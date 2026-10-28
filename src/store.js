@@ -1,26 +1,44 @@
-import { products } from "./data.js";
-export const DEMO = import.meta.env.VITE_DATA_MODE !== "api";
-const read = (k, d) => {
+export const DEMO = import.meta.env.VITE_DATA_MODE === "demo";
+const read = (key, fallback) => {
   try {
-    return JSON.parse(localStorage.getItem("lj:" + k)) ?? d;
+    return JSON.parse(localStorage.getItem("lj:" + key)) ?? fallback;
   } catch {
-    return d;
+    return fallback;
   }
 };
 export const storage = {
   read,
-  write: (k, v) => localStorage.setItem("lj:" + k, JSON.stringify(v)),
+  write(key, value) {
+    try {
+      localStorage.setItem("lj:" + key, JSON.stringify(value));
+    } catch {}
+  },
 };
 export async function api(path, options = {}) {
-  const res = await fetch("/api" + path, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+  let res;
+  try {
+    res = await fetch("/api" + path, {
+      credentials: "include",
+      ...options,
+      headers: { "Content-Type": "application/json", ...options.headers },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    throw new Error(
+      "Tidak dapat menghubungi toko. Aktifkan MySQL Laragon, jalankan npm start di folder proyek, lalu buka http://localhost:3001.",
+    );
+  }
+  const data = await res.json().catch(() => {
+    throw new Error(
+      "Backend belum terhubung. Jalankan npm start di folder proyek lalu buka http://localhost:3001, atau gunakan npm run dev untuk menyalakan frontend dan backend bersama.",
+    );
   });
-  const data = await res.json();
   if (!res.ok)
-    throw new Error(data.error || "Terjadi kesalahan. Silakan coba lagi.");
+    throw Object.assign(
+      new Error(data.error || "Terjadi kesalahan. Silakan coba lagi."),
+      { status: res.status, code: data.code },
+    );
   return data;
 }
 export function totals(cart, coupon = "", shipping = "regular") {
@@ -40,29 +58,9 @@ export function totals(cart, coupon = "", shipping = "regular") {
     total: subtotal - discount + delivery,
   };
 }
-export function demoOrder(cart, form, coupon, shipping) {
-  if (!cart.length) throw new Error("Keranjang masih kosong.");
-  const canonical = cart.map((item) => {
-    const p = products.find((p) => p.id === item.id);
-    if (
-      !p ||
-      !p.sizes.includes(item.size) ||
-      !p.colors.includes(item.color) ||
-      !Number.isInteger(item.quantity) ||
-      item.quantity < 1 ||
-      item.quantity > p.stock
-    )
-      throw new Error("Varian atau jumlah tidak tersedia.");
-    return { ...item, price: p.price };
-  });
-  return {
-    id: "LJ-" + Date.now(),
-    createdAt: new Date().toISOString(),
-    status: "Menunggu pembayaran",
-    items: canonical,
-    address: form,
-    shipping,
-    payment: form.payment,
-    ...totals(canonical, coupon, shipping),
-  };
+// Mode browser hanya untuk pratinjau eksplisit. Checkout memerlukan API.
+export function demoOrder() {
+  throw new Error(
+    "Checkout memerlukan backend MySQL dan Xendit. Jalankan npm start.",
+  );
 }

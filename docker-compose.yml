@@ -1,19 +1,13 @@
+# Opsional untuk komputer tanpa Laragon. Database default tetap Laragon.
 services:
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
+  mysql:
+    image: mysql:8.0
     environment:
-      POSTGRES_DB: linyjaya
-      POSTGRES_USER: linyjaya
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_dev_only}
+      MYSQL_DATABASE: liny_jaya
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Tetapkan MYSQL_ROOT_PASSWORD}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:3307:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U linyjaya -d linyjaya"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      - mysql_data:/var/lib/mysql
 volumes:
-  postgres_data:
+  mysql_data:

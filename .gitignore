@@ -4,3 +4,8 @@ dist/
 *.tar.gz
 .sites/
 .openai/.local/
+
+.env.*
+!.env.example
+*.log
+artifacts/

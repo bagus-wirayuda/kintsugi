@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Search,
@@ -26,16 +26,34 @@ import {
   ShieldCheck,
   RotateCcw,
 } from "lucide-react";
-import { products as seed, categories, assets, campaigns, money } from "./data";
-import { DEMO, storage, api, totals, demoOrder } from "./store";
+import { categories, money } from "./data";
+import { storage, api } from "./store";
 import "./styles.css";
-import Admin from "./Admin.jsx";
+const Admin = lazy(() => import("./Admin.jsx"));
+const Auth = lazy(() => import("./Auth.jsx"));
+const Account = lazy(() => import("./Account.jsx"));
+const Checkout = lazy(() => import("./Checkout.jsx"));
+import Home from "./Home.jsx";
+import { CartPage, WishlistPage, PaymentPage } from "./ShoppingPages.jsx";
+import "./workspace.css";
+import "./home.css";
+import { policy } from "./policies.js";
 
-const routes = ["home", "catalog", "wishlist", "account", "checkout", "admin"];
+const routes = [
+  "home",
+  "catalog",
+  "wishlist",
+  "account",
+  "checkout",
+  "admin",
+  "cart",
+];
 const initialView = () =>
-  routes.includes(location.hash.slice(1)) ? location.hash.slice(1) : "home";
+  routes.includes(location.hash.slice(1).split("/")[0])
+    ? location.hash.slice(1).split("/")[0]
+    : "home";
 function App() {
-  const [products, setProducts] = useState(seed),
+  const [products, setProducts] = useState([]),
     [gender, setGender] = useState("Wanita"),
     [view, setView] = useState(initialView),
     [menu, setMenu] = useState(false),
@@ -43,29 +61,39 @@ function App() {
     [searchOpen, setSearchOpen] = useState(false),
     [category, setCategory] = useState("Semua"),
     [sort, setSort] = useState("recommended"),
-    [slide, setSlide] = useState(0),
     [detail, setDetail] = useState(null),
     [size, setSize] = useState(""),
     [color, setColor] = useState(""),
     [quantity, setQuantity] = useState(1),
-    [cart, setCart] = useState(() => storage.read("cart", [])),
-    [wish, setWish] = useState(() => storage.read("wish", [])),
-    [drawer, setDrawer] = useState(false),
-    [user, setUser] = useState(() =>
-      DEMO ? storage.read("user", null) : null,
-    ),
-    [orders, setOrders] = useState(() =>
-      DEMO ? storage.read("orders", []) : [],
-    ),
+    [cart, setCart] = useState([]),
+    [wish, setWish] = useState([]),
+    [user, setUser] = useState(null),
     [toast, setToast] = useState(""),
     [coupon, setCoupon] = useState(""),
-    [couponInput, setCouponInput] = useState(""),
-    [shipping, setShipping] = useState("regular"),
     [placed, setPlaced] = useState(null),
-    [busy, setBusy] = useState(false),
-    [authMode, setAuthMode] = useState("login"),
     [info, setInfo] = useState(null),
     [cookie, setCookie] = useState(() => !storage.read("cookie", false));
+  const [authReady, setAuthReady] = useState(false),
+    [cartOwner, setCartOwner] = useState(null),
+    [config, setConfig] = useState({
+      contact: "wirayuda101101@gmail.com",
+      sandbox: true,
+    }),
+    [catalog, setCatalog] = useState({
+      items: [],
+      total: 0,
+      pages: 0,
+      facets: { sizes: [], colors: [] },
+    }),
+    [catalogLoading, setCatalogLoading] = useState(true),
+    [catalogError, setCatalogError] = useState(""),
+    [catalogRetry, setCatalogRetry] = useState(0),
+    [page, setPage] = useState(1),
+    [filterSize, setFilterSize] = useState(""),
+    [filterColor, setFilterColor] = useState(""),
+    [minPrice, setMinPrice] = useState(""),
+    [maxPrice, setMaxPrice] = useState(""),
+    [productLoading, setProductLoading] = useState(false);
   const toastTimer = useRef();
   function notify(t) {
     setToast(t);
@@ -73,29 +101,35 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(""), 3500);
   }
   useEffect(() => {
-    storage.write("cart", cart);
-  }, [cart]);
+    if (!authReady) return;
+    const owner = user?.id || "guest";
+    setCart(storage.read("cart:" + owner, []));
+    setWish(storage.read("wish:" + owner, []));
+    setCartOwner(owner);
+    setCoupon("");
+    setPlaced(null);
+  }, [user?.id, authReady]);
   useEffect(() => {
-    storage.write("wish", wish);
-  }, [wish]);
+    if (authReady && cartOwner === (user?.id || "guest"))
+      storage.write("cart:" + cartOwner, cart);
+  }, [cart, cartOwner, user?.id, authReady]);
   useEffect(() => {
-    if (DEMO) {
-      storage.write("user", user);
-      storage.write("orders", orders);
-    }
-  }, [user, orders]);
+    if (authReady && cartOwner === (user?.id || "guest"))
+      storage.write("wish:" + cartOwner, wish);
+  }, [wish, cartOwner, user?.id, authReady]);
   useEffect(() => {
-    if (!DEMO) {
-      api("/products")
-        .then(setProducts)
-        .catch((e) => notify(e.message));
-      api("/me")
-        .then(setUser)
-        .catch(() => {});
-      api("/orders")
-        .then(setOrders)
-        .catch(() => {});
-    }
+    api("/products?pageSize=48")
+      .then((data) => setProducts(data.items))
+      .catch((e) => notify(e.message));
+    api("/config")
+      .then((data) => setConfig({ ...data, loaded: true }))
+      .catch((e) => notify(e.message));
+    api("/me")
+      .then(setUser)
+      .catch((e) => {
+        if (e.status !== 401) notify(e.message);
+      })
+      .finally(() => setAuthReady(true));
   }, []);
   useEffect(() => {
     const key = (e) => {
@@ -105,7 +139,6 @@ function App() {
       }
       if (e.key === "Escape") {
         setDetail(null);
-        setDrawer(false);
         setMenu(false);
         setSearchOpen(false);
         setInfo(null);
@@ -120,7 +153,7 @@ function App() {
     return () => window.removeEventListener("hashchange", change);
   }, []);
   useEffect(() => {
-    if (!detail && !drawer && !searchOpen && !menu && !info) return;
+    if (!detail && !searchOpen && !menu && !info) return;
     const previous = document.activeElement;
     const dialogs = document.querySelectorAll('[role="dialog"]');
     const dialog = dialogs[dialogs.length - 1];
@@ -154,12 +187,12 @@ function App() {
       dialog.removeEventListener("keydown", trap);
       previous?.focus?.();
     };
-  }, [detail, drawer, searchOpen, menu, info]);
+  }, [detail, searchOpen, menu, info]);
   const nav = (v) => {
-    if (v !== "success") history.pushState(null, "", "#" + v);
-    setView(v);
+    if (v === "success") history.replaceState(null, "", "#account");
+    else history.pushState(null, "", "#" + v);
+    setView(v.split("/")[0]);
     setMenu(false);
-    setDrawer(false);
     setSearchOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -169,23 +202,102 @@ function App() {
     setSearch("");
     nav("catalog");
   };
-  const openProduct = (p) => {
-    setDetail(p);
-    setSize("");
-    setColor(p.colors[0]);
-    setQuantity(1);
+  const openProduct = async (p) => {
+    setProductLoading(true);
+    try {
+      const product = await api("/products/" + encodeURIComponent(p.id));
+      setDetail(product);
+      setSize("");
+      setColor(product.colors[0]);
+      setQuantity(1);
+    } catch (e) {
+      notify(e.message);
+    } finally {
+      setProductLoading(false);
+    }
   };
+  const selectedStock = detail?.variants
+    ? detail.variants.find((v) => v.size === size && v.color === color)
+        ?.stock || 0
+    : detail?.stock || 0;
+  useEffect(() => {
+    setQuantity(1);
+  }, [size, color]);
+  useEffect(() => {
+    setPage(1);
+  }, [
+    gender,
+    category,
+    search,
+    sort,
+    filterSize,
+    filterColor,
+    minPrice,
+    maxPrice,
+    view,
+  ]);
+  useEffect(() => {
+    if (!["catalog", "wishlist"].includes(view)) return;
+    const controller = new AbortController();
+    setCatalogLoading(true);
+    setCatalogError("");
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({
+        category: view === "wishlist" ? "Semua" : category,
+        search,
+        sort,
+        page: String(page),
+        pageSize: "8",
+      });
+      if (view === "wishlist") params.set("ids", wish.join(","));
+      else params.set("gender", gender);
+      if (filterSize) params.set("size", filterSize);
+      if (filterColor) params.set("color", filterColor);
+      if (minPrice) params.set("min", minPrice);
+      if (maxPrice) params.set("max", maxPrice);
+      api("/products?" + params, { signal: controller.signal })
+        .then(setCatalog)
+        .catch((e) => {
+          if (e.name !== "AbortError") setCatalogError(e.message);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setCatalogLoading(false);
+        });
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    view,
+    gender,
+    category,
+    search,
+    sort,
+    page,
+    filterSize,
+    filterColor,
+    minPrice,
+    maxPrice,
+    wish,
+    catalogRetry,
+  ]);
   const toggleWish = (id) => {
+    if (user?.role === "admin")
+      return notify("Favorit hanya tersedia untuk akun pelanggan.");
     setWish((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]));
   };
   const add = () => {
+    if (user?.role === "admin")
+      return notify("Akun admin tidak dapat berbelanja.");
+    if (!authReady) return notify("Sedang memuat akun. Coba sesaat lagi.");
     if (!size) {
       notify("Pilih ukuran terlebih dahulu.");
       return;
     }
     const key = `${detail.id}:${size}:${color}`;
     const old = cart.find((i) => i.key === key);
-    if ((old?.quantity || 0) + quantity > detail.stock) {
+    if ((old?.quantity || 0) + quantity > Math.min(99, selectedStock)) {
       notify("Jumlah melebihi stok tersedia.");
       return;
     }
@@ -194,106 +306,16 @@ function App() {
         ? c.map((i) =>
             i.key === key ? { ...i, quantity: i.quantity + quantity } : i,
           )
-        : [...c, { ...detail, key, size, color, quantity }],
+        : [
+            ...c,
+            { ...detail, stock: selectedStock, key, size, color, quantity },
+          ],
     );
     setDetail(null);
-    setDrawer(true);
+    nav("cart");
     notify("Produk ditambahkan ke keranjang");
   };
-  const updateQty = (key, n) =>
-    setCart((c) =>
-      c.map((i) =>
-        i.key === key
-          ? { ...i, quantity: Math.min(i.stock, Math.max(1, i.quantity + n)) }
-          : i,
-      ),
-    );
-  const filtered = products
-    .filter(
-      (p) =>
-        (view === "wishlist" ? wish.includes(p.id) : p.gender === gender) &&
-        (category === "Semua" ||
-          view === "wishlist" ||
-          (category === "Penawaran Terbatas" && p.oldPrice) ||
-          (category === "Produk Baru" && p.isNew) ||
-          p.category === category) &&
-        `${p.name} ${p.category}`.toLowerCase().includes(search.toLowerCase()),
-    )
-    .sort((a, b) =>
-      sort === "low"
-        ? a.price - b.price
-        : sort === "high"
-          ? b.price - a.price
-          : sort === "rating"
-            ? b.rating - a.rating
-            : 0,
-    );
-  const total = totals(cart, coupon, shipping),
-    count = cart.reduce((s, i) => s + i.quantity, 0),
-    campaign = campaigns[slide];
-  async function authenticate(e) {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.currentTarget));
-    setBusy(true);
-    try {
-      let u;
-      if (DEMO) {
-        u = {
-          name: f.name || "Sahabat Liny",
-          email: f.email,
-          role: "customer",
-        };
-        notify(
-          "Anda masuk dalam mode demo. Tidak ada akun server yang dibuat.",
-        );
-      } else u = await api("/auth/" + authMode, { method: "POST", body: f });
-      setUser(u);
-      if (!DEMO) setOrders(await api("/orders"));
-      nav("account");
-    } catch (e) {
-      notify(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function checkout(e) {
-    e.preventDefault();
-    const form = Object.fromEntries(new FormData(e.currentTarget));
-    setBusy(true);
-    try {
-      let order;
-      if (DEMO) {
-        order = demoOrder(cart, form, coupon, shipping);
-        setOrders((o) => [order, ...o]);
-      } else {
-        order = await api("/orders", {
-          method: "POST",
-          body: {
-            items: cart.map((i) => ({
-              id: i.id,
-              size: i.size,
-              color: i.color,
-              quantity: i.quantity,
-            })),
-            address: form,
-            coupon,
-            shipping,
-            payment: form.payment,
-          },
-        });
-        setOrders(await api("/orders"));
-        setProducts(await api("/products"));
-      }
-      setPlaced(order);
-      setCart([]);
-      setCoupon("");
-      nav("success");
-    } catch (e) {
-      notify(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const count = cart.reduce((n, i) => n + i.quantity, 0);
   function card(p) {
     return (
       <article className="product" key={p.id}>
@@ -347,8 +369,164 @@ function App() {
       </article>
     );
   }
+
+  async function logout() {
+    try {
+      await api("/auth/logout", { method: "POST" });
+      setUser(null);
+      setDetail(null);
+      nav("account");
+    } catch (e) {
+      notify(e.message);
+    }
+  }
+  async function authenticated(u) {
+    if (u.role === "customer" && cartOwner === "guest" && cart.length) {
+      const saved = storage.read("cart:" + u.id, []),
+        merged = [...saved];
+      for (const item of cart) {
+        const old = merged.find((x) => x.key === item.key);
+        if (old)
+          old.quantity = Math.min(99, item.stock, old.quantity + item.quantity);
+        else merged.push({ ...item });
+      }
+      storage.write("cart:" + u.id, merged);
+      storage.write("cart:guest", []);
+    }
+    if (u.role === "customer" && cartOwner === "guest" && wish.length) {
+      storage.write("wish:" + u.id, [
+        ...new Set([...storage.read("wish:" + u.id, []), ...wish]),
+      ]);
+      storage.write("wish:guest", []);
+    }
+    setUser(u);
+    nav(u.role === "admin" ? "admin" : "account");
+  }
+  const feedback = toast && (
+    <div className="ws-toast" role="status">
+      {toast}
+    </div>
+  );
+  if (!authReady)
+    return (
+      <div className="workspace">
+        <div className="ws-loading" role="status">
+          Menyiapkan Liny Jaya…
+        </div>
+      </div>
+    );
+  if (user?.role === "admin")
+    return (
+      <>
+        <Admin user={user} notify={notify} onLogout={logout} />
+        {feedback}
+      </>
+    );
+  if (
+    !user &&
+    ["account", "admin", "checkout", "cart", "wishlist", "success"].includes(
+      view,
+    )
+  )
+    return (
+      <>
+        <Auth
+          key={view === "admin" ? "admin" : "customer"}
+          admin={view === "admin"}
+          onAuthenticated={authenticated}
+          config={config}
+          pendingCart={cart.length > 0}
+        />
+        {feedback}
+      </>
+    );
+  if (user && view === "admin")
+    return (
+      <div className="workspace">
+        <div className="ws-empty">
+          <ShieldCheck size={35} />
+          <h1>Akses khusus administrator</h1>
+          <p>Akun Anda adalah akun pelanggan.</p>
+          <button className="ws-button primary" onClick={() => nav("account")}>
+            Kembali ke akun
+          </button>
+        </div>
+      </div>
+    );
+  const accountProps = { user, onLogout: logout, nav };
+  if (view === "account")
+    return (
+      <>
+        <Account
+          {...accountProps}
+          onUser={setUser}
+          notify={notify}
+          wishCount={wish.length}
+          cartCount={count}
+          config={config}
+        />
+        {feedback}
+      </>
+    );
+  if (view === "cart")
+    return (
+      <>
+        <CartPage
+          {...accountProps}
+          cart={cart}
+          setCart={setCart}
+          coupon={coupon}
+          setCoupon={setCoupon}
+        />
+        {feedback}
+      </>
+    );
+  if (view === "wishlist")
+    return (
+      <>
+        <WishlistPage
+          {...accountProps}
+          wish={wish}
+          setWish={setWish}
+          openProduct={(p) => {
+            nav("catalog");
+            openProduct(p);
+          }}
+        />
+        {feedback}
+      </>
+    );
+  if (view === "checkout")
+    return (
+      <>
+        <Checkout
+          user={user}
+          cart={cart}
+          coupon={coupon}
+          config={config}
+          nav={nav}
+          onPlaced={(order) => {
+            storage.write("cart:" + user.id, []);
+            setPlaced(order);
+            setCart([]);
+            setCoupon("");
+            nav("success");
+          }}
+        />
+        {feedback}
+      </>
+    );
+  if (view === "success")
+    return (
+      <>
+        <PaymentPage {...accountProps} order={placed} />
+        {feedback}
+      </>
+    );
   return (
-    <>
+    <div
+      className={view === "home" ? "modern-storefront" : "catalog-storefront"}
+    >
       <div className="topbar">
         <span>Everyday, made better.</span>
         <span>
@@ -376,7 +554,7 @@ function App() {
                 key={g}
                 onClick={() => {
                   setGender(g);
-                  if (view !== "home") shop("Semua", g);
+                  shop("Semua", g);
                 }}
               >
                 {g}
@@ -386,6 +564,7 @@ function App() {
           <div className="header-actions">
             <button
               className="search-trigger"
+              aria-label="Cari produk"
               onClick={() => setSearchOpen(true)}
             >
               <Search size={20} />
@@ -407,10 +586,7 @@ function App() {
               <Heart size={21} />
               {wish.length > 0 && <i>{wish.length}</i>}
             </button>
-            <button
-              aria-label="Keranjang belanja"
-              onClick={() => setDrawer(true)}
-            >
+            <button aria-label="Keranjang belanja" onClick={() => nav("cart")}>
               <ShoppingBag size={21} />
               {count > 0 && <i>{count}</i>}
             </button>
@@ -431,7 +607,7 @@ function App() {
             className={gender === g ? "active" : ""}
             onClick={() => {
               setGender(g);
-              if (view !== "home") shop("Semua", g);
+              shop("Semua", g);
             }}
           >
             {g}
@@ -439,245 +615,7 @@ function App() {
         ))}
       </div>
       {view === "home" && (
-        <>
-          <div className="collection-nav">
-            <button onClick={() => shop("Produk Baru")}>
-              Produk baru <span>NEW</span>
-            </button>
-            <button onClick={() => shop("Penawaran Terbatas")}>
-              Penawaran terbatas
-            </button>
-            <button onClick={() => shop()}>Koleksi esensial</button>
-            <button onClick={() => shop("Kemeja & Blus")}>
-              Linen collection
-            </button>
-            <button onClick={() => setInfo("Toko Liny Jaya")}>
-              <MapPin size={14} /> Temukan toko
-            </button>
-          </div>
-          <section className={"hero hero-" + slide}>
-            <img
-              className="hero-img"
-              src={
-                gender === "Pria"
-                  ? assets.men
-                  : gender === "Anak" || gender === "Bayi"
-                    ? assets.kids
-                    : campaign.image
-              }
-              alt="Koleksi gaya sehari-hari Liny Jaya"
-            />
-            <div className="hero-shade" />
-            <div className="hero-content">
-              <span className="eyebrow light">
-                {gender.toUpperCase()} / {campaign.eyebrow}
-              </span>
-              <h1>{campaign.title}</h1>
-              <p>{campaign.desc}</p>
-              <button
-                className="btn white"
-                onClick={() => shop(slide === 1 ? "Kemeja & Blus" : "Semua")}
-              >
-                Jelajahi koleksi <ArrowUpRight size={18} />
-              </button>
-            </div>
-            <div className="hero-bottom">
-              <div>
-                <span>{campaign.tag}</span>
-                <strong>{campaign.product}</strong>
-                <b>{campaign.price}</b>
-              </div>
-              <div className="slider-controls">
-                <span>
-                  0{slide + 1}
-                  <em>/ 03</em>
-                </span>
-                <button
-                  onClick={() => setSlide((slide + 2) % 3)}
-                  aria-label="Banner sebelumnya"
-                >
-                  <ChevronLeft />
-                </button>
-                <button
-                  onClick={() => setSlide((slide + 1) % 3)}
-                  aria-label="Banner berikutnya"
-                >
-                  <ChevronRight />
-                </button>
-              </div>
-            </div>
-            <div className="hero-dots">
-              {campaigns.map((_, i) => (
-                <button
-                  key={i}
-                  aria-label={`Banner ${i + 1}`}
-                  className={slide === i ? "selected" : ""}
-                  onClick={() => setSlide(i)}
-                />
-              ))}
-            </div>
-            <span className="hero-side">LINY JAYA — EVERYDAY ESSENTIALS</span>
-          </section>
-          <div className="service-strip">
-            <span>
-              <Truck size={18} /> Gratis ongkir mulai Rp699.000
-            </span>
-            <span>
-              <RotateCcw size={17} /> Penukaran mudah hingga 30 hari
-            </span>
-            <span>
-              <Package size={18} /> Ambil pesanan di toko
-            </span>
-            <span>
-              <ShieldCheck size={18} /> Kualitas di setiap detail
-            </span>
-          </div>
-          <main className="home-main">
-            <section className="category-section">
-              <div className="section-heading">
-                <div>
-                  <span className="eyebrow">TEMUKAN FAVORIT ANDA</span>
-                  <h2>Untuk semua sisi diri Anda.</h2>
-                </div>
-                <button className="text-link" onClick={() => shop()}>
-                  Semua kategori <ArrowRight size={17} />
-                </button>
-              </div>
-              <div className="category-grid">
-                {[
-                  {
-                    name: "T-Shirt",
-                    img: assets.tshirt,
-                    sub: "Nyaman di setiap hari",
-                  },
-                  {
-                    name: "Kemeja & Blus",
-                    img: assets.linen,
-                    sub: "Ringan, dengan karakter",
-                  },
-                  {
-                    name: "Celana",
-                    img: assets.denim,
-                    sub: "Temukan potongan Anda",
-                  },
-                  {
-                    name: "Luaran",
-                    img: assets.jacket,
-                    sub: "Layer untuk segala rencana",
-                  },
-                  {
-                    name: "Sweater & Cardigan",
-                    img: assets.shirt,
-                    sub: "Lembut di setiap sentuhan",
-                  },
-                  {
-                    name: "Aksesoris",
-                    img: assets.bag,
-                    sub: "Detail yang melengkapi",
-                  },
-                ].map((c) => (
-                  <button
-                    className="category-card"
-                    key={c.name}
-                    onClick={() => shop(c.name)}
-                  >
-                    <div>
-                      <img src={c.img} alt={c.name} loading="lazy" />
-                      <span>
-                        <ArrowUpRight size={18} />
-                      </span>
-                    </div>
-                    <h3>{c.name}</h3>
-                    <p>{c.sub}</p>
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section className="arrivals">
-              <div className="section-heading">
-                <div>
-                  <span className="eyebrow">FRESH FINDS, EVERY WEEK</span>
-                  <h2>Baru datang. Siap jadi favorit.</h2>
-                </div>
-                <button
-                  className="text-link"
-                  onClick={() => shop("Produk Baru")}
-                >
-                  Lihat semua produk baru <ArrowRight size={17} />
-                </button>
-              </div>
-              <div className="product-grid">
-                {products
-                  .filter((p) => p.gender === gender)
-                  .slice(0, 4)
-                  .map(card)}
-              </div>
-            </section>
-            <section className="editorial">
-              <div className="editorial-image">
-                <img
-                  src={assets.editorial}
-                  alt="Pilihan pakaian esensial"
-                  loading="lazy"
-                />
-                <span>THE LINY JOURNAL / VOL. 01</span>
-              </div>
-              <div className="editorial-copy">
-                <span className="eyebrow">LESS, BUT BETTER.</span>
-                <h2>
-                  Gaya yang tinggal.
-                  <br />
-                  Bukan sekadar singgah.
-                </h2>
-                <p>
-                  Pakaian yang baik terasa seperti diri sendiri. Kenali koleksi
-                  esensial yang dirancang untuk dipakai, dipadukan, dan dicintai
-                  setiap hari.
-                </p>
-                <button className="btn black" onClick={() => shop()}>
-                  Temukan everyday essentials <ArrowUpRight size={18} />
-                </button>
-                <span className="editorial-foot">MADE FOR YOUR EVERYDAY.</span>
-              </div>
-            </section>
-            <section className="offers">
-              <div className="section-heading">
-                <div>
-                  <span className="eyebrow red-text">
-                    PILIHAN HEMAT MINGGU INI
-                  </span>
-                  <h2>Favorit Anda, harga lebih istimewa.</h2>
-                </div>
-                <button
-                  className="text-link"
-                  onClick={() => shop("Penawaran Terbatas")}
-                >
-                  Lihat penawaran <ArrowRight size={17} />
-                </button>
-              </div>
-              <div className="offer-banner">
-                <div>
-                  <span>LINY WEEKLY OFFERS</span>
-                  <h3>
-                    Esensial yang Anda suka.
-                    <br />
-                    Kesempatan yang Anda tunggu.
-                  </h3>
-                  <p>
-                    Gunakan kode <b>LINY10</b> untuk potongan 10%, maks.
-                    Rp100.000.
-                  </p>
-                </div>
-                <button
-                  className="btn white"
-                  onClick={() => shop("Penawaran Terbatas")}
-                >
-                  Belanja sekarang <ArrowRight size={18} />
-                </button>
-              </div>
-            </section>
-          </main>
-        </>
+        <Home shop={shop} products={products} openProduct={openProduct} />
       )}
       {(view === "catalog" || view === "wishlist") && (
         <main className="catalog page">
@@ -706,7 +644,7 @@ function App() {
                   : "Esensial yang mengikuti ritme hidup Anda."}
               </p>
             </div>
-            <span>{filtered.length} produk</span>
+            <span>{catalog.total} produk</span>
           </div>
           <div className="catalog-layout">
             <aside>
@@ -734,6 +672,82 @@ function App() {
                   {g}
                 </button>
               ))}
+              <details className="advanced-filters">
+                <summary>Ukuran, warna & harga</summary>
+                <div className="filter-fields">
+                  <label>
+                    Ukuran
+                    <select
+                      aria-label="Filter ukuran"
+                      value={filterSize}
+                      onChange={(e) => setFilterSize(e.target.value)}
+                    >
+                      <option value="">Semua ukuran</option>
+                      {catalog.facets.sizes.map((s) => (
+                        <option key={s}>{s}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Warna
+                    <select
+                      aria-label="Filter warna"
+                      value={filterColor}
+                      onChange={(e) => setFilterColor(e.target.value)}
+                    >
+                      <option value="">Semua warna</option>
+                      {catalog.facets.colors.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {filterColor && (
+                    <i
+                      className="color-dot"
+                      style={{ background: filterColor }}
+                    />
+                  )}
+                  <label>
+                    Harga minimum
+                    <input
+                      aria-label="Harga minimum"
+                      type="number"
+                      min="0"
+                      max="10000000"
+                      placeholder="Rp0"
+                      value={minPrice}
+                      onChange={(e) => setMinPrice(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Harga maksimum
+                    <input
+                      aria-label="Harga maksimum"
+                      type="number"
+                      min="0"
+                      max="10000000"
+                      placeholder="Rp10.000.000"
+                      value={maxPrice}
+                      onChange={(e) => setMaxPrice(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="text-link"
+                    onClick={() => {
+                      setFilterSize("");
+                      setFilterColor("");
+                      setMinPrice("");
+                      setMaxPrice("");
+                      setCategory("Semua");
+                      setSearch("");
+                    }}
+                  >
+                    Hapus semua filter
+                  </button>
+                </div>
+              </details>
             </aside>
             <div className="catalog-results">
               <div className="catalog-toolbar">
@@ -754,9 +768,38 @@ function App() {
                   </select>
                 </label>
               </div>
-              {filtered.length ? (
+              <div className="active-filters">
+                {[
+                  search && "Cari: " + search,
+                  category !== "Semua" && category,
+                  filterSize && "Ukuran: " + filterSize,
+                  filterColor && "Warna: " + filterColor,
+                  minPrice && "Min: " + money(minPrice),
+                  maxPrice && "Maks: " + money(maxPrice),
+                ]
+                  .filter(Boolean)
+                  .map((t) => (
+                    <span key={t}>{t}</span>
+                  ))}
+              </div>
+              {catalogLoading ? (
+                <div className="empty" role="status">
+                  Memuat koleksi…
+                </div>
+              ) : catalogError ? (
+                <div className="empty" role="alert">
+                  <h2>Koleksi belum dapat dimuat.</h2>
+                  <p>{catalogError}</p>
+                  <button
+                    className="btn black"
+                    onClick={() => setCatalogRetry((n) => n + 1)}
+                  >
+                    Coba lagi
+                  </button>
+                </div>
+              ) : catalog.items.length ? (
                 <div className="product-grid catalog-grid">
-                  {filtered.map(card)}
+                  {catalog.items.map(card)}
                 </div>
               ) : (
                 <div className="empty">
@@ -768,410 +811,30 @@ function App() {
                   </button>
                 </div>
               )}
-            </div>
-          </div>
-        </main>
-      )}
-      {view === "checkout" && (
-        <main className="page checkout">
-          <button className="text-link" onClick={() => setDrawer(true)}>
-            <ArrowLeft size={16} /> Kembali ke keranjang
-          </button>
-          <h1>Checkout</h1>
-          <div className="checkout-steps">
-            <b>01 Keranjang</b>
-            <ChevronRight size={14} />
-            <b>02 Pengiriman & pembayaran</b>
-            <ChevronRight size={14} />
-            <span>03 Selesai</span>
-          </div>
-          <form onSubmit={checkout} className="checkout-grid">
-            <div>
-              <section className="form-section">
-                <h2>Informasi penerima</h2>
-                <div className="form-row">
-                  <label>
-                    Nama lengkap
-                    <input
-                      name="name"
-                      required
-                      minLength={2}
-                      defaultValue={user?.name}
-                      autoComplete="name"
-                    />
-                  </label>
-                  <label>
-                    Email
-                    <input
-                      name="email"
-                      type="email"
-                      required
-                      defaultValue={user?.email}
-                      autoComplete="email"
-                    />
-                  </label>
-                </div>
-                <label>
-                  Nomor telepon
-                  <input
-                    name="phone"
-                    type="tel"
-                    pattern="[0-9+ ()-]{8,20}"
-                    required
-                    autoComplete="tel"
-                  />
-                </label>
-                <label>
-                  Alamat lengkap
-                  <textarea
-                    name="street"
-                    minLength={10}
-                    required
-                    autoComplete="street-address"
-                  />
-                </label>
-                <div className="form-row">
-                  <label>
-                    Kota / Kabupaten
-                    <input name="city" required minLength={2} />
-                  </label>
-                  <label>
-                    Kode pos
-                    <input
-                      name="postal"
-                      pattern="[0-9]{5}"
-                      maxLength={5}
-                      required
-                    />
-                  </label>
-                </div>
-              </section>
-              <section className="form-section">
-                <h2>Metode pengiriman</h2>
-                {[
-                  [
-                    "regular",
-                    "Pengiriman reguler",
-                    "2–4 hari kerja · Rp15.000",
-                  ],
-                  [
-                    "express",
-                    "Pengiriman ekspres",
-                    "1–2 hari kerja · Rp35.000",
-                  ],
-                  [
-                    "pickup",
-                    "Ambil di toko",
-                    "Liny Jaya Central Jakarta · Gratis",
-                  ],
-                ].map(([v, t, d]) => (
-                  <label className="radio-card" key={v}>
-                    <input
-                      type="radio"
-                      name="shipping"
-                      checked={shipping === v}
-                      onChange={() => setShipping(v)}
-                    />
-                    <div>
-                      <b>{t}</b>
-                      <span>{d}</span>
-                    </div>
-                  </label>
-                ))}
-              </section>
-              <section className="form-section">
-                <h2>Pembayaran simulasi</h2>
-                <p className="muted">
-                  Pesanan dummy. Tidak ada uang yang ditagihkan.
-                </p>
-                <label className="radio-card">
-                  <input
-                    type="radio"
-                    name="payment"
-                    value="bank_transfer"
-                    defaultChecked
-                  />
-                  <div>
-                    <b>Virtual Account (Demo)</b>
-                    <span>Simulasi transfer bank</span>
-                  </div>
-                </label>
-                <label className="radio-card">
-                  <input type="radio" name="payment" value="cod" />
-                  <div>
-                    <b>Bayar di tempat (Demo)</b>
-                    <span>Simulasi pembayaran saat diterima</span>
-                  </div>
-                </label>
-              </section>
-            </div>
-            <div className="order-summary">
-              <h2>Ringkasan pesanan</h2>
-              {cart.map((i) => (
-                <div className="summary-item" key={i.key}>
-                  <img src={i.image} alt="" />
-                  <div>
-                    <b>{i.name}</b>
-                    <span>
-                      {i.size} / {i.quantity} item
-                    </span>
-                    <strong>{money(i.price * i.quantity)}</strong>
-                  </div>
-                </div>
-              ))}
-              <Summary total={total} />
-              <button
-                disabled={busy || !cart.length}
-                className="btn black full"
-                type="submit"
-              >
-                {busy ? "Memproses…" : "Buat pesanan dummy"}
-                <ArrowRight size={17} />
-              </button>
-              <small>
-                <ShieldCheck size={14} /> Checkout simulasi tanpa transaksi uang
-              </small>
-            </div>
-          </form>
-        </main>
-      )}
-      {view === "success" && placed && (
-        <main className="page success">
-          <span className="success-icon">
-            <Check size={38} />
-          </span>
-          <span className="eyebrow">TERIMA KASIH TELAH MEMILIH LINY JAYA</span>
-          <h1>Favorit baru Anda sedang disiapkan.</h1>
-          <p>
-            Pesanan <b>{placed.id}</b> berhasil dibuat.
-          </p>
-          <div className="success-box">
-            <div>
-              <span>Total pesanan</span>
-              <b>{money(placed.total)}</b>
-            </div>
-            <div>
-              <span>Status</span>
-              <b>{placed.status}</b>
-            </div>
-            <p>
-              Ini adalah pesanan simulasi. Tidak diperlukan pembayaran nyata.
-            </p>
-          </div>
-          <button className="btn black" onClick={() => nav("account")}>
-            Lihat pesanan saya <ArrowRight size={17} />
-          </button>
-          <button className="text-link" onClick={() => nav("home")}>
-            Kembali ke beranda
-          </button>
-        </main>
-      )}
-      {view === "account" && (
-        <main className="page account">
-          <div className="breadcrumb">
-            <button onClick={() => nav("home")}>Beranda</button>
-            <ChevronRight size={12} />
-            Akun saya
-          </div>
-          {!user ? (
-            <div className="auth-layout">
-              <div>
-                <span className="eyebrow">YOUR EVERYDAY STARTS HERE</span>
-                <h1>
-                  Selamat datang
-                  <br />
-                  di Liny Jaya.
-                </h1>
-                <p>Satu akun untuk semua favorit dan cerita baru Anda.</p>
-                <div className="auth-benefit">
-                  <Heart /> Simpan produk favorit Anda
-                </div>
-                <div className="auth-benefit">
-                  <Package /> Pantau pesanan dengan mudah
-                </div>
-                <div className="auth-benefit">
-                  <Star /> Temukan penawaran khusus
-                </div>
-              </div>
-              <form className="auth-form" onSubmit={authenticate}>
-                <div className="auth-tabs">
+              {catalog.pages > 1 && (
+                <nav className="pagination" aria-label="Halaman produk">
                   <button
-                    type="button"
-                    className={authMode === "login" ? "active" : ""}
-                    onClick={() => setAuthMode("login")}
+                    className="btn outline"
+                    disabled={page <= 1 || catalogLoading}
+                    onClick={() => setPage((p) => p - 1)}
                   >
-                    Masuk
+                    ← Sebelumnya
                   </button>
+                  <span>
+                    {page} / {catalog.pages}
+                  </span>
                   <button
-                    type="button"
-                    className={authMode === "register" ? "active" : ""}
-                    onClick={() => setAuthMode("register")}
+                    className="btn outline"
+                    disabled={page >= catalog.pages || catalogLoading}
+                    onClick={() => setPage((p) => p + 1)}
                   >
-                    Daftar
+                    Berikutnya →
                   </button>
-                </div>
-                {DEMO && (
-                  <div className="notice">
-                    Mode demo: gunakan email dummy dan kata sandi apa pun (min.
-                    8 karakter). Jangan gunakan kata sandi pribadi.
-                  </div>
-                )}
-                {authMode === "register" && (
-                  <label>
-                    Nama lengkap
-                    <input name="name" required minLength={2} />
-                  </label>
-                )}
-                <label>
-                  Email
-                  <input
-                    name="email"
-                    type="email"
-                    required
-                    placeholder="nama@contoh.test"
-                  />
-                </label>
-                <label>
-                  Kata sandi
-                  <input
-                    name="password"
-                    type="password"
-                    required
-                    minLength={8}
-                    autoComplete={
-                      authMode === "login" ? "current-password" : "new-password"
-                    }
-                  />
-                </label>
-                <button disabled={busy} className="btn black full">
-                  {busy
-                    ? "Memproses…"
-                    : authMode === "login"
-                      ? "Masuk ke akun"
-                      : "Buat akun"}
-                  <ArrowRight size={17} />
-                </button>
-              </form>
-            </div>
-          ) : (
-            <>
-              <div className="catalog-title">
-                <div>
-                  <span className="eyebrow">AKUN SAYA</span>
-                  <h1>Halo, {user.name}.</h1>
-                  <p>{user.email}</p>
-                </div>
-                <button
-                  className="text-link"
-                  onClick={async () => {
-                    if (!DEMO) await api("/auth/logout", { method: "POST" });
-                    setUser(null);
-                    if (!DEMO) setOrders([]);
-                    notify("Anda telah keluar");
-                  }}
-                >
-                  Keluar
-                </button>
-              </div>
-              <div className="account-links">
-                <button
-                  onClick={() => {
-                    setCategory("Semua");
-                    setSearch("");
-                    nav("wishlist");
-                  }}
-                >
-                  <Heart /> Wishlist <span>{wish.length} produk</span>
-                  <ChevronRight />
-                </button>
-                <button onClick={() => setDrawer(true)}>
-                  <ShoppingBag /> Keranjang <span>{count} item</span>
-                  <ChevronRight />
-                </button>
-                {user.role === "admin" && (
-                  <button onClick={() => nav("admin")}>
-                    Panel admin <ArrowRight />
-                  </button>
-                )}
-              </div>
-              <h2>Riwayat pesanan</h2>
-              {orders.length ? (
-                orders.map((o) => (
-                  <div className="order-card" key={o.id}>
-                    <div>
-                      <b>{o.id}</b>
-                      <span>
-                        {new Date(o.createdAt).toLocaleDateString("id-ID", {
-                          dateStyle: "long",
-                        })}
-                      </span>
-                      <strong className="order-status">{o.status}</strong>
-                    </div>
-                    <div className="order-products">
-                      {o.items.map((i, j) => (
-                        <div key={j}>
-                          <img src={i.image} alt={i.name} />
-                          <span>
-                            {i.name}
-                            <small>
-                              {i.size} · {i.quantity} item
-                            </small>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <footer>
-                      <span>Total pesanan</span>
-                      <b>{money(o.total)}</b>
-                    </footer>
-                    {o.status === "Menunggu pembayaran" && (
-                      <button
-                        className="text-link"
-                        onClick={async () => {
-                          try {
-                            if (!DEMO)
-                              await api(`/orders/${o.id}/cancel`, {
-                                method: "POST",
-                              });
-                            setOrders((os) =>
-                              os.map((x) =>
-                                x.id === o.id
-                                  ? { ...x, status: "Dibatalkan" }
-                                  : x,
-                              ),
-                            );
-                            notify("Pesanan dibatalkan");
-                          } catch (e) {
-                            notify(e.message);
-                          }
-                        }}
-                      >
-                        Batalkan pesanan
-                      </button>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div className="empty">
-                  <Package size={40} />
-                  <h3>Belum ada pesanan.</h3>
-                  <p>Temukan favorit pertama Anda hari ini.</p>
-                  <button className="btn black" onClick={() => shop()}>
-                    Mulai belanja <ArrowRight size={16} />
-                  </button>
-                </div>
+                </nav>
               )}
-            </>
-          )}
+            </div>
+          </div>
         </main>
-      )}
-      {view === "admin" && (
-        <Admin
-          user={user}
-          products={products}
-          notify={notify}
-          onProducts={setProducts}
-        />
       )}
       <section className="newsletter">
         <div>
@@ -1180,10 +843,19 @@ function App() {
           <p>Koleksi baru, cerita menarik, dan penawaran pilihan.</p>
         </div>
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            notify("Terima kasih! Pendaftaran newsletter demo berhasil.");
-            e.currentTarget.reset();
+            const form = e.currentTarget;
+            try {
+              await api("/newsletter", {
+                method: "POST",
+                body: { email: form.querySelector("input").value },
+              });
+              notify("Email tersimpan untuk kabar koleksi Liny Jaya.");
+              form.reset();
+            } catch (e) {
+              notify(e.message);
+            }
           }}
         >
           <label className="sr-only" htmlFor="newsletter">
@@ -1272,7 +944,9 @@ function App() {
             </button>
             <span>Indonesia / IDR</span>
           </div>
-          <span className="demo-label">DEMO STORE</span>
+          <span className="demo-label">
+            {config.sandbox ? "XENDIT TEST MODE" : "LINY JAYA"}
+          </span>
         </div>
       </footer>
       {detail && (
@@ -1339,6 +1013,12 @@ function App() {
                   <button
                     className={size === s ? "selected" : ""}
                     key={s}
+                    disabled={
+                      Boolean(detail.variants) &&
+                      !detail.variants.some(
+                        (v) => v.size === s && v.color === color && v.stock > 0,
+                      )
+                    }
                     onClick={() => setSize(s)}
                   >
                     {s}
@@ -1346,7 +1026,10 @@ function App() {
                 ))}
               </div>
               <label>
-                Jumlah <span>{detail.stock} tersedia</span>
+                Jumlah{" "}
+                <span>
+                  {size ? selectedStock + " tersedia" : "Pilih varian"}
+                </span>
               </label>
               <div className="qty">
                 <button
@@ -1358,14 +1041,23 @@ function App() {
                 <span>{quantity}</span>
                 <button
                   aria-label="Tambah jumlah"
+                  disabled={
+                    !size ||
+                    selectedStock < 1 ||
+                    quantity >= Math.min(99, selectedStock)
+                  }
                   onClick={() =>
-                    setQuantity(Math.min(detail.stock, quantity + 1))
+                    setQuantity(Math.min(99, selectedStock, quantity + 1))
                   }
                 >
                   <Plus size={15} />
                 </button>
               </div>
-              <button className="btn black full" onClick={add}>
+              <button
+                className="btn black full"
+                disabled={!size || selectedStock < 1 || !authReady}
+                onClick={add}
+              >
                 Tambahkan ke keranjang <ShoppingBag size={18} />
               </button>
               <button
@@ -1385,163 +1077,17 @@ function App() {
                 <span>
                   Gratis ongkir min. Rp699.000
                   <br />
-                  <small>Penukaran mudah hingga 30 hari · Simulasi</small>
+                  <small>Hubungi layanan pelanggan untuk penukaran.</small>
                 </span>
               </div>
               <details>
                 <summary>Material & perawatan</summary>
                 <p>
-                  Material dummy: 70% katun, 30% linen. Cuci dengan air dingin
-                  dan warna serupa. Hindari pemutih.
+                  Ikuti label perawatan pada barang. Hubungi pengelola untuk
+                  rincian komposisi material produk ini.
                 </p>
               </details>
             </div>
-          </section>
-        </div>
-      )}
-      {drawer && (
-        <div
-          className="overlay drawer-overlay"
-          onClick={() => setDrawer(false)}
-        >
-          <section
-            className="cart-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Keranjang Anda"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="drawer-title">
-              <h2>
-                Keranjang Anda <span>({count})</span>
-              </h2>
-              <button
-                aria-label="Tutup keranjang"
-                onClick={() => setDrawer(false)}
-              >
-                <X />
-              </button>
-            </div>
-            {!cart.length ? (
-              <div className="empty">
-                <ShoppingBag size={44} />
-                <h2>Masih ada ruang untuk favorit.</h2>
-                <p>Temukan esensial yang cocok untuk Anda.</p>
-                <button className="btn black" onClick={() => shop()}>
-                  Jelajahi koleksi <ArrowRight size={17} />
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="free-shipping">
-                  <Truck size={16} />
-                  {total.subtotal >= 699000
-                    ? "Anda mendapatkan gratis ongkir!"
-                    : `Tambah ${money(699000 - total.subtotal)} untuk gratis ongkir.`}
-                  <div>
-                    <span
-                      style={{
-                        width: Math.min(100, total.subtotal / 6990) + "%",
-                      }}
-                    />
-                  </div>
-                </div>
-                <div className="cart-items">
-                  {cart.map((i) => (
-                    <div className="cart-item" key={i.key}>
-                      <img src={i.image} alt={i.name} />
-                      <div>
-                        <span className="eyebrow">{i.gender}</span>
-                        <b>{i.name}</b>
-                        <small>
-                          Ukuran: {i.size} · Warna{" "}
-                          <i
-                            className="color-dot"
-                            style={{ background: i.color }}
-                          />
-                        </small>
-                        <strong>{money(i.price)}</strong>
-                        <div className="cart-item-actions">
-                          <div className="qty">
-                            <button
-                              aria-label={`Kurangi ${i.name}`}
-                              onClick={() => updateQty(i.key, -1)}
-                            >
-                              <Minus size={13} />
-                            </button>
-                            <span>{i.quantity}</span>
-                            <button
-                              aria-label={`Tambah ${i.name}`}
-                              onClick={() => updateQty(i.key, 1)}
-                            >
-                              <Plus size={13} />
-                            </button>
-                          </div>
-                          <button
-                            className="remove"
-                            onClick={() =>
-                              setCart((c) => c.filter((x) => x.key !== i.key))
-                            }
-                          >
-                            Hapus
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="cart-footer">
-                  <form
-                    className="coupon"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const c = couponInput.trim().toUpperCase();
-                      if (c === "LINY10") {
-                        setCoupon(c);
-                        notify("Voucher LINY10 berhasil digunakan");
-                      } else notify("Kode voucher tidak valid. Coba LINY10.");
-                    }}
-                  >
-                    <input
-                      aria-label="Kode voucher"
-                      placeholder="Masukkan kode voucher"
-                      value={couponInput}
-                      onChange={(e) => setCouponInput(e.target.value)}
-                    />
-                    <button>Gunakan</button>
-                  </form>
-                  {coupon && (
-                    <button
-                      className="coupon-applied"
-                      onClick={() => {
-                        setCoupon("");
-                        setCouponInput("");
-                      }}
-                    >
-                      LINY10 diterapkan <X size={13} />
-                    </button>
-                  )}
-                  <Summary total={total} />
-                  <button
-                    className="btn black full"
-                    onClick={() => {
-                      if (!DEMO && !user) {
-                        notify("Silakan masuk sebelum checkout.");
-                        nav("account");
-                      } else nav("checkout");
-                    }}
-                  >
-                    Lanjut ke checkout <ArrowRight size={18} />
-                  </button>
-                  <button
-                    className="text-link centered"
-                    onClick={() => setDrawer(false)}
-                  >
-                    Lanjutkan belanja
-                  </button>
-                </div>
-              </>
-            )}
           </section>
         </div>
       )}
@@ -1678,19 +1224,9 @@ function App() {
               </>
             ) : (
               <>
+                <p>{policy(info, config.contact)}</p>
                 <p>
-                  {info.includes("engiriman")
-                    ? "Pengiriman reguler 2–4 hari kerja (Rp15.000), ekspres 1–2 hari kerja (Rp35.000), atau ambil di toko gratis. Gratis ongkir belanja minimal Rp699.000."
-                    : info.includes("enukaran")
-                      ? "Simulasi kebijakan: produk dapat ditukar dalam 30 hari dengan label asli dan bukti pembelian. Hubungi tim kami untuk bantuan."
-                      : info.includes("privasi")
-                        ? "Pratinjau demo menyimpan keranjang, wishlist, profil dummy, dan pesanan di browser Anda. Mode API menggunakan sesi server dan PostgreSQL. Gunakan data dummy saat mencoba."
-                        : info.includes("toko") || info.includes("Toko")
-                          ? "Toko dummy: Liny Jaya Central, Jl. Contoh Raya No. 10, Jakarta. Senin–Minggu, 10.00–21.00 WIB. Layanan pickup tersedia untuk simulasi."
-                          : "Liny Jaya menghadirkan pakaian esensial dengan desain sederhana dan kenyamanan untuk setiap hari. Semua produk, ulasan, alamat toko, dan transaksi di situs ini merupakan konten dummy."}
-                </p>
-                <p className="muted">
-                  Kontak dummy: halo@linyjaya.test · 021-0000-0000
+                  <a href={"mailto:" + config.contact}>{config.contact}</a>
                 </p>
               </>
             )}
@@ -1713,6 +1249,11 @@ function App() {
           </button>
         </div>
       )}
+      {productLoading && (
+        <div className="toast" role="status">
+          Memuat detail produk…
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           <Check size={18} />
@@ -1720,33 +1261,21 @@ function App() {
         </div>
       )}
       <span className="mode-indicator">
-        {DEMO ? "DEMO · Data tersimpan di browser" : "POSTGRESQL · API aktif"}
+        {"LINY JAYA · " + (config.sandbox ? "XENDIT TEST" : "ONLINE")}
       </span>
-    </>
-  );
-}
-function Summary({ total }) {
-  return (
-    <div className="summary-lines">
-      <div>
-        <span>Subtotal</span>
-        <b>{money(total.subtotal)}</b>
-      </div>
-      {total.discount > 0 && (
-        <div className="red-text">
-          <span>Diskon LINY10</span>
-          <b>−{money(total.discount)}</b>
-        </div>
-      )}
-      <div>
-        <span>Estimasi pengiriman</span>
-        <b>{total.delivery === 0 ? "Gratis" : money(total.delivery)}</b>
-      </div>
-      <div className="grand-total">
-        <span>Total</span>
-        <b>{money(total.total)}</b>
-      </div>
     </div>
   );
 }
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <Suspense
+    fallback={
+      <div className="workspace">
+        <div className="ws-loading" role="status">
+          Memuat halaman…
+        </div>
+      </div>
+    }
+  >
+    <App />
+  </Suspense>,
+);

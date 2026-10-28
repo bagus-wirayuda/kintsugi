@@ -56,7 +56,8 @@ const valid = {
     postal: "12345",
   },
   shipping: "regular",
-  payment: "cod",
+  payment: "xendit",
+  checkoutKey: "d0284102-6878-4a46-939e-e680b2669536",
   coupon: "",
 };
 test("validasi menolak jumlah negatif, pecahan, kupon palsu, dan data alamat salah", () => {

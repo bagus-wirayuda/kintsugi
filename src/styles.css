@@ -2470,3 +2470,182 @@ td select {
 .admin .catalog-title {
   margin-bottom: 0;
 }
+
+/* Commerce controls */
+.catalog aside label {
+  display: block;
+  font-size: 12px;
+  margin: 18px 0;
+  color: #45483f;
+}
+.catalog aside select,
+.catalog aside input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #d9dbd3;
+  background: #fff;
+  padding: 11px;
+  border-radius: 0;
+}
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.active-filters span,
+.payment-badge {
+  background: #f0eee6;
+  padding: 7px 11px;
+  font-size: 11px;
+  display: inline-block;
+}
+.payment-badge.paid {
+  background: #e3efdf;
+  color: #244c29;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 35px 0;
+}
+.order-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 20px 0;
+}
+.order-id {
+  overflow-wrap: anywhere;
+}
+.order-card {
+  min-width: 0;
+}
+.order-card details {
+  padding: 12px 0;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.order-card details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.order-card p {
+  line-height: 1.8;
+}
+.order-card > small {
+  display: block;
+  line-height: 1.8;
+  color: #666;
+}
+.order-products > div > b {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.order-products > div > span {
+  min-width: 0;
+}
+.admin-orders {
+  max-width: 1000px;
+}
+.variant-editor {
+  max-height: 380px;
+  overflow: auto;
+  border: 1px solid #deded4;
+  padding: 20px;
+}
+.variant-editor input {
+  max-width: 160px;
+}
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.checkbox-label input {
+  width: auto;
+}
+.btn[disabled],
+button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+a.btn {
+  text-decoration: none;
+  justify-content: center;
+}
+@media (max-width: 700px) {
+  .order-card > div:first-child {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .order-buttons {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .order-buttons .btn {
+    width: 100%;
+  }
+  .pagination {
+    gap: 9px;
+  }
+  .pagination .btn {
+    padding: 12px;
+    font-size: 11px;
+  }
+  .admin-edit label {
+    min-width: 0;
+  }
+  .order-products > div {
+    flex-wrap: wrap;
+  }
+  .order-products > div > b {
+    margin-left: 0;
+  }
+}
+
+.advanced-filters {
+  margin: 20px 0;
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+}
+.advanced-filters summary {
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 0;
+}
+.filter-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+}
+@media (max-width: 700px) {
+  .catalog aside {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+  .catalog aside button:nth-last-child(-n + 4) {
+    display: flex;
+  }
+  .catalog aside .advanced-filters {
+    flex-basis: 100%;
+    margin: 5px 0;
+  }
+  .catalog aside label {
+    margin: 8px 0;
+    min-width: 0;
+  }
+  .filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .filter-fields > .text-link {
+    grid-column: 1/-1;
+  }
+}

@@ -1,0 +1,343 @@
+.modern-storefront .brand span {
+  background: #243c50;
+  border-radius: 9px;
+  font-size: 18px;
+  line-height: 18px;
+  padding-top: 9px;
+  letter-spacing: -0.7px;
+}
+.modern-storefront .topbar {
+  background: #edf2f5;
+  color: #697987;
+}
+.modern-storefront .desktop-nav button.active:after {
+  background: #395a70;
+}
+.home-v2 {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 35px 4.2% 70px;
+}
+.home-v2 h1,
+.home-v2 h2,
+.home-v2 h3 {
+  font-family: "DM Sans", Arial, sans-serif;
+  letter-spacing: -0.04em;
+}
+.home-v2-hero {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  background: #edf2f2;
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 490px;
+  color: #243a48;
+}
+.home-v2-hero > div:first-child {
+  padding: 65px 44px;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+}
+.home-v2-hero > div > span {
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  color: #82928f;
+  font-weight: 600;
+}
+.home-v2-hero h1 {
+  font-size: 46px;
+  line-height: 1.15;
+  margin: 23px 0;
+}
+.home-v2-hero p {
+  font-size: 13px;
+  line-height: 1.9;
+  color: #7a8b91;
+  max-width: 330px;
+}
+.home-v2-hero button {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: #2e4b5d;
+  color: white;
+  border-radius: 7px;
+  padding: 15px 20px;
+  font-size: 12px;
+  margin: 28px 0;
+}
+.home-v2-hero small {
+  font-size: 10px;
+  color: #8b9a9e;
+}
+.home-v2-image {
+  position: relative;
+  min-height: 430px;
+}
+.home-v2-image img {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  object-fit: cover;
+  object-position: 50% 58%;
+}
+.home-v2-image > span {
+  position: absolute;
+  bottom: 25px;
+  left: 25px;
+  color: #fff !important;
+  letter-spacing: 0 !important;
+  font-size: 11px !important;
+  background: #1a2c3180;
+  border: 1px solid #ffffff50;
+  backdrop-filter: blur(12px);
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+.home-v2-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  margin: 55px 0 25px;
+}
+.home-v2-heading span {
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  color: #8e9ba1;
+  font-weight: 600;
+}
+.home-v2-heading h2 {
+  font-size: 26px;
+  line-height: 1.4;
+  color: #2b3c47;
+  margin-top: 9px;
+}
+.home-v2-heading > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4c6877;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.home-v2-departments > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+}
+.home-v2-departments > div > button {
+  border: 1px solid #e7edef;
+  border-radius: 10px;
+  overflow: hidden;
+  text-align: left;
+  background: white;
+}
+.home-v2-departments img {
+  height: 245px;
+  object-fit: cover;
+}
+.home-v2-departments button > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 17px;
+  gap: 8px;
+}
+.home-v2-departments b {
+  display: block;
+  font-size: 18px;
+  font-weight: 600;
+  color: #30444f;
+}
+.home-v2-departments small {
+  display: block;
+  font-size: 10px;
+  color: #919fa6;
+  margin-top: 7px;
+}
+.home-v2-departments svg {
+  color: #8d9da6;
+}
+.home-v2-arrivals > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
+}
+.home-v2-arrivals > div > button {
+  text-align: left;
+}
+.home-v2-arrivals img {
+  height: 285px;
+  border-radius: 8px;
+  background: #f2f5f6;
+}
+.home-v2-arrivals button > span {
+  display: block;
+  color: #98a4ab;
+  font-size: 9px;
+  margin: 16px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.home-v2-arrivals h3 {
+  font-size: 13px;
+  line-height: 1.7;
+  letter-spacing: 0;
+  color: #465765;
+  font-weight: 500;
+  min-height: 44px;
+}
+.home-v2-arrivals button > b {
+  font-size: 13px;
+  display: block;
+  margin-top: 10px;
+  color: #2d4658;
+  font-weight: 650;
+}
+.home-v2-benefits {
+  margin-top: 65px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+  padding: 35px 0;
+  border-top: 1px solid #e8edf0;
+  border-bottom: 1px solid #e8edf0;
+}
+.home-v2-benefits svg {
+  color: #6f8e9d;
+  margin-bottom: 20px;
+}
+.home-v2-benefits h3 {
+  font-size: 14px;
+  color: #435969;
+  font-weight: 600;
+}
+.home-v2-benefits p {
+  font-size: 11px;
+  color: #9aa6ad;
+  line-height: 1.8;
+  margin-top: 9px;
+  max-width: 270px;
+}
+@media (max-width: 850px) {
+  .home-v2-hero h1 {
+    font-size: 36px;
+  }
+  .home-v2-hero > div:first-child {
+    padding: 40px 30px;
+  }
+  .home-v2-hero {
+    min-height: 440px;
+  }
+  .home-v2-departments img {
+    height: 200px;
+  }
+  .home-v2-departments > div:last-child {
+    gap: 13px;
+  }
+  .home-v2-arrivals img {
+    height: 225px;
+  }
+  .home-v2-arrivals > div:last-child {
+    gap: 15px;
+  }
+  .home-v2-departments button > div {
+    padding: 16px 13px;
+  }
+  .home-v2-departments small {
+    font-size: 9px;
+  }
+}
+@media (max-width: 600px) {
+  .home-v2 {
+    padding: 20px 20px 40px;
+  }
+  .home-v2-hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .home-v2-hero > div:first-child {
+    padding: 33px 27px;
+  }
+  .home-v2-hero h1 {
+    font-size: 35px;
+    margin: 17px 0;
+  }
+  .home-v2-hero p {
+    font-size: 12px;
+  }
+  .home-v2-hero button {
+    margin: 24px 0 18px;
+    font-size: 11px;
+    padding: 13px 18px;
+  }
+  .home-v2-image {
+    min-height: 270px;
+    order: 2;
+  }
+  .home-v2-image > span {
+    bottom: 18px;
+    left: 18px;
+    font-size: 10px !important;
+  }
+  .home-v2-heading {
+    margin: 35px 0 20px;
+    gap: 15px;
+  }
+  .home-v2-heading h2 {
+    font-size: 21px;
+  }
+  .home-v2-heading span {
+    font-size: 8px;
+  }
+  .home-v2-heading > button {
+    font-size: 9px;
+  }
+  .home-v2-departments > div:last-child,
+  .home-v2-arrivals > div:last-child {
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+  }
+  .home-v2-departments img {
+    height: 190px;
+  }
+  .home-v2-departments b {
+    font-size: 16px;
+  }
+  .home-v2-departments small {
+    font-size: 8px;
+    line-height: 1.7;
+  }
+  .home-v2-arrivals img {
+    height: 205px;
+  }
+  .home-v2-arrivals h3 {
+    font-size: 11px;
+    min-height: 38px;
+  }
+  .home-v2-benefits {
+    grid-template-columns: 1fr;
+    gap: 27px;
+    margin-top: 40px;
+    padding: 30px 0;
+  }
+  .home-v2-benefits > div {
+    position: relative;
+    padding-left: 45px;
+  }
+  .home-v2-benefits svg {
+    position: absolute;
+    left: 0;
+    top: 3px;
+  }
+  .home-v2-benefits h3 {
+    font-size: 13px;
+  }
+  .home-v2-benefits p {
+    font-size: 10px;
+  }
+}

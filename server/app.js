@@ -11,24 +11,72 @@ import {
   aggregateItems,
   transitions,
 } from "./commerce.js";
-const hash = (t) => createHash("sha256").update(t).digest("hex");
+import {
+  createGateway,
+  verifyToken,
+  fail,
+  queueEmail,
+  escapeHtml,
+  flushEmails,
+} from "./integrations.js";
+import { createPayments, orderRow, validateInvoice } from "./payments.js";
+import { createOtp, passwordSchema } from "./otp.js";
+
+const hash = (s) => createHash("sha256").update(s).digest("hex");
 const safeUser = (u) => ({
   id: u.id,
   name: u.name,
   email: u.email,
   role: u.role,
 });
-const fail = (status, message) => Object.assign(new Error(message), { status });
-const cookieOptions = {
-  httpOnly: true,
-  sameSite: "strict",
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-  maxAge: 7 * 24 * 60 * 60 * 1000,
+const imageSchema = z
+  .string()
+  .max(1000)
+  .refine(
+    (s) =>
+      /^\/images\/[a-zA-Z0-9_.-]+$/.test(s) ||
+      /^https:\/\/images\.unsplash\.com\//.test(s),
+    "Gunakan gambar /images/ atau HTTPS images.unsplash.com.",
+  );
+const colorSchema = z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6})$/);
+const productFields = {
+  name: z.string().trim().min(2).max(200),
+  price: z.number().int().min(1000).max(10000000),
+  sku: z.string().regex(/^[A-Za-z0-9-]{2,40}$/),
+  category: z.enum([
+    "T-Shirt",
+    "Kemeja & Blus",
+    "Celana",
+    "Luaran",
+    "Sweater & Cardigan",
+    "Rok & Gaun",
+    "Aksesoris",
+  ]),
+  gender: z.enum(["Wanita", "Pria", "Anak", "Bayi"]),
+  image: imageSchema,
+  description: z.string().trim().min(10).max(2000),
+  oldPrice: z.number().int().min(0).max(10000000),
+  isNew: z.boolean(),
 };
-export function createApp(pool) {
+const variantSchema = z.object({
+  size: z.string().regex(/^[a-zA-Z0-9]{1,10}$/),
+  color: colorSchema,
+  stock: z.number().int().min(0).max(100000),
+});
+export function createApp(pool, options = {}) {
+  const env = options.env || process.env;
+  const gateway = options.gateway || createGateway(env);
+  const payments = createPayments(pool, gateway);
   const app = express();
   app.disable("x-powered-by");
+  if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+  const cookieOptions = {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 7 * 86400000,
+  };
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -43,107 +91,161 @@ export function createApp(pool) {
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
           imgSrc: ["'self'", "https://images.unsplash.com", "data:"],
           connectSrc: ["'self'"],
-          upgradeInsecureRequests:
-            process.env.NODE_ENV === "production" ? [] : null,
+          upgradeInsecureRequests: env.NODE_ENV === "production" ? [] : null,
         },
       },
     }),
   );
-  app.use(express.json({ limit: "100kb" }));
+  app.use(express.json({ limit: "200kb" }));
   app.use(cookieParser());
+  app.use("/api", (req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    next();
+  });
   app.use(
     "/api",
     rateLimit({
       windowMs: 60000,
-      limit: 200,
+      limit: options.test ? 5000 : 400,
       standardHeaders: "draft-8",
       legacyHeaders: false,
     }),
   );
   app.use("/api", (req, res, next) => {
-    if (["POST", "PATCH", "DELETE"].includes(req.method)) {
-      const site = req.get("Sec-Fetch-Site");
-      if (site === "cross-site")
-        return next(fail(403, "Permintaan lintas situs ditolak."));
-      const origin = req.get("Origin");
-      if (
-        origin &&
-        origin !== `${req.protocol}://${req.get("host")}` &&
-        !(
-          ["http://127.0.0.1:5173", "http://localhost:5173"].includes(origin) &&
-          process.env.NODE_ENV !== "production"
-        )
-      )
-        return next(fail(403, "Origin tidak diizinkan."));
-    }
+    if (
+      !["POST", "PATCH", "DELETE"].includes(req.method) ||
+      req.path === "/webhooks/xendit"
+    )
+      return next();
+    if (req.get("Sec-Fetch-Site") === "cross-site")
+      return next(fail(403, "Permintaan lintas situs ditolak."));
+    const origin = req.get("Origin");
+    const allowed = [env.APP_URL, req.protocol + "://" + req.get("host")];
+    if (env.NODE_ENV !== "production")
+      allowed.push(
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+      );
+    if (origin && !allowed.includes(origin))
+      return next(fail(403, "Origin tidak diizinkan."));
     next();
   });
-  const loadUser = async (req, res, next) => {
-    try {
-      if (req.cookies.lj_session) {
-        const r = await pool.query(
-          "SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>NOW()",
+  app.post("/api/webhooks/xendit", async (req, res) => {
+    if (!verifyToken(req.get("x-callback-token"), env.XENDIT_WEBHOOK_TOKEN))
+      throw fail(401, "Token webhook tidak valid.");
+    const f = z
+      .object({
+        id: z.string().min(1),
+        external_id: z.string().min(1),
+        status: z.enum(["PENDING", "PAID", "SETTLED", "EXPIRED", "FAILED"]),
+        amount: z.number().int().positive(),
+        currency: z.literal("IDR"),
+        paid_amount: z.number().optional(),
+      })
+      .parse(req.body);
+    const order = (
+      await pool.query("SELECT * FROM orders WHERE id=?", [f.external_id])
+    ).rows[0];
+    if (!order) throw fail(404, "Pesanan tidak ditemukan.");
+    validateInvoice(f, order);
+    // Konfirmasi langsung ke Xendit sebelum menerima notifikasi.
+    const verified = await gateway.get(f.id);
+    validateInvoice(verified, order);
+    if (
+      f.status !== verified.status &&
+      !(f.status === "PAID" && verified.status === "SETTLED")
+    )
+      throw fail(409, "Status webhook belum cocok dengan Xendit.");
+    const result = await payments.apply(verified);
+    res.json(result);
+  });
+  app.use("/api", async (req, res, next) => {
+    if (req.cookies.lj_session)
+      req.user = (
+        await pool.query(
+          "SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP(3)",
           [hash(req.cookies.lj_session)],
-        );
-        req.user = r.rows[0];
-      }
-      next();
-    } catch (e) {
-      next(e);
-    }
-  };
-  app.use("/api", loadUser);
+        )
+      ).rows[0];
+    next();
+  });
   const auth = (req, res, next) =>
     req.user ? next() : next(fail(401, "Silakan masuk terlebih dahulu."));
   const admin = (req, res, next) =>
     req.user?.role === "admin"
       ? next()
       : next(fail(403, "Akses admin diperlukan."));
-  async function session(res, u) {
+  const customer = (req, res, next) =>
+    req.user?.role === "customer"
+      ? next()
+      : next(
+          fail(
+            403,
+            "Akun admin hanya untuk mengelola toko. Gunakan akun pelanggan untuk berbelanja.",
+          ),
+        );
+  async function session(req, res, user) {
+    if (req.cookies.lj_session)
+      await pool.query("DELETE FROM sessions WHERE token_hash=?", [
+        hash(req.cookies.lj_session),
+      ]);
+    await pool.query("DELETE FROM sessions WHERE expires_at<UTC_TIMESTAMP(3)");
     const token = randomBytes(32).toString("hex");
-    await pool.query("DELETE FROM sessions WHERE expires_at<NOW()");
     await pool.query(
-      "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,NOW()+INTERVAL '7 days')",
-      [hash(token), u.id],
+      "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 7 DAY))",
+      [hash(token), user.id],
     );
     res.cookie("lj_session", token, cookieOptions);
-    return safeUser(u);
+    return safeUser(user);
   }
   const authLimit = rateLimit({
-    windowMs: 15 * 60000,
-    limit: 25,
+    windowMs: 900000,
+    limit: options.test ? 500 : 30,
     standardHeaders: "draft-8",
     legacyHeaders: false,
   });
   app.get("/api/health", async (req, res) => {
     await pool.query("SELECT 1");
-    res.json({ status: "ok", database: "postgresql", payments: "simulation" });
+    res.json({
+      status: "ok",
+      database: "mysql",
+      serviceVersion: 2,
+      payments: gateway.configured ? "xendit" : "unconfigured",
+      sandbox: gateway.sandbox,
+    });
   });
-  app.post("/api/auth/register", authLimit, async (req, res) => {
-    const f = z
-      .object({
-        name: z.string().trim().min(2).max(100),
-        email: z.email().max(254),
-        password: z.string().min(8).max(72),
-      })
-      .parse(req.body);
-    const u = {
-      id: randomUUID(),
-      name: f.name,
-      email: f.email.toLowerCase(),
-      role: "customer",
-    };
-    try {
-      await pool.query(
-        "INSERT INTO users(id,name,email,password_hash) VALUES($1,$2,$3,$4)",
-        [u.id, u.name, u.email, await bcrypt.hash(f.password, 12)],
-      );
-    } catch (e) {
-      if (e.code === "23505") throw fail(409, "Email sudah terdaftar.");
-      throw e;
-    }
-    res.status(201).json(await session(res, u));
+  app.get("/api/config", (req, res) =>
+    res.json({
+      brand: "Liny Jaya",
+      registrationRequiresOtp: true,
+      contact: env.STORE_CONTACT_EMAIL || "wirayuda101101@gmail.com",
+      payments: gateway.configured,
+      sandbox: gateway.sandbox,
+      invoiceDuration: Number(env.INVOICE_DURATION) || 3600,
+      emailSandbox: Boolean(env.RESEND_ALLOWED_TO),
+      otpTestEmail:
+        env.NODE_ENV !== "production" && env.RESEND_ALLOWED_TO
+          ? env.RESEND_ALLOWED_TO.split(",")[0].trim()
+          : null,
+    }),
+  );
+  const otp = createOtp({
+    pool,
+    env,
+    transport: options.mailTransport,
+    session,
   });
+  app.post("/api/auth/register", authLimit, async (req, res) =>
+    res.status(202).json(await otp.register(req.body)),
+  );
+  app.post("/api/auth/otp/request", authLimit, async (req, res) =>
+    res.status(202).json(await otp.request(req.body)),
+  );
+  app.post("/api/auth/otp/verify", authLimit, async (req, res) =>
+    res.json(await otp.verify(req, res)),
+  );
   app.post("/api/auth/login", authLimit, async (req, res) => {
     const f = z
       .object({
@@ -151,240 +253,505 @@ export function createApp(pool) {
         password: z.string().min(1).max(72),
       })
       .parse(req.body);
-    const r = await pool.query("SELECT * FROM users WHERE email=$1", [
-      f.email.toLowerCase(),
-    ]);
-    const u = r.rows[0];
+    const u = (
+      await pool.query("SELECT * FROM users WHERE email=?", [
+        f.email.toLowerCase(),
+      ])
+    ).rows[0];
     if (!u || !(await bcrypt.compare(f.password, u.password_hash)))
       throw fail(401, "Email atau kata sandi tidak cocok.");
-    res.json(await session(res, u));
+    res.json(await session(req, res, u));
   });
   app.post("/api/auth/logout", async (req, res) => {
     if (req.cookies.lj_session)
-      await pool.query("DELETE FROM sessions WHERE token_hash=$1", [
+      await pool.query("DELETE FROM sessions WHERE token_hash=?", [
         hash(req.cookies.lj_session),
       ]);
-    res.clearCookie("lj_session", {
-      path: "/",
-      httpOnly: true,
-      sameSite: "strict",
-      secure: cookieOptions.secure,
-    });
+    res.clearCookie("lj_session", { ...cookieOptions, maxAge: undefined });
     res.json({ ok: true });
   });
   app.get("/api/me", auth, (req, res) => res.json(safeUser(req.user)));
-  async function listProducts(includeInactive = false) {
-    const r = await pool.query(
-      `SELECT p.*, ARRAY(SELECT DISTINCT v.size FROM product_variants v WHERE v.product_id=p.id ORDER BY v.size) AS sizes, ARRAY(SELECT DISTINCT v.color FROM product_variants v WHERE v.product_id=p.id ORDER BY v.color) AS colors, COALESCE((SELECT MIN(v.stock) FROM product_variants v WHERE v.product_id=p.id),0) AS stock FROM products p ${includeInactive ? "" : "WHERE p.active=TRUE"} ORDER BY p.id`,
-    );
-    return r.rows.map((p) => ({
+  app.get("/api/me/profile", auth, customer, async (req, res) => {
+    const p =
+      (
+        await pool.query(
+          "SELECT phone,street,city,postal FROM customer_profiles WHERE user_id=?",
+          [req.user.id],
+        )
+      ).rows[0] || {};
+    res.json({ ...safeUser(req.user), ...p });
+  });
+  app.patch("/api/me/profile", auth, customer, async (req, res) => {
+    const f = z
+      .object({
+        name: z.string().trim().min(2).max(100),
+        phone: z.string().regex(/^[0-9+ ()-]{8,20}$/),
+        street: z.string().trim().min(10).max(500),
+        city: z.string().trim().min(2).max(100),
+        postal: z.string().regex(/^\d{5}$/),
+      })
+      .parse(req.body);
+    const c = await pool.connect();
+    try {
+      await c.query("START TRANSACTION");
+      await c.query("UPDATE users SET name=? WHERE id=?", [
+        f.name,
+        req.user.id,
+      ]);
+      await c.query(
+        "INSERT INTO customer_profiles(user_id,phone,street,city,postal) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone),street=VALUES(street),city=VALUES(city),postal=VALUES(postal)",
+        [req.user.id, f.phone, f.street, f.city, f.postal],
+      );
+      await c.query("COMMIT");
+      res.json({ ...safeUser(req.user), ...f });
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    } finally {
+      c.release();
+    }
+  });
+  app.patch("/api/auth/password", auth, authLimit, async (req, res) => {
+    const f = z
+      .object({
+        oldPassword: z.string().min(1).max(72),
+        newPassword: passwordSchema,
+      })
+      .parse(req.body);
+    if (!(await bcrypt.compare(f.oldPassword, req.user.password_hash)))
+      throw fail(400, "Kata sandi saat ini tidak cocok.");
+    await pool.query("UPDATE users SET password_hash=? WHERE id=?", [
+      await bcrypt.hash(f.newPassword, 12),
+      req.user.id,
+    ]);
+    await pool.query("DELETE FROM sessions WHERE user_id=?", [req.user.id]);
+    res.json(await session(req, res, req.user));
+  });
+
+  function presentProduct(p, variants) {
+    return {
       ...p,
+      active: Boolean(p.active),
       oldPrice: p.old_price,
-      isNew: p.is_new,
+      isNew: Boolean(p.is_new),
       rating: Number(p.rating),
-    }));
+      sizes: [...new Set(variants.map((v) => v.size))].sort((a, b) => {
+        const sizes = ["XS", "S", "M", "L", "XL", "XXL"];
+        const x = sizes.indexOf(a),
+          y = sizes.indexOf(b);
+        return x >= 0 && y >= 0
+          ? x - y
+          : a.localeCompare(b, undefined, { numeric: true });
+      }),
+      colors: [...new Set(variants.map((v) => v.color))],
+      stock: variants.reduce((s, v) => s + v.stock, 0),
+      variants,
+      images: [p.image],
+    };
   }
-  app.get("/api/products", async (req, res) => res.json(await listProducts()));
+  async function hydrate(rows) {
+    if (!rows.length) return [];
+    const variants = (
+      await pool.query(
+        "SELECT * FROM product_variants WHERE product_id IN (?) ORDER BY product_id,size,color",
+        [rows.map((p) => p.id)],
+      )
+    ).rows;
+    return rows.map((p) =>
+      presentProduct(
+        p,
+        variants.filter((v) => v.product_id === p.id),
+      ),
+    );
+  }
+  app.get("/api/products", async (req, res) => {
+    const q = z
+      .object({
+        search: z.string().max(100).default(""),
+        gender: z.enum(["Wanita", "Pria", "Anak", "Bayi"]).optional(),
+        category: z.string().max(100).default("Semua"),
+        size: z.string().max(10).optional(),
+        color: colorSchema.optional(),
+        min: z.coerce.number().int().min(0).default(0),
+        max: z.coerce.number().int().min(0).max(10000000).default(10000000),
+        sort: z
+          .enum(["recommended", "low", "high", "rating"])
+          .default("recommended"),
+        page: z.coerce.number().int().min(1).max(100000).default(1),
+        pageSize: z.coerce.number().int().min(1).max(48).default(8),
+        ids: z.string().max(4000).optional(),
+      })
+      .parse(req.query);
+    if (q.min > q.max) throw fail(400, "Harga minimum melebihi maksimum.");
+    const where = ["p.active=TRUE", "p.price BETWEEN ? AND ?"],
+      args = [q.min, q.max];
+    if (q.gender) {
+      where.push("p.gender=?");
+      args.push(q.gender);
+    }
+    if (q.search) {
+      where.push("(p.name LIKE ? OR p.category LIKE ?)");
+      args.push("%" + q.search + "%", "%" + q.search + "%");
+    }
+    if (q.category === "Produk Baru") where.push("p.is_new=TRUE");
+    else if (q.category === "Penawaran Terbatas")
+      where.push("p.old_price>p.price");
+    else if (q.category !== "Semua") {
+      where.push("p.category=?");
+      args.push(q.category);
+    }
+    if (q.ids !== undefined) {
+      where.push("p.id IN (?)");
+      args.push(q.ids.split(",").filter(Boolean).slice(0, 100));
+      if (!args.at(-1).length) args[args.length - 1] = ["__empty__"];
+    }
+    if (q.size || q.color) {
+      let variant =
+        "EXISTS(SELECT 1 FROM product_variants v WHERE v.product_id=p.id";
+      if (q.size) {
+        variant += " AND v.size=?";
+        args.push(q.size);
+      }
+      if (q.color) {
+        variant += " AND v.color=?";
+        args.push(q.color);
+      }
+      where.push(variant + ")");
+    }
+    const clause = where.join(" AND ");
+    const total = (
+      await pool.query(
+        "SELECT COUNT(*) AS total FROM products p WHERE " + clause,
+        args,
+      )
+    ).rows[0].total;
+    const order = {
+      recommended: "p.is_new DESC,p.id",
+      low: "p.price ASC,p.id",
+      high: "p.price DESC,p.id",
+      rating: "p.rating DESC,p.id",
+    }[q.sort];
+    const rows = (
+      await pool.query(
+        "SELECT p.* FROM products p WHERE " +
+          clause +
+          " ORDER BY " +
+          order +
+          " LIMIT ? OFFSET ?",
+        [...args, q.pageSize, (q.page - 1) * q.pageSize],
+      )
+    ).rows;
+    const facets = (
+      await pool.query(
+        "SELECT DISTINCT v.size,v.color FROM product_variants v JOIN products p ON p.id=v.product_id WHERE p.active=TRUE ORDER BY v.size,v.color",
+      )
+    ).rows;
+    res.json({
+      items: await hydrate(rows),
+      total,
+      page: q.page,
+      pageSize: q.pageSize,
+      pages: Math.ceil(total / q.pageSize),
+      facets: {
+        sizes: [...new Set(facets.map((v) => v.size))],
+        colors: [...new Set(facets.map((v) => v.color))],
+      },
+    });
+  });
+  app.get("/api/products/:id", async (req, res) => {
+    const rows = (
+      await pool.query("SELECT * FROM products WHERE id=? AND active=TRUE", [
+        req.params.id,
+      ])
+    ).rows;
+    if (!rows.length)
+      throw fail(404, "Produk tidak tersedia atau sudah diarsipkan.");
+    res.json((await hydrate(rows))[0]);
+  });
   app.get("/api/admin/products", auth, admin, async (req, res) =>
-    res.json(await listProducts(true)),
+    res.json(
+      await hydrate(
+        (await pool.query("SELECT * FROM products ORDER BY id")).rows,
+      ),
+    ),
   );
-  async function readOrders(userId) {
-    const r = await pool.query(
-      "SELECT * FROM orders " +
-        (userId ? "WHERE user_id=$1 " : "") +
-        "ORDER BY created_at DESC",
-      userId ? [userId] : [],
-    );
-    if (!r.rows.length) return [];
-    const items = await pool.query(
-      "SELECT * FROM order_items WHERE order_id=ANY($1)",
-      [r.rows.map((o) => o.id)],
-    );
-    return r.rows.map((o) => ({
-      ...o,
-      createdAt: o.created_at,
-      items: items.rows
+
+  async function readOrders(userId, id) {
+    const filters = [],
+      args = [];
+    if (userId) {
+      filters.push("user_id=?");
+      args.push(userId);
+    }
+    if (id) {
+      filters.push("id=?");
+      args.push(id);
+    }
+    const rows = (
+      await pool.query(
+        "SELECT * FROM orders" +
+          (filters.length ? " WHERE " + filters.join(" AND ") : "") +
+          " ORDER BY created_at DESC",
+        args,
+      )
+    ).rows;
+    if (!rows.length) return [];
+    const items = (
+      await pool.query(
+        "SELECT * FROM order_items WHERE order_id IN (?) ORDER BY product_id,size,color",
+        [rows.map((o) => o.id)],
+      )
+    ).rows;
+    return rows.map((o) => ({
+      ...orderRow(o),
+      items: items
         .filter((i) => i.order_id === o.id)
         .map((i) => ({ ...i, id: i.product_id })),
     }));
   }
-  app.get("/api/orders", auth, async (req, res) =>
+  async function ownOrder(req) {
+    const rows = await readOrders(
+      req.user.role === "admin" ? undefined : req.user.id,
+      req.params.id,
+    );
+    if (!rows.length) throw fail(404, "Pesanan tidak ditemukan.");
+    return rows[0];
+  }
+  app.get("/api/orders", auth, customer, async (req, res) =>
     res.json(await readOrders(req.user.id)),
   );
-  app.post("/api/orders", auth, async (req, res) => {
+  app.get("/api/orders/:id", auth, customer, async (req, res) =>
+    res.json(await ownOrder(req)),
+  );
+  app.post("/api/checkout/quote", auth, customer, async (req, res) => {
+    const f = orderSchema
+      .omit({ address: true, checkoutKey: true, payment: true })
+      .parse(req.body);
+    const canonical = [];
+    for (const i of aggregateItems(f.items)) {
+      const p = (
+        await pool.query(
+          "SELECT p.*,v.stock FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE",
+          [i.id, i.size, i.color],
+        )
+      ).rows[0];
+      if (!p) throw fail(400, "Varian produk tidak tersedia.");
+      if (p.stock < i.quantity)
+        throw fail(409, "Stok " + p.name + " tidak mencukupi.");
+      canonical.push({
+        ...i,
+        name: p.name,
+        image: p.image,
+        price: p.price,
+        stock: p.stock,
+      });
+    }
+    res.json({
+      ...calculateTotals(canonical, f.coupon, f.shipping),
+      items: canonical,
+    });
+  });
+  app.post("/api/orders", auth, customer, async (req, res) => {
+    if (!gateway.configured)
+      throw fail(503, "Pembayaran Xendit belum dikonfigurasi.");
     const f = orderSchema.parse(req.body),
-      items = aggregateItems(f.items),
-      client = await pool.connect();
+      items = aggregateItems(f.items);
+    const c = await pool.connect();
+    let id;
     try {
-      await client.query("BEGIN");
-      const canonical = [];
-      for (const item of items) {
-        const r = await client.query(
-          "SELECT p.id,p.name,p.image,p.price,v.stock FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=$1 AND v.size=$2 AND v.color=$3 AND p.active=TRUE FOR UPDATE OF v",
-          [item.id, item.size, item.color],
-        );
-        const p = r.rows[0];
-        if (!p) throw fail(400, "Varian produk tidak ditemukan.");
-        if (p.stock < item.quantity)
-          throw fail(409, `Stok ${p.name} tidak mencukupi.`);
-        canonical.push({
-          ...item,
-          name: p.name,
-          image: p.image,
-          price: p.price,
-        });
-        await client.query(
-          "UPDATE product_variants SET stock=stock-$1 WHERE product_id=$2 AND size=$3 AND color=$4",
-          [item.quantity, item.id, item.size, item.color],
-        );
-      }
-      const total = calculateTotals(canonical, f.coupon, f.shipping),
+      await c.query("START TRANSACTION");
+      await c.query("SELECT id FROM users WHERE id=? FOR UPDATE", [
+        req.user.id,
+      ]);
+      const existing = (
+        await c.query(
+          "SELECT id FROM orders WHERE user_id=? AND checkout_key=?",
+          [req.user.id, f.checkoutKey],
+        )
+      ).rows[0];
+      if (existing) id = existing.id;
+      else {
+        const canonical = [];
+        for (const i of items) {
+          const p = (
+            await c.query(
+              "SELECT p.id,p.name,p.image,p.price,v.stock FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE FOR UPDATE",
+              [i.id, i.size, i.color],
+            )
+          ).rows[0];
+          if (!p) throw fail(400, "Varian produk tidak ditemukan.");
+          if (p.stock < i.quantity)
+            throw fail(409, "Stok " + p.name + " tidak mencukupi.");
+          canonical.push({
+            ...i,
+            name: p.name,
+            image: p.image,
+            price: p.price,
+          });
+          await c.query(
+            "UPDATE product_variants SET stock=stock-? WHERE product_id=? AND size=? AND color=?",
+            [i.quantity, i.id, i.size, i.color],
+          );
+        }
+        const total = calculateTotals(canonical, f.coupon, f.shipping);
         id = "LJ-" + randomUUID();
-      const r = await client.query(
-        "INSERT INTO orders(id,user_id,address,shipping,payment,coupon,subtotal,discount,delivery,total) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *",
-        [
-          id,
-          req.user.id,
-          JSON.stringify(f.address),
-          f.shipping,
-          f.payment,
-          f.coupon,
-          total.subtotal,
-          total.discount,
-          total.delivery,
-          total.total,
-        ],
-      );
-      for (const i of canonical)
-        await client.query(
-          "INSERT INTO order_items(id,order_id,product_id,name,image,size,color,quantity,price) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        await c.query(
+          "INSERT INTO orders(id,user_id,address,shipping,payment,coupon,subtotal,discount,delivery,total,checkout_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           [
-            randomUUID(),
             id,
-            i.id,
-            i.name,
-            i.image,
-            i.size,
-            i.color,
-            i.quantity,
-            i.price,
+            req.user.id,
+            JSON.stringify(f.address),
+            f.shipping,
+            "xendit",
+            f.coupon,
+            total.subtotal,
+            total.discount,
+            total.delivery,
+            total.total,
+            f.checkoutKey,
           ],
         );
-      await client.query("COMMIT");
-      res
-        .status(201)
-        .json({
-          ...r.rows[0],
-          createdAt: r.rows[0].created_at,
-          items: canonical,
-        });
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
-    }
-  });
-  async function changeStatus(id, status, userId, isAdmin) {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const r = await client.query(
-          "SELECT * FROM orders WHERE id=$1 FOR UPDATE",
-          [id],
-        ),
-        o = r.rows[0];
-      if (!o || (!isAdmin && o.user_id !== userId))
-        throw fail(404, "Pesanan tidak ditemukan.");
-      if (
-        !isAdmin &&
-        (status !== "Dibatalkan" || o.status !== "Menunggu pembayaran")
-      )
-        throw fail(409, "Pesanan ini tidak dapat dibatalkan.");
-      if (!transitions[o.status]?.includes(status))
-        throw fail(409, "Perubahan status tidak diizinkan.");
-      if (status === "Dibatalkan") {
-        const items = await client.query(
-          "SELECT * FROM order_items WHERE order_id=$1 ORDER BY product_id,size,color",
-          [id],
-        );
-        for (const i of items.rows)
-          await client.query(
-            "UPDATE product_variants SET stock=stock+$1 WHERE product_id=$2 AND size=$3 AND color=$4",
-            [i.quantity, i.product_id, i.size, i.color],
+        for (const i of canonical)
+          await c.query(
+            "INSERT INTO order_items(id,order_id,product_id,name,image,size,color,quantity,price) VALUES(?,?,?,?,?,?,?,?,?)",
+            [
+              randomUUID(),
+              id,
+              i.id,
+              i.name,
+              i.image,
+              i.size,
+              i.color,
+              i.quantity,
+              i.price,
+            ],
           );
+        await queueEmail(
+          c,
+          "order/" + id,
+          f.address.email,
+          "Pesanan dibuat · " + id,
+          "<h1>Pesanan tersimpan</h1><p>Halo " +
+            escapeHtml(f.address.name) +
+            ", lanjutkan pembayaran pesanan " +
+            escapeHtml(id) +
+            " melalui halaman akun. Total Rp" +
+            total.total.toLocaleString("id-ID") +
+            ".</p>",
+        );
       }
-      await client.query("UPDATE orders SET status=$1 WHERE id=$2", [
-        status,
-        id,
-      ]);
-      await client.query("COMMIT");
+      await c.query("COMMIT");
     } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
+      await c.query("ROLLBACK");
+      if (e.code !== "ER_DUP_ENTRY") throw e;
+      id = (
+        await pool.query(
+          "SELECT id FROM orders WHERE user_id=? AND checkout_key=?",
+          [req.user.id, f.checkoutKey],
+        )
+      ).rows[0]?.id;
+      if (!id) throw e;
     } finally {
-      client.release();
+      c.release();
     }
-  }
-  app.post("/api/orders/:id/cancel", auth, async (req, res) => {
-    await changeStatus(req.params.id, "Dibatalkan", req.user.id, false);
+    let paymentError;
+    try {
+      await payments.ensure(id);
+    } catch (e) {
+      paymentError = e.message;
+    }
+    const order = (await readOrders(req.user.id, id))[0];
+    res.status(201).json({ ...order, paymentError });
+  });
+  app.post("/api/orders/:id/payment", auth, customer, async (req, res) => {
+    const order = await ownOrder(req);
+    await payments.sync(order);
+    res.json(
+      (
+        await readOrders(
+          req.user.role === "admin" ? undefined : req.user.id,
+          order.id,
+        )
+      )[0],
+    );
+  });
+  app.post("/api/orders/:id/cancel", auth, customer, async (req, res) => {
+    const order = await ownOrder(req);
+    await payments.cancel(order);
     res.json({ ok: true });
   });
   app.get("/api/admin/orders", auth, admin, async (req, res) =>
     res.json(await readOrders()),
   );
+  app.post("/api/admin/orders/:id/payment", auth, admin, async (req, res) => {
+    const order = await ownOrder(req);
+    await payments.sync(order);
+    res.json((await readOrders(undefined, order.id))[0]);
+  });
   app.patch("/api/admin/orders/:id", auth, admin, async (req, res) => {
     const f = z
       .object({ status: z.enum(Object.keys(transitions)) })
       .parse(req.body);
-    await changeStatus(req.params.id, f.status, req.user.id, true);
-    res.json({ ok: true });
+    const order = await ownOrder(req);
+    if (f.status === "Dibatalkan") {
+      await payments.cancel(order);
+      return res.json({ ok: true });
+    }
+    const c = await pool.connect();
+    try {
+      await c.query("START TRANSACTION");
+      const o = (
+        await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
+      ).rows[0];
+      if (
+        o.payment_status !== "PAID" ||
+        !transitions[o.status]?.includes(f.status)
+      )
+        throw fail(
+          409,
+          "Perubahan status tidak diizinkan. Pembayaran harus dikonfirmasi Xendit.",
+        );
+      await c.query("UPDATE orders SET status=? WHERE id=?", [f.status, o.id]);
+      const a = orderRow(o).address;
+      await queueEmail(
+        c,
+        "status/" + o.id + "/" + f.status,
+        a.email,
+        "Pesanan " + f.status.toLowerCase() + " · " + o.id,
+        "<h1>Status pesanan: " +
+          escapeHtml(f.status) +
+          "</h1><p>Pesanan " +
+          escapeHtml(o.id) +
+          " telah diperbarui.</p>",
+      );
+      await c.query("COMMIT");
+      res.json({ ok: true });
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    } finally {
+      c.release();
+    }
   });
-  const productFields = {
-    name: z.string().trim().min(2).max(200),
-    price: z.number().int().min(1000).max(10000000),
-    stock: z.number().int().min(0).max(100000),
-  };
   app.post("/api/admin/products", auth, admin, async (req, res) => {
     const f = z
       .object({
         ...productFields,
-        sku: z.string().regex(/^[A-Za-z0-9-]{2,40}$/),
-        category: z.enum([
-          "T-Shirt",
-          "Kemeja & Blus",
-          "Celana",
-          "Luaran",
-          "Sweater & Cardigan",
-          "Rok & Gaun",
-          "Aksesoris",
-        ]),
-        gender: z.enum(["Wanita", "Pria", "Anak", "Bayi"]),
-        image: z
-          .string()
-          .max(1000)
-          .refine(
-            (s) =>
-              /^\/images\/[a-zA-Z0-9_.-]+$/.test(s) || s.startsWith("https://"),
-            "Gunakan path /images/ atau HTTPS.",
-          ),
-        description: z.string().trim().min(10).max(2000),
-        sizes: z
-          .array(z.string().regex(/^[a-zA-Z0-9]{1,10}$/))
-          .min(1)
-          .max(20),
-        colors: z
-          .array(z.string().regex(/^#[a-fA-F0-9]{3,6}$/))
-          .min(1)
-          .max(20),
+        oldPrice: productFields.oldPrice.default(0),
+        isNew: productFields.isNew.default(true),
+        sizes: z.array(variantSchema.shape.size).min(1).max(20),
+        colors: z.array(colorSchema).min(1).max(20),
+        stock: variantSchema.shape.stock,
       })
       .parse(req.body);
-    const client = await pool.connect();
+    if (f.oldPrice && f.oldPrice <= f.price)
+      throw fail(400, "Harga sebelum diskon harus melebihi harga jual.");
+    const c = await pool.connect();
     try {
-      await client.query("BEGIN");
+      await c.query("START TRANSACTION");
       const id = "lj-" + randomUUID();
-      await client.query(
-        "INSERT INTO products(id,sku,name,category,gender,price,image,description) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      await c.query(
+        "INSERT INTO products(id,sku,name,category,gender,price,old_price,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?,?)",
         [
           id,
           f.sku,
@@ -392,76 +759,157 @@ export function createApp(pool) {
           f.category,
           f.gender,
           f.price,
+          f.oldPrice,
           f.image,
           f.description,
+          f.isNew,
         ],
       );
-      for (const size of new Set(f.sizes))
+      for (const s of new Set(f.sizes))
         for (const color of new Set(f.colors))
-          await client.query(
-            "INSERT INTO product_variants(product_id,size,color,stock) VALUES($1,$2,$3,$4)",
-            [id, size, color, f.stock],
+          await c.query(
+            "INSERT INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
+            [id, s, color, f.stock],
           );
-      await client.query("COMMIT");
+      await c.query("COMMIT");
       res.status(201).json({ id });
     } catch (e) {
-      await client.query("ROLLBACK");
-      if (e.code === "23505") throw fail(409, "SKU sudah digunakan.");
+      await c.query("ROLLBACK");
+      if (e.code === "ER_DUP_ENTRY") throw fail(409, "SKU sudah digunakan.");
       throw e;
     } finally {
-      client.release();
+      c.release();
     }
   });
   app.patch("/api/admin/products/:id", auth, admin, async (req, res) => {
     const f = z
-      .object({ ...productFields, active: z.boolean() })
+      .object({
+        ...productFields,
+        active: z.boolean(),
+        variants: z.array(variantSchema).min(1).max(400),
+      })
       .partial()
+      .strict()
       .refine((o) => Object.keys(o).length > 0)
       .parse(req.body);
-    const client = await pool.connect();
+    const c = await pool.connect();
     try {
-      await client.query("BEGIN");
-      const result = await client.query(
-        "UPDATE products SET name=COALESCE($1,name),price=COALESCE($2,price),active=COALESCE($3,active) WHERE id=$4 RETURNING id",
-        [f.name ?? null, f.price ?? null, f.active ?? null, req.params.id],
-      );
-      if (!result.rows.length) throw fail(404, "Produk tidak ditemukan.");
-      if (f.stock !== undefined)
-        await client.query(
-          "UPDATE product_variants SET stock=$1 WHERE product_id=$2",
-          [f.stock, req.params.id],
+      await c.query("START TRANSACTION");
+      const old = (
+        await c.query("SELECT * FROM products WHERE id=? FOR UPDATE", [
+          req.params.id,
+        ])
+      ).rows[0];
+      if (!old) throw fail(404, "Produk tidak ditemukan.");
+      const price = f.price ?? old.price,
+        oldPrice = f.oldPrice ?? old.old_price;
+      if (oldPrice && oldPrice <= price)
+        throw fail(400, "Harga sebelum diskon harus melebihi harga jual.");
+      const map = { ...f };
+      delete map.variants;
+      const names = { oldPrice: "old_price", isNew: "is_new" };
+      if (Object.keys(map).length)
+        await c.query(
+          "UPDATE products SET " +
+            Object.keys(map)
+              .map((k) => (names[k] || k) + "=?")
+              .join(",") +
+            " WHERE id=?",
+          [...Object.values(map), req.params.id],
         );
-      await client.query("COMMIT");
+      if (f.variants) {
+        const keys = f.variants.map((v) => v.size + ":" + v.color);
+        if (new Set(keys).size !== keys.length)
+          throw fail(400, "Varian duplikat.");
+        for (const v of f.variants) {
+          const found = (
+            await c.query(
+              "SELECT stock FROM product_variants WHERE product_id=? AND size=? AND color=? FOR UPDATE",
+              [req.params.id, v.size, v.color],
+            )
+          ).rows[0];
+          if (!found)
+            throw fail(
+              400,
+              "Varian tidak ditemukan. Buat produk baru untuk kombinasi ukuran/warna baru.",
+            );
+          await c.query(
+            "UPDATE product_variants SET stock=? WHERE product_id=? AND size=? AND color=?",
+            [v.stock, req.params.id, v.size, v.color],
+          );
+        }
+      }
+      await c.query("COMMIT");
       res.json({ ok: true });
     } catch (e) {
-      await client.query("ROLLBACK");
+      await c.query("ROLLBACK");
+      if (e.code === "ER_DUP_ENTRY") throw fail(409, "SKU sudah digunakan.");
       throw e;
     } finally {
-      client.release();
+      c.release();
     }
   });
+  app.get("/api/admin/status", auth, admin, async (req, res) => {
+    const mail = (
+      await pool.query(
+        "SELECT status,COUNT(*) AS count FROM email_outbox GROUP BY status",
+      )
+    ).rows;
+    res.json({
+      database: "MySQL / Laragon",
+      gateway: gateway.configured,
+      sandbox: gateway.sandbox,
+      emailConfigured: Boolean(env.RESEND_API_KEY),
+      emailSender: env.RESEND_FROM || "Liny Jaya <onboarding@resend.dev>",
+      emailUsesTestSender: /@resend\.dev(?:>|\s|$)/i.test(
+        env.RESEND_FROM || "onboarding@resend.dev",
+      ),
+      emailSandbox: Boolean(env.RESEND_ALLOWED_TO),
+      email: mail,
+    });
+  });
+  app.post("/api/newsletter", authLimit, async (req, res) => {
+    const f = z.object({ email: z.email().max(254) }).parse(req.body);
+    await pool.query(
+      "INSERT IGNORE INTO newsletter_subscribers(email) VALUES(?)",
+      [f.email.toLowerCase()],
+    );
+    res.json({ ok: true });
+  });
+  app.locals.background = async () => {
+    const { rows } = await pool.query(
+      "SELECT * FROM orders WHERE payment_status IN ('CREATING','PENDING') ORDER BY created_at LIMIT 30",
+    );
+    for (const order of rows)
+      try {
+        await payments.sync(order);
+      } catch (e) {
+        console.error("Sinkronisasi pembayaran:", order.id, e.message);
+      }
+    await flushEmails(pool, env, options.mailTransport);
+  };
   app.use("/api", (req, res) =>
     res.status(404).json({ error: "Endpoint tidak ditemukan." }),
   );
   app.use((err, req, res, next) => {
     if (err instanceof z.ZodError)
-      return res
-        .status(400)
-        .json({
-          error: err.issues
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join("; "),
-        });
+      return res.status(400).json({
+        error: err.issues
+          .map((i) => i.path.join(".") + ": " + i.message)
+          .join("; "),
+      });
     if (err.type === "entity.parse.failed")
       return res.status(400).json({ error: "Format JSON tidak valid." });
-    if (!err.status) console.error("Kesalahan server:", err.message);
-    res
-      .status(err.status || 500)
-      .json({
-        error: err.status
-          ? err.message
-          : "Server sedang bermasalah. Silakan coba lagi.",
-      });
+    if (!err.status)
+      console.error("Kesalahan server:", err.code || err.message);
+    res.status(err.status || 500).json({
+      error: err.status
+        ? err.message
+        : "Server sedang bermasalah. Silakan coba lagi.",
+      ...(typeof err.code === "string" && err.code.startsWith("EMAIL_")
+        ? { code: err.code }
+        : {}),
+    });
   });
   return app;
 }

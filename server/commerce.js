@@ -21,7 +21,8 @@ export const orderSchema = z.object({
     .max(50),
   address: addressSchema,
   shipping: z.enum(["regular", "express", "pickup"]),
-  payment: z.enum(["bank_transfer", "cod"]),
+  payment: z.literal("xendit").default("xendit"),
+  checkoutKey: z.string().uuid(),
   coupon: z.enum(["", "LINY10"]).default(""),
 });
 export function calculateTotals(items, coupon, shipping) {
@@ -65,8 +66,8 @@ export function aggregateItems(items) {
   return rows;
 }
 export const transitions = {
-  "Menunggu pembayaran": ["Diproses", "Dibatalkan"],
-  Diproses: ["Dikirim", "Dibatalkan"],
+  "Menunggu pembayaran": ["Dibatalkan"],
+  Diproses: ["Dikirim"],
   Dikirim: ["Selesai"],
   Selesai: [],
   Dibatalkan: [],

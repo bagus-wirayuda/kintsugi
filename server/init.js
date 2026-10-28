@@ -1,18 +1,24 @@
+import mysql from "mysql2/promise";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { pool } from "./db.js";
+import { pool, databaseConfig } from "./db.js";
 import { products } from "../src/data.js";
-try {
-  await pool.query(
-    await readFile(new URL("../database/schema.sql", import.meta.url), "utf8"),
+
+export async function initialize(target = pool, seed = true) {
+  const source = await readFile(
+    new URL("../database/schema.sql", import.meta.url),
+    "utf8",
   );
-  const client = await pool.connect();
+  for (const sql of source.split(";").filter((s) => s.trim()))
+    await target.query(sql);
+  if (!seed) return;
+  const client = await target.connect();
   try {
-    await client.query("BEGIN");
+    await client.query("START TRANSACTION");
     for (const p of products) {
       await client.query(
-        "INSERT INTO products(id,sku,name,category,gender,price,old_price,image,description,rating,reviews,is_new) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING",
+        "INSERT IGNORE INTO products(id,sku,name,category,gender,price,old_price,image,description,rating,reviews,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         [
           p.id,
           p.sku,
@@ -31,37 +37,75 @@ try {
       for (const size of p.sizes)
         for (const color of p.colors)
           await client.query(
-            "INSERT INTO product_variants(product_id,size,color,stock) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+            "INSERT IGNORE INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
             [p.id, size, color, p.stock],
           );
     }
-    if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
-      if (process.env.ADMIN_PASSWORD.length < 16)
-        throw new Error("ADMIN_PASSWORD harus minimal 16 karakter.");
+    const accounts = [
+      [
+        process.env.ADMIN_EMAIL || "admin@linyjaya.test",
+        process.env.ADMIN_PASSWORD || "AdminLinyJaya2026!",
+        "Admin Liny Jaya",
+        "admin",
+      ],
+      [
+        process.env.CUSTOMER_EMAIL || "pelanggan@linyjaya.test",
+        process.env.CUSTOMER_PASSWORD || "BelanjaLiny2026!",
+        "Pelanggan Demo",
+        "customer",
+      ],
+    ];
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!process.env.ADMIN_PASSWORD || !process.env.CUSTOMER_PASSWORD)
+    )
+      throw new Error("Password akun seed wajib ditetapkan pada production.");
+    for (const [email, password, name, role] of accounts) {
+      if (password.length < 12)
+        throw new Error("Password seed minimal 12 karakter.");
       await client.query(
-        "INSERT INTO users(id,name,email,password_hash,role) VALUES($1,$2,$3,$4,$5) ON CONFLICT(email) DO NOTHING",
+        "INSERT IGNORE INTO users(id,name,email,password_hash,role) VALUES(?,?,?,?,?)",
         [
           randomUUID(),
-          "Admin Liny Jaya",
-          process.env.ADMIN_EMAIL.toLowerCase(),
-          await bcrypt.hash(process.env.ADMIN_PASSWORD, 12),
-          "admin",
+          name,
+          email.toLowerCase(),
+          await bcrypt.hash(password, 12),
+          role,
         ],
       );
     }
     await client.query("COMMIT");
-    console.log(
-      "Database siap: 32 produk dummy beserta varian. Admin dibuat jika konfigurasi tersedia.",
-    );
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
   } finally {
     client.release();
   }
-} catch (e) {
-  console.error("Inisialisasi gagal:", e.message);
-  process.exitCode = 1;
-} finally {
-  await pool.end();
+}
+
+if (process.argv[1]?.replaceAll("\\", "/").endsWith("/server/init.js")) {
+  try {
+    const config = databaseConfig();
+    const connection = await mysql.createConnection({
+      ...config,
+      database: undefined,
+    });
+    await connection.query(
+      "CREATE DATABASE IF NOT EXISTS `" +
+        config.database +
+        "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    );
+    await connection.end();
+    await initialize();
+    console.log(
+      "Database MySQL " +
+        config.database +
+        " siap: 32 produk, varian, admin dan pelanggan. Seed tidak mereset data lama.",
+    );
+  } catch (e) {
+    console.error("Inisialisasi gagal:", e.message);
+    process.exitCode = 1;
+  } finally {
+    await pool.end();
+  }
 }
