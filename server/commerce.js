@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { paymentMethods } from '../src/payment-methods.js';
 export const addressSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.email().max(254),
@@ -21,7 +22,7 @@ export const orderSchema = z.object({
     .max(50),
   address: addressSchema,
   shipping: z.enum(["regular", "express", "pickup"]),
-  payment: z.literal("xendit").default("xendit"),
+  payment: z.enum(['xendit', ...paymentMethods.map((method) => method.id)]).default("xendit"),
   checkoutKey: z.string().uuid(),
   coupon: z.enum(["", "LINY10"]).default(""),
 });

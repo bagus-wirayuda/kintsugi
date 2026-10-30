@@ -2,117 +2,173 @@ import React from "react";
 import {
   ArrowRight,
   ArrowUpRight,
-  Package,
-  ShieldCheck,
   Truck,
+  ShieldCheck,
+  Package,
 } from "lucide-react";
-import { assets, money } from "./data";
+import { assets, colorLabel, money } from "./data";
+import { categoryLabel, departmentLabel } from "./catalog";
 export default function Home({ shop, products, openProduct }) {
   return (
-    <main className="home-v2">
-      <section className="home-v2-hero">
-        <div>
-          <span>LINY JAYA · DAILY ESSENTIALS</span>
+    <main className="ks-home">
+      <section className="ks-hero">
+        <img
+          src={assets.hero}
+          alt="Kamar tidur dengan tekstil lembut pilihan Kintsugi"
+          fetchPriority="high"
+        />
+        <div className="ks-hero-shade" />
+        <div className="ks-hero-content">
+          <span className="ks-kicker">KINTSUGI / BEDROOM COLLECTION</span>
           <h1>
-            Nyaman dipakai.
+            Beristirahat.
             <br />
-            Mudah jadi favorit.
+            Lebih dalam.
+            <br />
+            <em>Setiap malam.</em>
           </h1>
-          <p>
-            Koleksi pakaian sehari-hari untuk gaya, aktivitas, dan cerita Anda.
-          </p>
+          <p>Tekstil kamar yang lembut untuk menjaga setiap momen istirahat.</p>
           <button onClick={() => shop("Semua", "Wanita")}>
-            Temukan koleksi
-            <ArrowRight size={18} />
+            JELAJAHI KOLEKSI <ArrowRight size={19} />
           </button>
-          <small>Wanita · Pria · Anak · Bayi</small>
+          <span className="ks-hero-caption">
+            Lembut, tenang, dan dirancang untuk tidur yang utuh.
+          </span>
         </div>
-        <div className="home-v2-image">
-          <img
-            src={assets.editorial}
-            alt="Pilihan pakaian sehari-hari Liny Jaya"
-          />
-          <span>Pilihan esensial, untuk setiap hari.</span>
+        <div className="ks-hero-index">
+          <span>01</span>
+          <i />
+          <span>SLEEP, REFINED.</span>
         </div>
       </section>
-      <section className="home-v2-departments">
-        <div className="home-v2-heading">
+      <nav className="ks-quick-links" aria-label="Pilihan koleksi">
+        {[
+          "Produk Baru",
+          "Penawaran Terbatas",
+          "T-Shirt",
+          "Kemeja & Blus",
+          "Celana",
+          "Luaran",
+        ].map((c) => (
+          <button key={c} onClick={() => shop(c)}>
+            {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c)} <ArrowUpRight size={15} />
+          </button>
+        ))}
+      </nav>
+      <section className="ks-section ks-department-section">
+        <div className="ks-section-heading">
           <div>
-            <span>MULAI DARI PILIHAN ANDA</span>
-            <h2>Belanja untuk siapa hari ini?</h2>
+            <p className="ks-kicker">TEMUKAN PILIHAN ANDA</p>
+            <h2>Untuk setiap ruang. Untuk istirahat yang utuh.</h2>
           </div>
           <button onClick={() => shop()}>
-            Lihat katalog
-            <ArrowUpRight size={17} />
+            Lihat semua <ArrowRight size={17} />
           </button>
         </div>
-        <div>
+        <div className="ks-department-grid">
           {[
-            ["Wanita", assets.hero, "Untuk setiap sisi diri Anda"],
-            ["Pria", assets.men, "Esensial yang selalu relevan"],
-            ["Anak", assets.kids, "Bebas bergerak dan bermain"],
-            ["Bayi", assets.baby, "Lembut untuk hari-hari pertama"],
-          ].map(([g, img, sub]) => (
+            ["Wanita", assets.sheets, "Lembut untuk ritual tidur setiap hari."],
+            ["Pria", assets.hotel, "Rapi dan nyaman untuk kamar hotel & guest."],
+            ["Anak", assets.kids, "Motif yang membuat waktu tidur lebih ceria."],
+            ["Bayi", assets.baby, "Kelembutan sejak pelukan pertama."],
+          ].map(([g, image, description]) => (
             <button key={g} onClick={() => shop("Semua", g)}>
-              <img src={img} alt={"Koleksi " + g} />
               <div>
-                <span>
-                  <b>{g}</b>
-                  <small>{sub}</small>
-                </span>
-                <ArrowRight size={19} />
+                <img src={image} alt={"Koleksi " + g} loading="lazy" />
               </div>
+              <h3>
+                {departmentLabel(g).toUpperCase()} <ArrowUpRight size={19} />
+              </h3>
+              <p>{description}</p>
             </button>
           ))}
         </div>
       </section>
-      <section className="home-v2-arrivals">
-        <div className="home-v2-heading">
+      <section className="ks-section ks-products-section">
+        <div className="ks-section-heading">
           <div>
-            <span>PILIHAN KATALOG</span>
-            <h2>Mulai dengan yang Anda suka.</h2>
+            <p className="ks-kicker">SLEEP ESSENTIALS</p>
+            <h2>Pilihan untuk tidur yang lebih baik.</h2>
           </div>
-          <button onClick={() => shop("Produk Baru")}>
-            Semua produk
-            <ArrowRight size={17} />
+          <button onClick={() => shop()}>
+            Jelajahi koleksi <ArrowRight size={17} />
           </button>
         </div>
-        <div>
-          {products
-            .filter((p) => p.gender === "Wanita")
-            .slice(0, 4)
-            .map((p) => (
-              <button key={p.id} onClick={() => openProduct(p)}>
+        <div className="ks-home-products">
+          {products.slice(0, 4).map((p) => (
+            <article key={p.id}>
+              <button
+                className="ks-home-product-image"
+                onClick={() => openProduct(p)}
+              >
                 <img src={p.image} alt={p.name} loading="lazy" />
-                <span>{p.category}</span>
-                <h3>{p.name}</h3>
-                <b>{money(p.price)}</b>
+                <span>
+                  {p.oldPrice ? "PENAWARAN TERBATAS" : "PILIHAN KINTSUGI"}
+                </span>
               </button>
-            ))}
+              <div className="swatches">
+                {p.colors.map((c) => (
+                  <span key={c} style={{ background: c }} title={colorLabel(c)} />
+                ))}
+              </div>
+              <small>
+                {departmentLabel(p.gender).toUpperCase()} · {p.sizes[0]}–{p.sizes.at(-1)} · {colorLabel(p.colors[0])}
+              </small>
+              <button
+                className="ks-home-product-name"
+                onClick={() => openProduct(p)}
+              >
+                {p.name}
+              </button>
+              <strong>{money(p.price)}</strong>
+              {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
+              <div className="ks-product-actions"><button onClick={() => openProduct(p, 'cart')}>+ Keranjang</button><button onClick={() => openProduct(p, 'buy')}>Beli langsung</button></div>
+            </article>
+          ))}
         </div>
       </section>
-      <section className="home-v2-benefits">
+      <section className="ks-story">
+        <div className="ks-story-photo">
+          <img
+            src={assets.editorial}
+            alt="Detail tekstil kamar tidur Kintsugi"
+            loading="lazy"
+          />
+        </div>
+        <div className="ks-story-copy">
+          <p className="ks-kicker">THE KINTSUGI WAY</p>
+          <h2>
+            Keindahan ada
+            <br />
+            di setiap cerita.
+          </h2>
+          <span className="ks-gold-rule" />
+          <p>
+            Terinspirasi dari seni merangkai kembali, Kintsugi merayakan ruang
+            istirahat yang terasa utuh. Mulai dari tekstil yang menyentuh hari
+            Anda paling awal dan paling akhir.
+          </p>
+          <button onClick={() => shop()}>
+            TEMUKAN KOLEKSI KAMAR <ArrowRight size={18} />
+          </button>
+        </div>
+      </section>
+      <section className="ks-benefits">
         {[
-          {
-            icon: Truck,
-            title: "Pengiriman pilihan Anda",
-            text: "Reguler, ekspres, atau pengambilan pesanan.",
-          },
-          {
-            icon: ShieldCheck,
-            title: "Pembayaran melalui Xendit",
-            text: "Pilih metode pada halaman pembayaran yang aman.",
-          },
-          {
-            icon: Package,
-            title: "Pantau dari akun Anda",
-            text: "Lihat status pesanan dan rincian belanja dalam satu tempat.",
-          },
-        ].map(({ icon: Icon, title, text }) => (
+          [Truck, "Dikirim ke pintu Anda", "Gratis ongkir mulai Rp699.000"],
+          [ShieldCheck, "Pembayaran aman", "Transfer bank, QRIS & dompet digital"],
+          [
+            Package,
+            "Belanja tanpa terburu-buru",
+            "Pilihan Anda tersimpan di browser",
+          ],
+        ].map(([Icon, title, detail]) => (
           <div key={title}>
             <Icon size={25} />
-            <h3>{title}</h3>
-            <p>{text}</p>
+            <div>
+              <b>{title}</b>
+              <p>{detail}</p>
+            </div>
           </div>
         ))}
       </section>

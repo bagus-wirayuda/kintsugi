@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from "react";
 import {
-  LayoutDashboard,
-  Package,
-  UserRound,
-  ShieldCheck,
   Heart,
   ShoppingBag,
   Plus,
@@ -13,32 +9,59 @@ import {
   ArrowUpRight,
   CheckCircle2,
 } from "lucide-react";
-import Workspace, { Empty, Notice, Status } from "./Workspace";
+import { Empty, Notice } from "./Workspace";
 import { api, totals } from "./store";
-import { money } from "./data";
-const items = [
-  { id: "overview", label: "Ringkasan", icon: LayoutDashboard },
-  { id: "orders", label: "Pesanan saya", icon: Package },
-  { id: "profile", label: "Profil & alamat", icon: UserRound },
-  { id: "security", label: "Keamanan", icon: ShieldCheck },
-  { id: "wishlist", label: "Favorit saya", icon: Heart },
-  { id: "cart", label: "Keranjang", icon: ShoppingBag },
-];
-function Shell({ user, onLogout, nav, active, title, subtitle, children }) {
+import { colorLabel, money } from "./data";
+import { categoryLabel, departmentLabel } from "./catalog";
+import { StoreHeader, StoreFooter } from "./StoreChrome";
+function Shell({
+  user,
+  onLogout,
+  nav,
+  shop,
+  gender,
+  cartCount,
+  wishCount,
+  onSearch,
+  active,
+  title,
+  subtitle,
+  children,
+}) {
   return (
-    <Workspace
-      user={user}
-      items={items}
-      active={active}
-      onSelect={(id) =>
-        nav(["cart", "wishlist"].includes(id) ? id : "account/" + id)
-      }
-      onLogout={onLogout}
-      title={title}
-      subtitle={subtitle}
-    >
-      {children}
-    </Workspace>
+    <div className="workspace ks-shopping">
+      <StoreHeader
+        nav={nav}
+        shop={shop}
+        gender={gender}
+        user={user}
+        count={cartCount}
+        wishCount={wishCount}
+        onSearch={onSearch}
+        onLogout={onLogout}
+      />
+      <main className="ks-shopping-content">
+        <div className="breadcrumb">
+          <button onClick={() => nav("home")}>Beranda</button>
+          <span>/</span>
+          <span>{title}</span>
+        </div>
+        <div className="ks-shopping-title">
+          <div>
+            <p className="ks-kicker">
+              KINTSUGI / {active === "cart" ? "SHOPPING BAG" : "MY SELECTION"}
+            </p>
+            <h1>{title}</h1>
+            <p>{subtitle}</p>
+          </div>
+          <button className="ws-link" onClick={() => nav("catalog")}>
+            Lanjut belanja <ArrowRight size={17} />
+          </button>
+        </div>
+        {children}
+      </main>
+      <StoreFooter nav={nav} />
+    </div>
   );
 }
 export function CartPage({
@@ -49,6 +72,10 @@ export function CartPage({
   setCart,
   coupon,
   setCoupon,
+  shop,
+  gender,
+  wishCount,
+  onSearch,
 }) {
   const [input, setInput] = useState(coupon),
     [error, setError] = useState(""),
@@ -95,6 +122,11 @@ export function CartPage({
       onLogout={onLogout}
       nav={nav}
       active="cart"
+      onSearch={onSearch}
+      shop={shop}
+      gender={gender}
+      cartCount={cart.reduce((sum, row) => sum + row.quantity, 0)}
+      wishCount={wishCount}
       title="Keranjang belanja"
       subtitle="Periksa barang pilihan Anda sebelum checkout."
     >
@@ -131,8 +163,8 @@ export function CartPage({
                 <div>
                   <h3>{i.name}</h3>
                   <p>
-                    Ukuran {i.size} ·{" "}
-                    <i className="color-dot" style={{ background: i.color }} />
+                    Ukuran kasur {i.size} ·{" "}
+                    <i className="color-dot" style={{ background: i.color }} /> {colorLabel(i.color)}
                   </p>
                   <b>{money(i.price)}</b>
                   <div className="ws-quantity">
@@ -240,6 +272,10 @@ export function WishlistPage({
   wish,
   setWish,
   openProduct,
+  shop,
+  gender,
+  cartCount,
+  onSearch,
 }) {
   const [rows, setRows] = useState([]),
     [loading, setLoading] = useState(true),
@@ -257,6 +293,11 @@ export function WishlistPage({
       onLogout={onLogout}
       nav={nav}
       active="wishlist"
+      onSearch={onSearch}
+      shop={shop}
+      gender={gender}
+      cartCount={cartCount}
+      wishCount={wish.length}
       title="Favorit saya"
       subtitle="Produk pilihan yang ingin Anda temukan kembali."
     >
@@ -266,7 +307,7 @@ export function WishlistPage({
       ) : rows.length ? (
         <>
           <p className="ws-muted ws-spaced">
-            Tersimpan pada akun Anda di browser ini. Produk arsip disembunyikan.
+            Pilihan Anda tersimpan di browser ini untuk ditemukan kembali.
           </p>
           <div className="ws-favorites">
             {rows.map((p) => (
@@ -280,14 +321,11 @@ export function WishlistPage({
                 </button>
                 <div>
                   <span className="ws-kicker">
-                    {p.gender} / {p.category}
+                    {departmentLabel(p.gender)} / {categoryLabel(p.category)}
                   </span>
                   <h3>{p.name}</h3>
                   <b>{money(p.price)}</b>
-                  <button className="ws-button" onClick={() => openProduct(p)}>
-                    Pilih varian
-                    <ArrowRight size={16} />
-                  </button>
+                  <div className="ks-product-actions"><button onClick={() => openProduct(p, 'cart')}>+ Keranjang</button><button onClick={() => openProduct(p, 'buy')}>Beli langsung</button></div>
                   <button
                     className="ws-link secondary-link"
                     onClick={() =>
@@ -322,7 +360,17 @@ export function WishlistPage({
     </Shell>
   );
 }
-export function PaymentPage({ user, onLogout, nav, order }) {
+export function PaymentPage({
+  user,
+  onLogout,
+  nav,
+  order,
+  shop,
+  gender,
+  cartCount,
+  wishCount,
+  onSearch,
+}) {
   const pending = order?.payment_status === "PENDING";
   return (
     <Shell
@@ -330,6 +378,11 @@ export function PaymentPage({ user, onLogout, nav, order }) {
       onLogout={onLogout}
       nav={nav}
       active="orders"
+      shop={shop}
+      gender={gender}
+      cartCount={cartCount}
+      wishCount={wishCount}
+      onSearch={onSearch}
       title="Pembayaran pesanan"
       subtitle="Pesanan Anda tersimpan dan dapat dilanjutkan dari halaman pesanan."
     >
@@ -351,7 +404,7 @@ export function PaymentPage({ user, onLogout, nav, order }) {
         <Notice>{order?.paymentError}</Notice>
         {pending && (
           <a className="ws-button primary" href={order.payment_url}>
-            Buka pembayaran Xendit
+            Lanjutkan pembayaran
             <ArrowUpRight size={17} />
           </a>
         )}
@@ -359,7 +412,7 @@ export function PaymentPage({ user, onLogout, nav, order }) {
           Lihat status pesanan
         </button>
         <p>
-          Pembayaran hanya dinyatakan lunas setelah dikonfirmasi oleh Xendit.
+          Status pesanan diperbarui setelah pembayaran berhasil dikonfirmasi.
         </p>
       </section>
     </Shell>

@@ -1,5 +1,6 @@
 import React from "react";
 import { ArrowLeft, LogOut, Menu, X } from "lucide-react";
+import Brand from "./Brand";
 export default function Workspace({
   user,
   admin = false,
@@ -17,9 +18,8 @@ export default function Workspace({
     <div className={"workspace " + (admin ? "ws-admin" : "ws-customer")}>
       <aside className={"ws-sidebar " + (open ? "is-open" : "")}>
         <a className="ws-logo" href={admin ? "#admin" : "#account"}>
-          <span>LJ</span>
+          <Brand />
           <div>
-            Liny Jaya
             <small>{admin ? "ADMINISTRATION" : "AKUN PELANGGAN"}</small>
           </div>
         </a>
@@ -89,7 +89,7 @@ export default function Workspace({
           <div className="ws-page-heading">
             <div>
               <p className="ws-kicker">
-                {admin ? "LINY JAYA / OPERASIONAL" : "AKUN SAYA"}
+                {admin ? "KINTSUGI / OPERASIONAL" : "AKUN SAYA"}
               </p>
               <h1>{title}</h1>
               {subtitle && <p>{subtitle}</p>}
@@ -99,7 +99,7 @@ export default function Workspace({
           {children}
         </main>
         <footer className="ws-footer">
-          © 2026 Liny Jaya{" "}
+          © 2026 Kintsugi{" "}
           <span>{admin ? "Panel administrator" : "Pusat akun pelanggan"}</span>
         </footer>
       </div>

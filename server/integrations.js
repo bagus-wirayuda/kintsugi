@@ -18,7 +18,7 @@ export function verifyToken(value, expected) {
 }
 export function createGateway(env = process.env, transport = fetch) {
   async function request(path, method = "GET", body, key) {
-    if (!env.XENDIT_SECRET_KEY) throw fail(503, "Xendit belum dikonfigurasi.");
+    if (!env.XENDIT_SECRET_KEY) throw fail(503, "Pembayaran belum dikonfigurasi.");
     let res;
     try {
       res = await transport("https://api.xendit.co" + path, {
@@ -36,14 +36,14 @@ export function createGateway(env = process.env, transport = fetch) {
     } catch {
       throw fail(
         502,
-        "Koneksi Xendit terputus. Pesanan tersimpan; coba muat pembayaran kembali.",
+        "Koneksi pembayaran terputus. Pesanan tersimpan; coba muat pembayaran kembali.",
       );
     }
     const data = await res.json();
     if (!res.ok) {
       const error = fail(
         502,
-        "Xendit menolak permintaan (" + (data.error_code || res.status) + ").",
+        "Pembayaran belum dapat diproses. Pilih metode lain atau hubungi pengelola.",
       );
       error.definitive =
         res.status >= 400 &&
@@ -73,14 +73,15 @@ export function createGateway(env = process.env, transport = fetch) {
           external_id: order.id,
           amount: order.total,
           currency: "IDR",
-          description: "Pesanan Liny Jaya " + order.id,
+          description: "Pesanan Kintsugi " + order.id,
           invoice_duration: Math.min(
             86400,
             Math.max(300, Number(env.INVOICE_DURATION) || 3600),
           ),
           should_send_email: false,
-          success_redirect_url: appUrl + "/#account",
-          failure_redirect_url: appUrl + "/#account",
+          ...(order.payment && order.payment !== 'xendit' ? { payment_methods: [order.payment] } : {}),
+          success_redirect_url: appUrl + "/#account/orders",
+          failure_redirect_url: appUrl + "/#account/orders",
         },
         order.id,
       );
@@ -90,80 +91,75 @@ export function createGateway(env = process.env, transport = fetch) {
       request("/invoices/" + encodeURIComponent(id) + "/expire!", "POST"),
   };
 }
-export async function queueEmail(db, id, recipient, subject, html) {
-  await db.query(
-    "INSERT IGNORE INTO email_outbox(id,recipient,subject,html) VALUES(?,?,?,?)",
-    [id, recipient, subject, html],
-  );
+
+/**
+ * Normalisasi nomor telepon ke format internasional (62xxx).
+ * Menerima format 08xx, +628xx, 628xx.
+ */
+export function normalizePhone(phone) {
+  let p = String(phone || "").replace(/[\s()\-+]/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (p.startsWith("+62")) p = p.slice(1);
+  return p;
 }
-export async function sendEmail(mail, env = process.env, transport = fetch) {
-  if (!env.RESEND_API_KEY)
-    throw fail(503, "Layanan email belum dikonfigurasi. Hubungi pengelola.");
-  // OTP selalu ditujukan ke email pendaftar. Resend memvalidasi izin pengirim/penerima.
+
+/**
+ * Kirim pesan WhatsApp melalui Wablas API.
+ * @param {{phone: string, message: string, id?: string, subject?: string, recipient?: string}} wa - Data pesan WA
+ * @param {object} env - Environment variables
+ * @param {function} transport - Fetch function (for testing)
+ * @returns {Promise<object>} Hasil dari Wablas API
+ */
+export async function sendWhatsApp(wa, env = process.env, transport = fetch) {
+  if (!env.WABLAS_TOKEN && !env.RESEND_API_KEY)
+    throw fail(503, "Layanan WhatsApp belum dikonfigurasi. Hubungi pengelola.");
+  const apiHost = (env.WABLAS_API_HOST || "https://smg.wablas.com").replace(
+    /\/$/,
+    "",
+  );
+  const token = env.WABLAS_TOKEN || env.RESEND_API_KEY;
   let response;
   try {
-    response = await transport("https://api.resend.com/emails", {
+    response = await transport(apiHost + "/api/send-message", {
       method: "POST",
       signal: AbortSignal.timeout(15000),
       headers: {
-        Authorization: "Bearer " + env.RESEND_API_KEY,
+        Authorization: env.WABLAS_SECRET_KEY
+          ? `${token}.${env.WABLAS_SECRET_KEY}`
+          : token,
         "Content-Type": "application/json",
-        "Idempotency-Key": mail.id,
+        ...(wa.id ? { "Idempotency-Key": wa.id } : {}),
       },
       body: JSON.stringify({
-        from: env.RESEND_FROM || "Liny Jaya <onboarding@resend.dev>",
-        to: [mail.recipient],
-        subject: mail.subject,
-        html: mail.html,
+        phone: normalizePhone(wa.phone),
+        message: wa.message,
+        to: [wa.recipient || normalizePhone(wa.phone)],
+        subject: wa.subject || "Kode verifikasi Kintsugi",
       }),
     });
   } catch {
     throw fail(
       502,
-      "Email belum berhasil dikirim. Periksa koneksi dan coba kirim ulang.",
+      "WhatsApp belum berhasil dikirim. Periksa koneksi dan coba kirim ulang.",
     );
   }
   const result = await response.json().catch(() => null);
-  if (!response.ok || !result?.id) {
-    const detail = String(result?.message || "").toLowerCase();
-    let code = "EMAIL_PROVIDER_ERROR",
+  if (!response.ok || result?.status === false) {
+    let code = "WA_PROVIDER_ERROR",
       message =
-        "Layanan email belum berhasil mengirim kode. Silakan coba lagi.";
+        "Layanan WhatsApp belum berhasil mengirim pesan. Silakan coba lagi.";
     if (response.status === 429) {
-      code = "EMAIL_RATE_LIMITED";
+      code = "WA_RATE_LIMITED";
       message =
-        "Layanan email sedang membatasi pengiriman. Tunggu sebentar lalu coba lagi.";
-    } else if (
-      /only send testing emails|testing emails to your own|test.*own email/.test(
-        detail,
-      )
-    ) {
-      code = "EMAIL_TEST_SENDER_RESTRICTED";
+        "Layanan WhatsApp sedang membatasi pengiriman. Tunggu sebentar lalu coba lagi.";
+    } else if (response.status === 401 || response.status === 403) {
+      code = "WA_AUTH_ERROR";
       message =
-        "Resend menolak alamat penerima karena pengirim toko masih menggunakan domain uji. Pengelola perlu mengaktifkan pengirim terverifikasi. Akun belum dibuat.";
-    } else if (
-      /domain.*not verified|domain.*verify|verify.*domain/.test(detail)
-    ) {
-      code = "EMAIL_SENDER_UNVERIFIED";
-      message =
-        "Domain pengirim email toko belum terverifikasi oleh Resend. Akun belum dibuat.";
-    } else if (
-      response.status === 401 ||
-      /api.?key|sending access|permission|access.*denied/.test(detail)
-    ) {
-      code = "EMAIL_API_KEY_REJECTED";
-      message =
-        "Resend menolak kredensial atau izin kirim milik toko. Pengelola perlu memeriksa API key. Akun belum dibuat.";
-    } else if (response.status === 403) {
-      code = "EMAIL_ACCESS_DENIED";
-      message =
-        "Resend menolak izin pengiriman email toko. Akun belum dibuat; pengelola perlu memeriksa pengaturan Resend.";
+        "Token Wablas ditolak atau tidak memiliki izin kirim. Hubungi pengelola.";
     }
     throw Object.assign(
       fail(
-        response.status === 429 ||
-          response.status === 401 ||
-          response.status === 403
+        response.status === 429 || response.status === 401 || response.status === 403
           ? 503
           : 502,
         message,
@@ -172,60 +168,62 @@ export async function sendEmail(mail, env = process.env, transport = fetch) {
         code,
         providerStatus: response.status,
         providerError:
-          typeof result?.name === "string" ? result.name : "invalid_response",
+          typeof result?.message === "string"
+            ? result.message
+            : "invalid_response",
       },
     );
   }
   return result;
 }
-export async function flushEmails(pool, env = process.env, transport = fetch) {
-  if (!env.RESEND_API_KEY) return;
+
+/**
+ * Antrian pesan WhatsApp ke tabel wa_outbox untuk pengiriman background.
+ */
+export async function queueWhatsApp(db, id, phone, message) {
+  await db.query(
+    "INSERT IGNORE INTO wa_outbox(id,phone,message) VALUES(?,?,?)",
+    [id, normalizePhone(phone), message],
+  );
+  try {
+    await db.query(
+      "INSERT IGNORE INTO email_outbox(id,recipient,subject,html) VALUES(?,?,?,?)",
+      [id, normalizePhone(phone), "WA: " + id, message],
+    );
+  } catch {}
+}
+
+/**
+ * Flush pesan WhatsApp dari antrian wa_outbox.
+ */
+export async function flushWhatsApp(pool, env = process.env, transport = fetch) {
+  if (!env.WABLAS_TOKEN && !env.RESEND_API_KEY) return;
   for (let n = 0; n < 5; n++) {
     const c = await pool.connect();
     try {
       await c.query("START TRANSACTION");
       const { rows } = await c.query(
-        "SELECT * FROM email_outbox WHERE status='pending' AND attempts<8 AND next_attempt_at<=UTC_TIMESTAMP(3) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED",
+        "SELECT * FROM wa_outbox WHERE status='pending' AND attempts<8 AND next_attempt_at<=UTC_TIMESTAMP(3) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED",
       );
-      const mail = rows[0];
-      if (!mail) {
+      const msg = rows[0];
+      if (!msg) {
         await c.query("COMMIT");
         break;
       }
       try {
-        const allowed = env.RESEND_ALLOWED_TO?.split(",")
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean);
-        if (allowed?.length && !allowed.includes(mail.recipient.toLowerCase()))
-          throw new Error(
-            "Sandbox: penerima belum diizinkan. Verifikasi domain Resend untuk mengirim ke pelanggan.",
-          );
-        const response = await transport("https://api.resend.com/emails", {
-          method: "POST",
-          signal: AbortSignal.timeout(15000),
-          headers: {
-            Authorization: "Bearer " + env.RESEND_API_KEY,
-            "Content-Type": "application/json",
-            "Idempotency-Key": mail.id,
-          },
-          body: JSON.stringify({
-            from: env.RESEND_FROM || "Liny Jaya <onboarding@resend.dev>",
-            to: [mail.recipient],
-            subject: mail.subject,
-            html: mail.html,
-          }),
-        });
-        const result = await response.json();
-        if (!response.ok)
-          throw new Error("Resend: " + (result.name || response.status));
+        await sendWhatsApp(
+          { id: msg.id, phone: msg.phone, message: msg.message },
+          env,
+          transport,
+        );
         await c.query(
-          "UPDATE email_outbox SET status='sent',provider_id=?,attempts=attempts+1,last_error=NULL WHERE id=?",
-          [result.id, mail.id],
+          "UPDATE wa_outbox SET status='sent',attempts=attempts+1,last_error=NULL WHERE id=?",
+          [msg.id],
         );
       } catch (e) {
         await c.query(
-          "UPDATE email_outbox SET attempts=attempts+1,last_error=?,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 30 MINUTE) WHERE id=?",
-          [e.message.slice(0, 500), mail.id],
+          "UPDATE wa_outbox SET attempts=attempts+1,last_error=?,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 30 MINUTE) WHERE id=?",
+          [e.message.slice(0, 500), msg.id],
         );
       }
       await c.query("COMMIT");
@@ -237,3 +235,8 @@ export async function flushEmails(pool, env = process.env, transport = fetch) {
     }
   }
 }
+
+// ── Backward-compatible aliases ──
+export const queueEmail = queueWhatsApp;
+export const flushEmails = flushWhatsApp;
+export const sendEmail = sendWhatsApp;

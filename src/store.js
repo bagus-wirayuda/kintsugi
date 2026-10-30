@@ -1,4 +1,3 @@
-export const DEMO = import.meta.env.VITE_DATA_MODE === "demo";
 const read = (key, fallback) => {
   try {
     return JSON.parse(localStorage.getItem("lj:" + key)) ?? fallback;
@@ -26,12 +25,12 @@ export async function api(path, options = {}) {
   } catch (e) {
     if (e.name === "AbortError") throw e;
     throw new Error(
-      "Tidak dapat menghubungi toko. Aktifkan MySQL Laragon, jalankan npm start di folder proyek, lalu buka http://localhost:3001.",
+      "Layanan toko sedang tidak dapat dihubungi. Silakan coba beberapa saat lagi.",
     );
   }
   const data = await res.json().catch(() => {
     throw new Error(
-      "Backend belum terhubung. Jalankan npm start di folder proyek lalu buka http://localhost:3001, atau gunakan npm run dev untuk menyalakan frontend dan backend bersama.",
+      "Layanan toko sedang tidak tersedia. Silakan coba kembali.",
     );
   });
   if (!res.ok)
@@ -57,10 +56,4 @@ export function totals(cart, coupon = "", shipping = "regular") {
     delivery,
     total: subtotal - discount + delivery,
   };
-}
-// Mode browser hanya untuk pratinjau eksplisit. Checkout memerlukan API.
-export function demoOrder() {
-  throw new Error(
-    "Checkout memerlukan backend MySQL dan Xendit. Jalankan npm start.",
-  );
 }

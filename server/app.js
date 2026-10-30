@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
+import { paymentMethods } from '../src/payment-methods.js';
 import {
   orderSchema,
   calculateTotals,
@@ -15,9 +16,10 @@ import {
   createGateway,
   verifyToken,
   fail,
-  queueEmail,
+  queueWhatsApp,
   escapeHtml,
-  flushEmails,
+  flushWhatsApp,
+  normalizePhone,
 } from "./integrations.js";
 import { createPayments, orderRow, validateInvoice } from "./payments.js";
 import { createOtp, passwordSchema } from "./otp.js";
@@ -26,7 +28,8 @@ const hash = (s) => createHash("sha256").update(s).digest("hex");
 const safeUser = (u) => ({
   id: u.id,
   name: u.name,
-  email: u.email,
+  email: u.email || "",
+  phone: u.phone || "",
   role: u.role,
 });
 const imageSchema = z
@@ -218,27 +221,28 @@ export function createApp(pool, options = {}) {
   });
   app.get("/api/config", (req, res) =>
     res.json({
-      brand: "Liny Jaya",
+      brand: "Kintsugi",
       registrationRequiresOtp: true,
       contact: env.STORE_CONTACT_EMAIL || "wirayuda101101@gmail.com",
+      contactPhone: env.STORE_CONTACT_PHONE || "",
       payments: gateway.configured,
+      paymentMethods: paymentMethods.filter((method) => !env.PAYMENT_METHODS || env.PAYMENT_METHODS.split(',').map((value) => value.trim()).includes(method.id)),
       sandbox: gateway.sandbox,
       invoiceDuration: Number(env.INVOICE_DURATION) || 3600,
-      emailSandbox: Boolean(env.RESEND_ALLOWED_TO),
-      otpTestEmail:
-        env.NODE_ENV !== "production" && env.RESEND_ALLOWED_TO
-          ? env.RESEND_ALLOWED_TO.split(",")[0].trim()
-          : null,
+      whatsappConfigured: Boolean(env.WABLAS_TOKEN),
     }),
   );
   const otp = createOtp({
     pool,
     env,
-    transport: options.mailTransport,
+    transport: options.waTransport || options.mailTransport,
     session,
   });
   app.post("/api/auth/register", authLimit, async (req, res) =>
     res.status(202).json(await otp.register(req.body)),
+  );
+  app.post("/api/auth/checkout", authLimit, async (req, res) =>
+    res.status(202).json(await otp.checkout(req.body)),
   );
   app.post("/api/auth/otp/request", authLimit, async (req, res) =>
     res.status(202).json(await otp.request(req.body)),
@@ -249,17 +253,26 @@ export function createApp(pool, options = {}) {
   app.post("/api/auth/login", authLimit, async (req, res) => {
     const f = z
       .object({
-        email: z.email().max(254),
+        phone: z.string().min(1).max(20).optional(),
+        email: z.email().max(254).optional(),
         password: z.string().min(1).max(72),
       })
+      .refine((o) => o.phone || o.email, "Masukkan nomor WhatsApp atau email.")
       .parse(req.body);
-    const u = (
-      await pool.query("SELECT * FROM users WHERE email=?", [
-        f.email.toLowerCase(),
-      ])
-    ).rows[0];
+    let u;
+    if (f.phone) {
+      const phone = normalizePhone(f.phone);
+      u = (await pool.query("SELECT * FROM users WHERE phone=?", [phone]))
+        .rows[0];
+    } else {
+      u = (
+        await pool.query("SELECT * FROM users WHERE email=?", [
+          f.email.toLowerCase(),
+        ])
+      ).rows[0];
+    }
     if (!u || !(await bcrypt.compare(f.password, u.password_hash)))
-      throw fail(401, "Email atau kata sandi tidak cocok.");
+      throw fail(401, "Nomor WhatsApp/email atau kata sandi tidak cocok.");
     res.json(await session(req, res, u));
   });
   app.post("/api/auth/logout", async (req, res) => {
@@ -275,7 +288,7 @@ export function createApp(pool, options = {}) {
     const p =
       (
         await pool.query(
-          "SELECT phone,street,city,postal FROM customer_profiles WHERE user_id=?",
+          "SELECT phone AS profile_phone,street,city,postal FROM customer_profiles WHERE user_id=?",
           [req.user.id],
         )
       ).rows[0] || {};
@@ -523,39 +536,44 @@ export function createApp(pool, options = {}) {
   app.get("/api/orders/:id", auth, customer, async (req, res) =>
     res.json(await ownOrder(req)),
   );
-  app.post("/api/checkout/quote", auth, customer, async (req, res) => {
-    const f = orderSchema
-      .omit({ address: true, checkoutKey: true, payment: true })
-      .parse(req.body);
-    const canonical = [];
-    for (const i of aggregateItems(f.items)) {
-      const p = (
-        await pool.query(
-          "SELECT p.*,v.stock FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE",
-          [i.id, i.size, i.color],
-        )
-      ).rows[0];
-      if (!p) throw fail(400, "Varian produk tidak tersedia.");
-      if (p.stock < i.quantity)
-        throw fail(409, "Stok " + p.name + " tidak mencukupi.");
-      canonical.push({
-        ...i,
-        name: p.name,
-        image: p.image,
-        price: p.price,
-        stock: p.stock,
+  app.post(
+    "/api/checkout/quote",
+    (req, res, next) => (req.user ? customer(req, res, next) : next()),
+    async (req, res) => {
+      const f = orderSchema
+        .omit({ address: true, checkoutKey: true, payment: true })
+        .parse(req.body);
+      const canonical = [];
+      for (const i of aggregateItems(f.items)) {
+        const p = (
+          await pool.query(
+            "SELECT p.*,v.stock FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE",
+            [i.id, i.size, i.color],
+          )
+        ).rows[0];
+        if (!p) throw fail(400, "Varian produk tidak tersedia.");
+        if (p.stock < i.quantity)
+          throw fail(409, "Stok " + p.name + " tidak mencukupi.");
+        canonical.push({
+          ...i,
+          name: p.name,
+          image: p.image,
+          price: p.price,
+          stock: p.stock,
+        });
+      }
+      res.json({
+        ...calculateTotals(canonical, f.coupon, f.shipping),
+        items: canonical,
       });
-    }
-    res.json({
-      ...calculateTotals(canonical, f.coupon, f.shipping),
-      items: canonical,
-    });
-  });
+    },
+  );
   app.post("/api/orders", auth, customer, async (req, res) => {
     if (!gateway.configured)
-      throw fail(503, "Pembayaran Xendit belum dikonfigurasi.");
+      throw fail(503, "Pembayaran belum tersedia. Hubungi pengelola.");
     const f = orderSchema.parse(req.body),
       items = aggregateItems(f.items);
+    if (env.PAYMENT_METHODS && f.payment !== 'xendit' && !env.PAYMENT_METHODS.split(',').map((value) => value.trim()).includes(f.payment)) throw fail(400, 'Metode pembayaran belum tersedia. Pilih metode lain.');
     const c = await pool.connect();
     let id;
     try {
@@ -602,7 +620,7 @@ export function createApp(pool, options = {}) {
             req.user.id,
             JSON.stringify(f.address),
             f.shipping,
-            "xendit",
+            f.payment,
             f.coupon,
             total.subtotal,
             total.discount,
@@ -626,18 +644,15 @@ export function createApp(pool, options = {}) {
               i.price,
             ],
           );
-        await queueEmail(
+        // Kirim notifikasi pesanan via WhatsApp
+        await queueWhatsApp(
           c,
           "order/" + id,
-          f.address.email,
-          "Pesanan dibuat · " + id,
-          "<h1>Pesanan tersimpan</h1><p>Halo " +
-            escapeHtml(f.address.name) +
-            ", lanjutkan pembayaran pesanan " +
-            escapeHtml(id) +
-            " melalui halaman akun. Total Rp" +
-            total.total.toLocaleString("id-ID") +
-            ".</p>",
+          f.address.phone,
+          `*Kintsugi - Pesanan Tersimpan*\n\n` +
+            `Halo ${f.address.name}, pesanan ${id} telah tersimpan.\n` +
+            `Total: Rp${total.total.toLocaleString("id-ID")}\n\n` +
+            `Lanjutkan pembayaran melalui halaman akun Anda.`,
         );
       }
       await c.query("COMMIT");
@@ -713,16 +728,15 @@ export function createApp(pool, options = {}) {
         );
       await c.query("UPDATE orders SET status=? WHERE id=?", [f.status, o.id]);
       const a = orderRow(o).address;
-      await queueEmail(
+      // Kirim notifikasi status pesanan via WhatsApp
+      await queueWhatsApp(
         c,
         "status/" + o.id + "/" + f.status,
-        a.email,
-        "Pesanan " + f.status.toLowerCase() + " · " + o.id,
-        "<h1>Status pesanan: " +
-          escapeHtml(f.status) +
-          "</h1><p>Pesanan " +
-          escapeHtml(o.id) +
-          " telah diperbarui.</p>",
+        a.phone,
+        `*Kintsugi - Status Pesanan*\n\n` +
+          `Pesanan ${o.id} telah diperbarui.\n` +
+          `Status: *${f.status}*\n\n` +
+          `Terima kasih telah berbelanja di Kintsugi.`,
       );
       await c.query("COMMIT");
       res.json({ ok: true });
@@ -850,22 +864,18 @@ export function createApp(pool, options = {}) {
     }
   });
   app.get("/api/admin/status", auth, admin, async (req, res) => {
-    const mail = (
+    const wa = (
       await pool.query(
-        "SELECT status,COUNT(*) AS count FROM email_outbox GROUP BY status",
+        "SELECT status,COUNT(*) AS count FROM wa_outbox GROUP BY status",
       )
     ).rows;
     res.json({
-      database: "MySQL / Laragon",
+      database: "MySQL",
       gateway: gateway.configured,
       sandbox: gateway.sandbox,
-      emailConfigured: Boolean(env.RESEND_API_KEY),
-      emailSender: env.RESEND_FROM || "Liny Jaya <onboarding@resend.dev>",
-      emailUsesTestSender: /@resend\.dev(?:>|\s|$)/i.test(
-        env.RESEND_FROM || "onboarding@resend.dev",
-      ),
-      emailSandbox: Boolean(env.RESEND_ALLOWED_TO),
-      email: mail,
+      whatsappConfigured: Boolean(env.WABLAS_TOKEN),
+      whatsappHost: env.WABLAS_API_HOST || "https://smg.wablas.com",
+      whatsapp: wa,
     });
   });
   app.post("/api/newsletter", authLimit, async (req, res) => {
@@ -886,7 +896,11 @@ export function createApp(pool, options = {}) {
       } catch (e) {
         console.error("Sinkronisasi pembayaran:", order.id, e.message);
       }
-    await flushEmails(pool, env, options.mailTransport);
+    await flushWhatsApp(
+      pool,
+      env,
+      options.waTransport || options.mailTransport,
+    );
   };
   app.use("/api", (req, res) =>
     res.status(404).json({ error: "Endpoint tidak ditemukan." }),
@@ -906,7 +920,7 @@ export function createApp(pool, options = {}) {
       error: err.status
         ? err.message
         : "Server sedang bermasalah. Silakan coba lagi.",
-      ...(typeof err.code === "string" && err.code.startsWith("EMAIL_")
+      ...(typeof err.code === "string" && err.code.startsWith("WA_")
         ? { code: err.code }
         : {}),
     });

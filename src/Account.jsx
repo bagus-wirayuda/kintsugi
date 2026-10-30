@@ -14,6 +14,7 @@ import {
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import OrderCard from "./Orders";
 import { api } from "./store";
+import { StoreHeader, StoreFooter } from "./StoreChrome";
 export default function Account({
   user,
   onUser,
@@ -23,12 +24,15 @@ export default function Account({
   wishCount,
   cartCount,
   config,
+  shop,
+  gender,
+  onSearch,
 }) {
-  const tabs = ["overview", "orders", "profile", "security"];
+  const tabs = ["orders", "profile", "address", "security", "help"];
   const tabFromHash = () =>
     tabs.includes(location.hash.split("/")[1])
       ? location.hash.split("/")[1]
-      : "overview";
+      : "profile";
   const [tab, setTab] = useState(tabFromHash),
     [orders, setOrders] = useState([]),
     [loading, setLoading] = useState(true),
@@ -134,6 +138,8 @@ export default function Account({
     overview: "Ringkasan akun",
     orders: "Pesanan saya",
     profile: "Profil & alamat",
+    address: 'Alamat pengiriman',
+    help: 'Bantuan belanja',
     security: "Keamanan akun",
   };
   const items = [
@@ -160,16 +166,11 @@ export default function Account({
       (filter === "cancelled" && o.status === "Dibatalkan"),
   );
   return (
-    <Workspace
-      user={user}
-      items={items}
-      active={tab}
-      onSelect={selectMenu}
-      onLogout={onLogout}
-      title={titles[tab]}
-      subtitle="Kelola informasi dan aktivitas belanja Anda dengan mudah."
-      actions={
-        tab === "orders" ? (
+    <div className="workspace ks-shopping ks-customer-account">
+      <StoreHeader user={user} nav={nav} shop={shop} gender={gender} count={cartCount} wishCount={wishCount} onSearch={onSearch} onLogout={onLogout}/>
+      <main className="ks-shopping-content">
+        <div className="ks-shopping-title"><div><p className="ks-kicker">AKUN PELANGGAN</p><h1>{titles[tab]}</h1><p>Informasi pribadi dan aktivitas belanja Anda.</p></div>
+        {tab === "orders" ? (
           <button
             className="ws-button"
             onClick={() => refresh().catch((e) => setError(e.message))}
@@ -177,9 +178,8 @@ export default function Account({
             <RefreshCw size={16} />
             Muat ulang
           </button>
-        ) : null
-      }
-    >
+        ) : <button className="ws-link" onClick={() => nav('catalog')}>Lanjut belanja <ArrowRight size={17}/></button>}
+        </div>
       <Notice>{error}</Notice>
       <Notice type="success">{message}</Notice>
       {loading ? (
@@ -359,7 +359,7 @@ export default function Account({
               )}
             </>
           )}
-          {tab === "profile" && (
+          {(tab === "profile" || tab === 'address') && (
             <section className="ws-panel ws-form-panel">
               <div className="ws-panel-heading">
                 <h2>Informasi pribadi & pengiriman</h2>
@@ -382,9 +382,9 @@ export default function Account({
                   />
                 </label>
                 <label>
-                  Email akun
-                  <input value={user.email} readOnly />
-                  <small>Email digunakan untuk masuk dan verifikasi.</small>
+                  WhatsApp
+                  <input value={user.phone || ""} readOnly />
+                  <small>Nomor WhatsApp digunakan untuk masuk dan verifikasi OTP.</small>
                 </label>
                 <label>
                   Nomor telepon
@@ -481,7 +481,7 @@ export default function Account({
                 <ShieldCheck size={30} />
                 <h3>Perlindungan akun Anda</h3>
                 <p>
-                  Akun baru harus memverifikasi email menggunakan OTP. Kode
+                  Akun baru harus memverifikasi nomor WhatsApp menggunakan OTP. Kode
                   hanya berlaku 10 menit dan satu kali pemakaian.
                 </p>
                 <p>
@@ -495,8 +495,10 @@ export default function Account({
               </section>
             </div>
           )}
+          {tab === 'help' && <section className="ws-panel ws-form-panel"><div className="ws-panel-heading"><h2>Ada yang bisa kami bantu?</h2><p>Hubungi layanan pelanggan untuk pertanyaan produk, pengiriman, penukaran, atau pembayaran. Sertakan nomor pesanan jika sudah berbelanja.</p></div><a className="ws-button primary" href={'mailto:' + (config?.contact || 'wirayuda101101@gmail.com')}>Hubungi layanan pelanggan</a><button className="ws-button" onClick={() => select('orders')}>Lihat pesanan saya</button><p className="ws-muted">Status pembayaran dan pengiriman dapat dilihat melalui menu Pesanan saya di Profil.</p></section>}
         </>
       )}
-    </Workspace>
+      </main><StoreFooter nav={nav}/>
+    </div>
   );
 }

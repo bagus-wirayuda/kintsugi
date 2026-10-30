@@ -26,7 +26,8 @@ import {
   ShieldCheck,
   RotateCcw,
 } from "lucide-react";
-import { categories, money } from "./data";
+import { categories, colorLabel, money } from "./data";
+import { categoryLabel, departments, departmentLabel } from "./catalog";
 import { storage, api } from "./store";
 import "./styles.css";
 const Admin = lazy(() => import("./Admin.jsx"));
@@ -36,8 +37,15 @@ const Checkout = lazy(() => import("./Checkout.jsx"));
 import Home from "./Home.jsx";
 import { CartPage, WishlistPage, PaymentPage } from "./ShoppingPages.jsx";
 import "./workspace.css";
-import "./home.css";
 import { policy } from "./policies.js";
+import Brand from "./Brand.jsx";
+import { StoreHeader } from "./StoreChrome.jsx";
+import {
+  mergeGuestCart,
+  moveGuestCheckout,
+  subtractPurchased,
+} from "./checkout-state.js";
+import "./kintsugi.css";
 
 const routes = [
   "home",
@@ -66,6 +74,8 @@ function App() {
     [color, setColor] = useState(""),
     [quantity, setQuantity] = useState(1),
     [cart, setCart] = useState([]),
+    [directPurchase, setDirectPurchase] = useState(null),
+    [purchaseIntent, setPurchaseIntent] = useState('cart'),
     [wish, setWish] = useState([]),
     [user, setUser] = useState(null),
     [toast, setToast] = useState(""),
@@ -104,9 +114,10 @@ function App() {
     if (!authReady) return;
     const owner = user?.id || "guest";
     setCart(storage.read("cart:" + owner, []));
+    setDirectPurchase(storage.read('direct:' + owner, null));
     setWish(storage.read("wish:" + owner, []));
     setCartOwner(owner);
-    setCoupon("");
+    setCoupon(storage.read("coupon:" + owner, ""));
     setPlaced(null);
   }, [user?.id, authReady]);
   useEffect(() => {
@@ -117,6 +128,10 @@ function App() {
     if (authReady && cartOwner === (user?.id || "guest"))
       storage.write("wish:" + cartOwner, wish);
   }, [wish, cartOwner, user?.id, authReady]);
+  useEffect(() => {
+    if (authReady && cartOwner === (user?.id || "guest"))
+      storage.write("coupon:" + cartOwner, coupon);
+  }, [coupon, cartOwner, user?.id, authReady]);
   useEffect(() => {
     api("/products?pageSize=48")
       .then((data) => setProducts(data.items))
@@ -153,6 +168,12 @@ function App() {
     return () => window.removeEventListener("hashchange", change);
   }, []);
   useEffect(() => {
+    if (user?.role === 'customer' && (view === 'home' || (view === 'account' && ['', 'overview'].includes(location.hash.split('/')[1] || '')))) {
+      history.replaceState(null, '', '#catalog');
+      setView('catalog');
+    }
+  }, [user?.role, view]);
+  useEffect(() => {
     if (!detail && !searchOpen && !menu && !info) return;
     const previous = document.activeElement;
     const dialogs = document.querySelectorAll('[role="dialog"]');
@@ -188,10 +209,15 @@ function App() {
       previous?.focus?.();
     };
   }, [detail, searchOpen, menu, info]);
-  const nav = (v) => {
+  const nav = (v, keepDirect = false) => {
+    if (v === 'checkout' && !keepDirect) {
+      setDirectPurchase(null);
+      storage.write('direct:' + (user?.id || 'guest'), null);
+    }
     if (v === "success") history.replaceState(null, "", "#account");
     else history.pushState(null, "", "#" + v);
     setView(v.split("/")[0]);
+    if (v !== 'success') window.dispatchEvent(new HashChangeEvent('hashchange'));
     setMenu(false);
     setSearchOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -202,7 +228,8 @@ function App() {
     setSearch("");
     nav("catalog");
   };
-  const openProduct = async (p) => {
+  const openProduct = async (p, intent = 'cart') => {
+    setPurchaseIntent(intent);
     setProductLoading(true);
     try {
       const product = await api("/products/" + encodeURIComponent(p.id));
@@ -287,7 +314,7 @@ function App() {
       return notify("Favorit hanya tersedia untuk akun pelanggan.");
     setWish((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]));
   };
-  const add = () => {
+  const add = (event, buyNow = false) => {
     if (user?.role === "admin")
       return notify("Akun admin tidak dapat berbelanja.");
     if (!authReady) return notify("Sedang memuat akun. Coba sesaat lagi.");
@@ -296,6 +323,15 @@ function App() {
       return;
     }
     const key = `${detail.id}:${size}:${color}`;
+    if (buyNow) {
+      if (quantity > Math.min(99, selectedStock)) return notify('Jumlah melebihi stok tersedia.');
+      const item = { ...detail, stock: selectedStock, key, size, color, quantity };
+      setDirectPurchase(item);
+      storage.write('direct:' + (user?.id || 'guest'), item);
+      setDetail(null);
+      nav('checkout', true);
+      return;
+    }
     const old = cart.find((i) => i.key === key);
     if ((old?.quantity || 0) + quantity > Math.min(99, selectedStock)) {
       notify("Jumlah melebihi stok tersedia.");
@@ -311,11 +347,29 @@ function App() {
             { ...detail, stock: selectedStock, key, size, color, quantity },
           ],
     );
+    flyToCart(detail.image, event.currentTarget);
     setDetail(null);
-    nav("cart");
     notify("Produk ditambahkan ke keranjang");
   };
   const count = cart.reduce((n, i) => n + i.quantity, 0);
+  function flyToCart(image, button) {
+    const target = [...document.querySelectorAll('[data-cart-target]')].find((el) => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+    const source = document.querySelector('.product-dialog img');
+    if (!target || !source) return;
+    const finish = () => target.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.24)' }, { transform: 'scale(1)' }], { duration: 350 });
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
+    const imageRect = source.getBoundingClientRect();
+    const from = imageRect.top + imageRect.height / 2 > 0 && imageRect.top + imageRect.height / 2 < innerHeight ? imageRect : button.getBoundingClientRect();
+    const to = target.getBoundingClientRect();
+    const ghost = document.createElement('img');
+    ghost.src = image; ghost.alt = ''; ghost.className = 'ks-flying-product';
+    Object.assign(ghost.style, { left: `${from.left + from.width / 2 - 45}px`, top: `${from.top + from.height / 2 - 45}px` });
+    document.body.append(ghost);
+    const dx = to.left + to.width / 2 - from.left - from.width / 2, dy = to.top + to.height / 2 - from.top - from.height / 2;
+    const flight = ghost.animate([{ transform: 'translate(0, 0) scale(1)', opacity: 1 }, { transform: `translate(${dx * .55}px, ${Math.min(dy * .45, -100)}px) scale(.7)`, opacity: .95, offset: .5 }, { transform: `translate(${dx}px, ${dy}px) scale(.12)`, opacity: .3 }], { duration: 750, easing: 'cubic-bezier(.3,.05,.45,1)', fill: 'forwards' });
+    flight.onfinish = () => { ghost.remove(); finish(); };
+    flight.oncancel = () => ghost.remove();
+  }
   function card(p) {
     return (
       <article className="product" key={p.id}>
@@ -329,10 +383,10 @@ function App() {
           </button>
           <span className={"product-tag " + (p.oldPrice ? "red" : "")}>
             {p.oldPrice
-              ? "Limited offer"
+              ? "Penawaran terbatas"
               : p.isNew
-                ? "New arrival"
-                : "Everyday essential"}
+                ? "Koleksi baru"
+                : "Pilihan Kintsugi"}
           </span>
           <button
             className={"wish-btn " + (wish.includes(p.id) ? "liked" : "")}
@@ -347,11 +401,11 @@ function App() {
         </div>
         <div className="swatches">
           {p.colors.map((c) => (
-            <span key={c} style={{ background: c }} />
+            <span key={c} style={{ background: c }} title={colorLabel(c)} />
           ))}
         </div>
         <div className="product-meta">
-          {p.gender.toUpperCase()}{" "}
+          {departmentLabel(p.gender).toUpperCase()} {" "}
           <span>
             {p.sizes[0]}–{p.sizes.at(-1)}
           </span>
@@ -362,9 +416,9 @@ function App() {
         <div className={"price " + (p.oldPrice ? "sale" : "")}>
           {money(p.price)} {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
         </div>
-        <div className="rating">
-          <Star size={11} fill="currentColor" />
-          {p.rating.toFixed(1)} <span>({p.reviews})</span>
+        <div className="ks-product-actions">
+          <button aria-label={'Tambah ke keranjang ' + p.name} onClick={() => openProduct(p, 'cart')}><ShoppingBag size={15}/><span>Keranjang</span></button>
+          <button onClick={() => openProduct(p, 'buy')} aria-label={'Beli langsung ' + p.name}>Beli langsung</button>
         </div>
       </article>
     );
@@ -380,18 +434,18 @@ function App() {
       notify(e.message);
     }
   }
-  async function authenticated(u) {
+  async function authenticated(u, checkout = false) {
     if (u.role === "customer" && cartOwner === "guest" && cart.length) {
       const saved = storage.read("cart:" + u.id, []),
-        merged = [...saved];
-      for (const item of cart) {
-        const old = merged.find((x) => x.key === item.key);
-        if (old)
-          old.quantity = Math.min(99, item.stock, old.quantity + item.quantity);
-        else merged.push({ ...item });
-      }
+        merged = mergeGuestCart(saved, cart);
       storage.write("cart:" + u.id, merged);
       storage.write("cart:guest", []);
+    }
+    if (u.role === "customer" && cartOwner === "guest") {
+      if (directPurchase) storage.write('direct:' + u.id, directPurchase);
+      moveGuestCheckout(storage, u.id);
+      storage.write("coupon:" + u.id, coupon);
+      storage.write("coupon:guest", "");
     }
     if (u.role === "customer" && cartOwner === "guest" && wish.length) {
       storage.write("wish:" + u.id, [
@@ -400,7 +454,7 @@ function App() {
       storage.write("wish:guest", []);
     }
     setUser(u);
-    nav(u.role === "admin" ? "admin" : "account");
+    if (!checkout) nav(u.role === "admin" ? "admin" : "catalog");
   }
   const feedback = toast && (
     <div className="ws-toast" role="status">
@@ -411,7 +465,7 @@ function App() {
     return (
       <div className="workspace">
         <div className="ws-loading" role="status">
-          Menyiapkan Liny Jaya…
+          Menyiapkan Kintsugi…
         </div>
       </div>
     );
@@ -422,12 +476,7 @@ function App() {
         {feedback}
       </>
     );
-  if (
-    !user &&
-    ["account", "admin", "checkout", "cart", "wishlist", "success"].includes(
-      view,
-    )
-  )
+  if (!user && ["account", "admin", "success"].includes(view))
     return (
       <>
         <Auth
@@ -436,6 +485,12 @@ function App() {
           onAuthenticated={authenticated}
           config={config}
           pendingCart={cart.length > 0}
+          nav={nav}
+          shop={shop}
+          gender={gender}
+          cartCount={count}
+          wishCount={wish.length}
+          onSearch={() => { nav('catalog'); setSearchOpen(true); }}
         />
         {feedback}
       </>
@@ -453,7 +508,19 @@ function App() {
         </div>
       </div>
     );
-  const accountProps = { user, onLogout: logout, nav };
+  const accountProps = {
+    user,
+    onLogout: logout,
+    nav,
+    shop,
+    gender,
+    cartCount: count,
+    wishCount: wish.length,
+    onSearch: () => {
+      nav("catalog");
+      setSearchOpen(true);
+    },
+  };
   if (view === "account")
     return (
       <>
@@ -488,9 +555,9 @@ function App() {
           {...accountProps}
           wish={wish}
           setWish={setWish}
-          openProduct={(p) => {
+          openProduct={(p, intent) => {
             nav("catalog");
-            openProduct(p);
+            openProduct(p, intent);
           }}
         />
         {feedback}
@@ -500,15 +567,26 @@ function App() {
     return (
       <>
         <Checkout
+          {...accountProps}
           user={user}
-          cart={cart}
+          cart={directPurchase ? [directPurchase] : cart}
+          key={directPurchase?.key || 'cart-checkout'}
           coupon={coupon}
           config={config}
           nav={nav}
-          onPlaced={(order) => {
-            storage.write("cart:" + user.id, []);
+          onAuthenticated={(u) => authenticated(u, true)}
+          onPlaced={(order, buyer, items) => {
+            const remaining = directPurchase ? storage.read('cart:' + buyer.id, []) : subtractPurchased(
+              storage.read("cart:" + buyer.id, []),
+              items,
+            );
+            storage.write("cart:" + buyer.id, remaining);
+            storage.write("coupon:" + buyer.id, "");
             setPlaced(order);
-            setCart([]);
+            setDirectPurchase(null);
+            storage.write('direct:' + buyer.id, null);
+            storage.write('direct:guest', null);
+            setCart(remaining);
             setCoupon("");
             nav("success");
           }}
@@ -527,93 +605,16 @@ function App() {
     <div
       className={view === "home" ? "modern-storefront" : "catalog-storefront"}
     >
-      <div className="topbar">
-        <span>Everyday, made better.</span>
-        <span>
-          Gratis ongkir untuk belanja mulai Rp699.000 <ArrowRight size={12} />
-        </span>
-        <button onClick={() => setInfo("Bantuan")}>Bantuan & layanan</button>
-      </div>
-      <header>
-        <div className="header-inner">
-          <button
-            className="brand"
-            aria-label="Liny Jaya beranda"
-            onClick={() => nav("home")}
-          >
-            <span>
-              LINY
-              <br />
-              JAYA
-            </span>
-          </button>
-          <nav className="desktop-nav">
-            {["Wanita", "Pria", "Anak", "Bayi"].map((g) => (
-              <button
-                className={gender === g ? "active" : ""}
-                key={g}
-                onClick={() => {
-                  setGender(g);
-                  shop("Semua", g);
-                }}
-              >
-                {g}
-              </button>
-            ))}
-          </nav>
-          <div className="header-actions">
-            <button
-              className="search-trigger"
-              aria-label="Cari produk"
-              onClick={() => setSearchOpen(true)}
-            >
-              <Search size={20} />
-              <span>Cari produk</span>
-              <kbd>⌘ K</kbd>
-            </button>
-            <button aria-label="Akun saya" onClick={() => nav("account")}>
-              <UserRound size={21} />
-            </button>
-            <button
-              className="hide-mobile"
-              aria-label="Wishlist"
-              onClick={() => {
-                setCategory("Semua");
-                setSearch("");
-                nav("wishlist");
-              }}
-            >
-              <Heart size={21} />
-              {wish.length > 0 && <i>{wish.length}</i>}
-            </button>
-            <button aria-label="Keranjang belanja" onClick={() => nav("cart")}>
-              <ShoppingBag size={21} />
-              {count > 0 && <i>{count}</i>}
-            </button>
-            <button
-              aria-label="Menu kategori"
-              className="mobile-menu"
-              onClick={() => setMenu(!menu)}
-            >
-              <Menu />
-            </button>
-          </div>
-        </div>
-      </header>
-      <div className="mobile-tabs">
-        {["Wanita", "Pria", "Anak", "Bayi"].map((g) => (
-          <button
-            key={g}
-            className={gender === g ? "active" : ""}
-            onClick={() => {
-              setGender(g);
-              shop("Semua", g);
-            }}
-          >
-            {g}
-          </button>
-        ))}
-      </div>
+      <StoreHeader
+        nav={nav}
+        shop={shop}
+        gender={gender}
+        count={count}
+        wishCount={wish.length}
+        user={user}
+        onLogout={logout}
+        onSearch={() => setSearchOpen(true)}
+      />
       {view === "home" && (
         <Home shop={shop} products={products} openProduct={openProduct} />
       )}
@@ -622,26 +623,26 @@ function App() {
           <div className="breadcrumb">
             <button onClick={() => nav("home")}>Beranda</button>
             <ChevronRight size={12} />
-            {view === "wishlist" ? "Wishlist" : gender}
+            {view === "wishlist" ? "Wishlist" : departmentLabel(gender)}
             <ChevronRight size={12} />
-            {category}
+            {categoryLabel(category)}
           </div>
           <div className="catalog-title">
             <div>
-              <span className="eyebrow">EVERYDAY ESSENTIALS</span>
+              <span className="eyebrow">KINTSUGI BEDROOM</span>
               <h1>
                 {view === "wishlist"
                   ? "Wishlist Anda"
                   : search
                     ? `Hasil pencarian “${search}”`
                     : category === "Semua"
-                      ? `Koleksi ${gender}`
-                      : category}
+                      ? `Koleksi ${departmentLabel(gender)}`
+                      : categoryLabel(category)}
               </h1>
               <p>
                 {view === "wishlist"
                   ? "Simpan hari ini. Temukan lagi saat Anda siap."
-                  : "Esensial yang mengikuti ritme hidup Anda."}
+                  : "Sprei fitted dan set sprei untuk membungkus spring bed dengan rapi."}
               </p>
             </div>
             <span>{catalog.total} produk</span>
@@ -649,34 +650,36 @@ function App() {
           <div className="catalog-layout">
             <aside>
               <h3>Kategori</h3>
-              {categories
-                .concat(["Produk Baru", "Penawaran Terbatas"])
-                .map((c) => (
-                  <button
-                    key={c}
-                    className={category === c ? "active" : ""}
-                    onClick={() => setCategory(c)}
-                  >
-                    {c}
-                    <ChevronRight size={13} />
-                  </button>
-                ))}
+              <div className="catalog-category-filter">
+                {[...categories, "Produk Baru", "Penawaran Terbatas"].map((c) => (
+                    <button
+                      key={c}
+                      className={category === c ? "active" : ""}
+                      onClick={() => setCategory(c)}
+                    >
+                      {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c)}
+                      <ChevronRight size={13} />
+                    </button>
+                  ))}
+              </div>
               <hr />
               <h3>Belanja untuk</h3>
-              {["Wanita", "Pria", "Anak", "Bayi"].map((g) => (
-                <button
-                  key={g}
-                  className={gender === g ? "active" : ""}
-                  onClick={() => setGender(g)}
-                >
-                  {g}
-                </button>
-              ))}
+              <div className="catalog-departments-filter">
+                {departments.map(({ id: g, label }) => (
+                  <button
+                    key={g}
+                    className={gender === g ? "active" : ""}
+                    onClick={() => setGender(g)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <details className="advanced-filters">
-                <summary>Ukuran, warna & harga</summary>
+                <summary>Ukuran kasur, warna & harga</summary>
                 <div className="filter-fields">
                   <label>
-                    Ukuran
+                    Ukuran kasur
                     <select
                       aria-label="Filter ukuran"
                       value={filterSize}
@@ -698,7 +701,7 @@ function App() {
                       <option value="">Semua warna</option>
                       {catalog.facets.colors.map((c) => (
                         <option key={c} value={c}>
-                          {c}
+                          {colorLabel(c)}
                         </option>
                       ))}
                     </select>
@@ -752,7 +755,7 @@ function App() {
             <div className="catalog-results">
               <div className="catalog-toolbar">
                 <span>
-                  <SlidersHorizontal size={16} /> {gender} / {category}
+                  <SlidersHorizontal size={16} /> {departmentLabel(gender)} / {categoryLabel(category)}
                 </span>
                 <label>
                   Urutkan:{" "}
@@ -772,8 +775,8 @@ function App() {
                 {[
                   search && "Cari: " + search,
                   category !== "Semua" && category,
-                  filterSize && "Ukuran: " + filterSize,
-                  filterColor && "Warna: " + filterColor,
+                  filterSize && "Ukuran kasur: " + filterSize,
+                  filterColor && "Warna: " + colorLabel(filterColor),
                   minPrice && "Min: " + money(minPrice),
                   maxPrice && "Maks: " + money(maxPrice),
                 ]
@@ -851,7 +854,7 @@ function App() {
                 method: "POST",
                 body: { email: form.querySelector("input").value },
               });
-              notify("Email tersimpan untuk kabar koleksi Liny Jaya.");
+              notify("Email tersimpan untuk kabar koleksi Kintsugi.");
               form.reset();
             } catch (e) {
               notify(e.message);
@@ -876,22 +879,18 @@ function App() {
         <div className="footer-top">
           <div className="footer-brand">
             <button className="brand" onClick={() => nav("home")}>
-              <span>
-                LINY
-                <br />
-                JAYA
-              </span>
+              <Brand />
             </button>
             <p>Everyday, made better.</p>
             <span>
-              Pakaian esensial. Kenyamanan nyata.
+              Sprei dan tekstil lembut. Istirahat yang lebih utuh.
               <br />
               Untuk semua cerita Anda.
             </span>
           </div>
           {[
             [
-              "Tentang Liny Jaya",
+              "Tentang Kintsugi",
               "Cerita kami",
               "Kualitas & material",
               "Keberlanjutan",
@@ -921,7 +920,7 @@ function App() {
                     l === "Wishlist"
                       ? (setCategory("Semua"), setSearch(""), nav("wishlist"))
                       : ["Akun saya", "Riwayat pesanan"].includes(l)
-                        ? nav("account")
+                        ? nav(l === 'Riwayat pesanan' ? 'account/orders' : 'account/profile')
                         : l === "Panel admin"
                           ? nav("admin")
                           : setInfo(l)
@@ -934,7 +933,7 @@ function App() {
           ))}
         </div>
         <div className="footer-bottom">
-          <span>© 2026 Liny Jaya. Semua hak dilindungi.</span>
+          <span>© 2026 Kintsugi. Semua hak dilindungi.</span>
           <div>
             <button onClick={() => setInfo("Kebijakan privasi")}>
               Kebijakan privasi
@@ -944,9 +943,7 @@ function App() {
             </button>
             <span>Indonesia / IDR</span>
           </div>
-          <span className="demo-label">
-            {config.sandbox ? "XENDIT TEST MODE" : "LINY JAYA"}
-          </span>
+          <span>KINTSUGI</span>
         </div>
       </footer>
       {detail && (
@@ -970,12 +967,12 @@ function App() {
             </div>
             <div className="detail-info">
               <span className="eyebrow">
-                {detail.gender} / {detail.category}
+                {departmentLabel(detail.gender)} / {categoryLabel(detail.category)}
               </span>
               <h1>{detail.name}</h1>
               <div className="rating">
                 <Star size={14} fill="currentColor" />
-                {detail.rating.toFixed(1)} ({detail.reviews} ulasan dummy)
+                Pilihan tekstil Kintsugi
               </div>
               <div className="detail-price">
                 {money(detail.price)}
@@ -985,14 +982,15 @@ function App() {
               <label>
                 Warna{" "}
                 <span>
-                  {detail.colors.indexOf(color) + 1} / {detail.colors.length}
+                  {colorLabel(color)} · {detail.colors.indexOf(color) + 1} / {detail.colors.length}
                 </span>
               </label>
               <div className="color-choices">
                 {detail.colors.map((c) => (
                   <button
                     key={c}
-                    aria-label={`Warna ${c}`}
+                    aria-label={`Warna ${colorLabel(c)}`}
+                    title={colorLabel(c)}
                     className={color === c ? "selected" : ""}
                     style={{ background: c }}
                     onClick={() => setColor(c)}
@@ -1000,7 +998,7 @@ function App() {
                 ))}
               </div>
               <label>
-                Ukuran: {size || "Pilih ukuran"}{" "}
+                Ukuran kasur: {size || "Pilih ukuran"}{" "}
                 <button
                   className="text-link"
                   onClick={() => setInfo("Panduan ukuran")}
@@ -1056,9 +1054,12 @@ function App() {
               <button
                 className="btn black full"
                 disabled={!size || selectedStock < 1 || !authReady}
-                onClick={add}
+                onClick={(e) => add(e, purchaseIntent === 'buy')}
               >
-                Tambahkan ke keranjang <ShoppingBag size={18} />
+                {purchaseIntent === 'buy' ? 'Beli langsung' : 'Tambahkan ke keranjang'} <ShoppingBag size={18} />
+              </button>
+              <button className="btn outline full" disabled={!size || selectedStock < 1 || !authReady} onClick={(e) => add(e, purchaseIntent !== 'buy')}>
+                {purchaseIntent === 'buy' ? 'Tambahkan ke keranjang' : 'Beli langsung'}
               </button>
               <button
                 className="btn outline full"
@@ -1132,7 +1133,7 @@ function App() {
             </form>
             <span className="eyebrow">PENCARIAN POPULER</span>
             <div className="search-tags">
-              {["Linen", "T-Shirt", "Jeans", "Cardigan"].map((t) => (
+            {["Sprei Fitted", "Sprei Karet", "Sprei Hotel", "Sarung Bantal"].map((t) => (
                 <button
                   key={t}
                   onClick={() => {
@@ -1159,14 +1160,14 @@ function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="drawer-title">
-              <h2>Jelajahi Liny Jaya</h2>
+              <h2>Jelajahi Kintsugi</h2>
               <button aria-label="Tutup menu" onClick={() => setMenu(false)}>
                 <X />
               </button>
             </div>
             {categories.map((c) => (
               <button key={c} onClick={() => shop(c)}>
-                {c}
+                {categoryLabel(c)}
                 <ArrowRight size={16} />
               </button>
             ))}
@@ -1198,25 +1199,25 @@ function App() {
             >
               <X />
             </button>
-            <span className="eyebrow">LINY JAYA / INFORMASI</span>
+            <span className="eyebrow">KINTSUGI / INFORMASI</span>
             <h2>{info}</h2>
             {info === "Panduan ukuran" ? (
               <>
-                <p>Ukuran dummy (lingkar dada / panjang dalam cm).</p>
+                <p>Pilih ukuran yang sama dengan ukuran spring bed Anda. Semua angka dalam sentimeter.</p>
                 <table>
                   <thead>
                     <tr>
-                      <th>Ukuran</th>
-                      <th>Dada</th>
+                      <th>Ukuran kasur</th>
+                      <th>Lebar</th>
                       <th>Panjang</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {["XS", "S", "M", "L", "XL", "XXL"].map((s, i) => (
+                    {[["90×200", 90], ["100×200", 100], ["120×200", 120], ["160×200", 160], ["180×200", 180], ["200×200", 200]].map(([s, width]) => (
                       <tr key={s}>
                         <td>{s}</td>
-                        <td>{84 + i * 6}</td>
-                        <td>{62 + i * 2}</td>
+                        <td>{width} cm</td>
+                        <td>200 cm</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1260,9 +1261,6 @@ function App() {
           {toast}
         </div>
       )}
-      <span className="mode-indicator">
-        {"LINY JAYA · " + (config.sandbox ? "XENDIT TEST" : "ONLINE")}
-      </span>
     </div>
   );
 }

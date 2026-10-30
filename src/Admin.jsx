@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import { api } from "./store";
-import { money, categories } from "./data";
+import { colorLabel, money } from "./data";
+import { catalogCategories, departmentLabel, departments } from "./catalog";
 import { paymentLabel } from "./Orders";
 
 export default function Admin({ user, notify, onLogout }) {
@@ -489,7 +490,7 @@ export default function Admin({ user, notify, onLogout }) {
                               <div>
                                 <b>{p.name}</b>
                                 <small>
-                                  {p.sku} · {p.gender}
+                                  {p.sku} · {departmentLabel(p.gender)}
                                 </small>
                               </div>
                             </div>
@@ -580,8 +581,8 @@ export default function Admin({ user, notify, onLogout }) {
                 <label>
                   Departemen
                   <select name="gender" defaultValue={edit.gender || "Wanita"}>
-                    {["Wanita", "Pria", "Anak", "Bayi"].map((x) => (
-                      <option key={x}>{x}</option>
+                    {departments.map(({ id, label }) => (
+                      <option key={id} value={id}>{label}</option>
                     ))}
                   </select>
                 </label>
@@ -591,10 +592,8 @@ export default function Admin({ user, notify, onLogout }) {
                     name="category"
                     defaultValue={edit.category || "T-Shirt"}
                   >
-                    {categories
-                      .filter((x) => x !== "Semua")
-                      .map((x) => (
-                        <option key={x}>{x}</option>
+                    {catalogCategories.map(({ id, label }) => (
+                        <option key={id} value={id}>{label}</option>
                       ))}
                   </select>
                 </label>
@@ -626,7 +625,8 @@ export default function Admin({ user, notify, onLogout }) {
                   <input
                     name="image"
                     required
-                    defaultValue={edit.image || "/images/tshirt.jpg"}
+                    defaultValue={edit.image || ""}
+                    placeholder="Alamat gambar produk"
                   />
                   <small>
                     Path /images/ atau URL HTTPS images.unsplash.com.
@@ -663,7 +663,7 @@ export default function Admin({ user, notify, onLogout }) {
                       <table className="ws-table">
                         <thead>
                           <tr>
-                            <th>Ukuran</th>
+                            <th>Ukuran kasur</th>
                             <th>Warna</th>
                             <th>Stok tersedia</th>
                           </tr>
@@ -677,7 +677,7 @@ export default function Admin({ user, notify, onLogout }) {
                                   className="color-dot"
                                   style={{ background: v.color }}
                                 />{" "}
-                                {v.color}
+                                {colorLabel(v.color)}
                               </td>
                               <td>
                                 <input
@@ -699,8 +699,8 @@ export default function Admin({ user, notify, onLogout }) {
                 ) : (
                   <>
                     <label>
-                      Ukuran (pisahkan koma)
-                      <input name="sizes" required defaultValue="S,M,L,XL" />
+                      Ukuran kasur (pisahkan koma)
+                      <input name="sizes" required defaultValue="100×200,120×200,160×200" />
                     </label>
                     <label>
                       Warna HEX (pisahkan koma)
@@ -807,7 +807,7 @@ export default function Admin({ user, notify, onLogout }) {
                 <div>
                   <h3>Pembayaran</h3>
                   <p>
-                    Xendit · {paymentLabel[selected.payment_status]}
+                    {paymentLabel[selected.payment_status]}
                     <br />
                     Metode pengiriman: {selected.shipping}
                   </p>
@@ -874,7 +874,7 @@ export default function Admin({ user, notify, onLogout }) {
                         )
                       }
                     >
-                      Periksa pembayaran Xendit
+                      Periksa pembayaran
                     </button>
                     <button
                       className="ws-button"
@@ -930,37 +930,27 @@ export default function Admin({ user, notify, onLogout }) {
               {[
                 {
                   name: "Database toko",
-                  detail: "MySQL Laragon · Data produk, akun dan pesanan",
+                  detail: "Penyimpanan produk, akun dan pesanan",
                   ok: true,
                   label: "Terhubung",
                 },
                 {
-                  name: "Pembayaran Xendit",
+                  name: "Pembayaran online",
                   detail: health?.sandbox
-                    ? "Mode pengujian. Transaksi mengikuti alur Xendit sandbox."
-                    : "Transaksi menggunakan layanan Xendit.",
+                    ? "Transaksi nyata belum diaktifkan."
+                    : "Penerimaan dan konfirmasi pembayaran otomatis.",
                   ok: health?.gateway,
                   label: health?.gateway
                     ? health?.sandbox
-                      ? "Test Mode"
+                      ? "Belum live"
                       : "Aktif"
                     : "Belum diatur",
                 },
                 {
-                  name: "Email & verifikasi OTP",
-                  detail: health?.emailUsesTestSender
-                    ? "Pengirim: " +
-                      health.emailSender +
-                      ". Domain uji Resend hanya mengizinkan email pemilik akun. Atur alamat pengirim dari domain terverifikasi agar OTP dapat dikirim ke setiap pendaftar."
-                    : "Pengirim: " +
-                      (health?.emailSender || "belum diatur") +
-                      ". Verifikasi domain dan izin kirim pada Resend sebelum melayani pendaftaran.",
-                  ok: health?.emailConfigured && !health?.emailUsesTestSender,
-                  label: !health?.emailConfigured
-                    ? "Belum diatur"
-                    : health?.emailUsesTestSender
-                      ? "Pengirim uji: terbatas"
-                      : "Pengirim tersetel",
+                  name: "WhatsApp & verifikasi akun",
+                  detail: "Pengiriman kode verifikasi dan notifikasi pesanan.",
+                  ok: health?.whatsappConfigured,
+                  label: health?.whatsappConfigured ? "Aktif" : "Belum diatur",
                 },
               ].map((s) => (
                 <section className="ws-panel ws-service" key={s.name}>

@@ -9,7 +9,7 @@ try {
   await pool.query("SELECT 1 FROM users LIMIT 1");
 } catch (error) {
   console.error(
-    "Backend belum dapat terhubung ke database. Aktifkan MySQL di Laragon, periksa DB_HOST/DB_PORT/DB_USER/DB_PASSWORD pada .env, lalu jalankan npm run db:init.",
+    "Koneksi database tidak tersedia. Periksa konfigurasi layanan database.",
   );
   console.error("Kode masalah:", error.code || "DATABASE_UNAVAILABLE");
   await pool.end();
@@ -27,7 +27,7 @@ try {
 } catch (error) {
   console.error(
     error.code === "EADDRINUSE"
-      ? `Port ${port} sudah digunakan. Jika toko sudah berjalan, buka http://localhost:${port}; gunakan satu terminal untuk menjalankannya.`
+      ? `Port ${port} sudah digunakan oleh layanan lain.`
       : "Backend gagal dimulai: " + (error.code || error.message),
   );
   await pool.end();

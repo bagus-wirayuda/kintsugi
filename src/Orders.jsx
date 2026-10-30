@@ -8,7 +8,8 @@ import {
   Clock3,
 } from "lucide-react";
 import { api } from "./store";
-import { money } from "./data";
+import { colorLabel, money } from "./data";
+import { paymentName } from './payment-methods';
 import { Notice, Status } from "./Workspace";
 export const paymentLabel = {
   CREATING: "Menyiapkan pembayaran",
@@ -74,8 +75,8 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
             <div>
               <b>{i.name}</b>
               <span>
-                Ukuran {i.size} ·{" "}
-                <i className="color-dot" style={{ background: i.color }} /> ·{" "}
+                Ukuran kasur {i.size} ·{" "}
+                <i className="color-dot" style={{ background: i.color }} /> {colorLabel(i.color)} ·{" "}
                 {i.quantity} barang
               </span>
               <small>{money(i.price)} / barang</small>
@@ -86,7 +87,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
       </div>
       <div className="ws-order-total">
         <div>
-          <span>Pembayaran Xendit</span>
+          <span>{paymentName(o.payment)}</span>
           <Status
             tone={
               o.payment_status === "PAID"
@@ -138,7 +139,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
         <div className="ws-confirm">
           <p>
             Batalkan pesanan ini? Tautan pembayaran akan ditutup dan stok
-            dikembalikan setelah Xendit mengonfirmasi.
+            dikembalikan setelah pembatalan dikonfirmasi.
           </p>
           <button
             className="ws-button danger-button"
@@ -157,16 +158,6 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
           <Clock3 size={15} />
           Bayar sebelum {new Date(o.expires_at).toLocaleString("id-ID")}
         </p>
-      )}
-      {pending && config?.sandbox && (
-        <div className="ws-payment-guide">
-          <b>Pembayaran dalam mode uji</b>
-          <p>
-            Di halaman Xendit, pilih metode pembayaran lalu gunakan tombol
-            simulasi pada banner Test Mode. Kode OTP bank/e-wallet mengikuti
-            instruksi Xendit, bukan kode verifikasi akun toko.
-          </p>
-        </div>
       )}
       {!cancelled && (
         <div className="ws-order-progress">

@@ -1,8 +1,11 @@
 -- MySQL 8 / Laragon. InnoDB menjamin transaksi dan row lock.
 CREATE TABLE IF NOT EXISTS users (
- id CHAR(36) PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(254) UNIQUE NOT NULL,
+ id CHAR(36) PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(254) NULL DEFAULT NULL,
+ phone VARCHAR(20) NULL DEFAULT NULL,
  password_hash VARCHAR(255) NOT NULL, role ENUM('customer','admin') NOT NULL DEFAULT 'customer',
- created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+ created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ UNIQUE INDEX idx_phone (phone),
+ UNIQUE INDEX idx_email (email)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS sessions (
  token_hash CHAR(64) PRIMARY KEY, user_id CHAR(36) NOT NULL, expires_at DATETIME(3) NOT NULL,
@@ -46,6 +49,14 @@ CREATE TABLE IF NOT EXISTS payment_events (
  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
  FOREIGN KEY(order_id) REFERENCES orders(id)
 ) ENGINE=InnoDB;
+-- Antrian pesan WhatsApp (menggantikan email_outbox)
+CREATE TABLE IF NOT EXISTS wa_outbox (
+ id VARCHAR(120) PRIMARY KEY, phone VARCHAR(20) NOT NULL, message TEXT NOT NULL,
+ status ENUM('pending','sent') NOT NULL DEFAULT 'pending',
+ attempts INT NOT NULL DEFAULT 0, last_error VARCHAR(500),
+ next_attempt_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS email_outbox (
  id VARCHAR(120) PRIMARY KEY, recipient VARCHAR(254) NOT NULL, subject VARCHAR(250) NOT NULL,
  html MEDIUMTEXT NOT NULL, status ENUM('pending','sent') NOT NULL DEFAULT 'pending',
@@ -57,11 +68,11 @@ CREATE TABLE IF NOT EXISTS newsletter_subscribers (
  email VARCHAR(254) PRIMARY KEY, created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS auth_challenges (
- id CHAR(36) PRIMARY KEY, email VARCHAR(254) NOT NULL,
+ id CHAR(36) PRIMARY KEY, phone VARCHAR(20) NULL DEFAULT NULL,
  purpose ENUM('register','login','reset') NOT NULL, code_hash VARCHAR(255) NOT NULL,
  payload JSON NOT NULL, attempts INT NOT NULL DEFAULT 0, delivered BOOLEAN NOT NULL DEFAULT FALSE,
  expires_at DATETIME(3) NOT NULL, issued_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
- UNIQUE(email,purpose), INDEX(expires_at)
+ UNIQUE(phone,purpose), INDEX(expires_at)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS customer_profiles (
  user_id CHAR(36) PRIMARY KEY, phone VARCHAR(20) NOT NULL DEFAULT '',

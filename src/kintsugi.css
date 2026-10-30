@@ -1,0 +1,2078 @@
+/* Kintsugi: teal, white, and restrained gold seams. */
+:root {
+  --ks-teal: #075b6e;
+  --ks-deep: #064858;
+  --ks-gold: #c6a15c;
+  --ks-ink: #18383f;
+  --ks-muted: #62777b;
+  --ks-line: #dce5e5;
+  --red: var(--ks-teal);
+  --line: var(--ks-line);
+}
+body {
+  color: var(--ks-ink);
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--ks-gold);
+  outline-offset: 4px;
+}
+.kintsugi-logo {
+  width: 200px;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  background: transparent;
+}
+.ks-kicker {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.18em;
+  color: var(--ks-teal);
+  line-height: 1.6;
+}
+.ks-announcement {
+  height: 32px;
+  padding: 0 4%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f3f6f5;
+  color: #486669;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid #e4e9e7;
+}
+.ks-announcement > span:nth-child(2) {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+.ks-announcement a {
+  text-decoration: none;
+}
+.ks-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--ks-teal);
+  border-bottom: 2px solid var(--ks-gold);
+  color: white;
+  isolation: isolate;
+}
+.ks-header:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("/brand/kintsugi-gold-cracks-gold-only.png") center / cover no-repeat;
+  opacity: 0.72;
+  pointer-events: none;
+  z-index: -1;
+}
+.ks-header-inner {
+  height: 96px;
+  max-width: 1600px;
+  margin: auto;
+  padding: 0 4%;
+  display: flex;
+  align-items: center;
+  gap: 45px;
+}
+.ks-brand {
+  display: block;
+  flex: none;
+  background: transparent;
+  padding: 3px 7px;
+  border: 0;
+  line-height: 0;
+}
+.ks-brand .kintsugi-logo {
+  width: 186px;
+  height: 67px;
+  object-fit: contain;
+  /* Outline halus agar logo teal tetap terpisah dari navbar tanpa kotak latar. */
+  filter:
+    drop-shadow(.5px 0 0 #fffdf8)
+    drop-shadow(-.5px 0 0 #fffdf8)
+    drop-shadow(0 .5px 0 #fffdf8)
+    drop-shadow(0 -.5px 0 #fffdf8)
+    drop-shadow(0 1px 1px #002d3740);
+}
+.ks-departments {
+  display: flex;
+  align-self: stretch;
+  gap: 28px;
+}
+.ks-departments button {
+  color: white;
+  font-size: 12px;
+  font-weight: 650;
+  position: relative;
+  letter-spacing: 0.04em;
+}
+.ks-departments button.active:after {
+  content: "";
+  position: absolute;
+  bottom: 23px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--ks-gold);
+}
+.ks-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.ks-actions > button {
+  position: relative;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+}
+.ks-actions > button > b {
+  position: absolute;
+  top: 0;
+  right: -9px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  background: var(--ks-gold);
+  color: #143c44;
+  font-size: 10px;
+}
+.ks-actions .ks-search {
+  font-size: 11px;
+  background: #ffffff12;
+  border: 1px solid #ffffff35;
+  padding: 0 12px;
+  margin-right: 6px;
+  min-height: 36px;
+}
+.ks-actions .ks-menu,
+.ks-mobile-departments {
+  display: none;
+}
+.ks-hero {
+  position: relative;
+  height: min(640px, calc(100vh - 128px));
+  min-height: 500px;
+  overflow: hidden;
+  background: #0c4652;
+  color: #fff;
+}
+.ks-hero > img {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 62%;
+  height: 100%;
+  object-position: center 42%;
+}
+.ks-hero-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    #063f4e 0%,
+    #075466 31%,
+    #075466a8 48%,
+    #053b4500 78%
+  );
+}
+.ks-hero-content {
+  position: relative;
+  padding: 75px 6%;
+  max-width: 1550px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.ks-hero-content .ks-kicker {
+  color: #e2c78d;
+  letter-spacing: 0.21em;
+}
+.ks-hero h1 {
+  font-size: clamp(47px, 5.1vw, 76px);
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+  margin: 22px 0;
+}
+.ks-hero h1 em {
+  font-family: Georgia, serif;
+  font-weight: 400;
+  color: #e0c186;
+  letter-spacing: -0.045em;
+}
+.ks-hero p {
+  font-size: 13px;
+  color: #e1eded;
+  line-height: 1.8;
+  max-width: 300px;
+}
+.ks-hero-content > button {
+  display: flex;
+  gap: 36px;
+  align-items: center;
+  background: #fff;
+  color: var(--ks-teal);
+  padding: 17px 23px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  margin: 29px 0 25px;
+  border-bottom: 2px solid var(--ks-gold);
+}
+.ks-hero-caption {
+  font-size: 10px;
+  color: #c0d8dc;
+  letter-spacing: 0.02em;
+}
+.ks-hero-index {
+  position: absolute;
+  bottom: 35px;
+  right: 5%;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: #fff;
+}
+.ks-hero-index > span:first-child {
+  font-size: 18px;
+}
+.ks-hero-index i {
+  width: 60px;
+  height: 1px;
+  background: var(--ks-gold);
+}
+.ks-quick-links {
+  scrollbar-width: none;
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  border-bottom: 1px solid var(--ks-line);
+  padding: 24px 4%;
+  background: #fff;
+}
+.ks-quick-links::-webkit-scrollbar {
+  display: none;
+}
+.ks-quick-links button {
+  padding: 0 25px;
+  border-right: 1px solid var(--ks-line);
+  font-size: 11px;
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  color: var(--ks-teal);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ks-quick-links button:last-child {
+  border: 0;
+}
+.ks-section {
+  max-width: 1400px;
+  margin: auto;
+  padding: 64px 5%;
+}
+.ks-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 30px;
+  gap: 20px;
+}
+.ks-section-heading h2 {
+  font-size: 29px;
+  letter-spacing: -0.04em;
+  font-weight: 650;
+  margin-top: 10px;
+}
+.ks-section-heading > button {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--ks-gold);
+}
+.ks-department-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+.ks-department-grid > button {
+  text-align: left;
+}
+.ks-department-grid > button > div {
+  overflow: hidden;
+  background: #edf2f1;
+  aspect-ratio: 4/5;
+}
+.ks-department-grid img {
+  height: 100%;
+  transition: transform 0.5s;
+  object-position: center;
+}
+.ks-department-grid button:hover img {
+  transform: scale(1.035);
+}
+.ks-department-grid h3 {
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 17px 0 8px;
+  letter-spacing: 0.05em;
+}
+.ks-department-grid p {
+  font-size: 11px;
+  color: var(--ks-muted);
+}
+.ks-products-section {
+  padding-top: 10px;
+  padding-bottom: 75px;
+}
+.ks-home-products {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+.ks-home-product-image {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3/4;
+  background: #eef1f0;
+  overflow: hidden;
+}
+.ks-home-product-image img {
+  height: 100%;
+  transition: transform 0.5s;
+}
+.ks-home-product-image:hover img {
+  transform: scale(1.03);
+}
+.ks-home-product-image > span {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 8px;
+  font-weight: 650;
+  color: var(--ks-teal);
+  letter-spacing: 0.04em;
+  border-left: 2px solid var(--ks-gold);
+}
+.ks-home-products small {
+  font-size: 9px;
+  color: var(--ks-muted);
+}
+.ks-home-product-name {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  margin: 7px 0 10px;
+}
+.ks-home-products strong {
+  font-size: 17px;
+  color: var(--ks-teal);
+  display: block;
+}
+.ks-home-products del {
+  font-size: 11px;
+  color: var(--ks-muted);
+  display: block;
+  margin-top: 4px;
+}
+.ks-story {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--ks-teal);
+  color: #fff;
+  min-height: 460px;
+}
+.ks-story-photo {
+  min-height: 460px;
+  overflow: hidden;
+}
+.ks-story-photo img {
+  height: 100%;
+  max-height: 540px;
+  object-position: center;
+}
+.ks-story-copy {
+  padding: 65px 13% 65px 12%;
+  align-self: center;
+  background-color: var(--ks-teal);
+  background-image: url("/brand/kintsugi-gold-cracks-gold-only.png");
+  background-position: center;
+  background-size: cover;
+}
+.ks-story-copy .ks-kicker {
+  color: #e3c58a;
+}
+.ks-story h2 {
+  font-size: 38px;
+  line-height: 1.3;
+  letter-spacing: -0.045em;
+  margin: 17px 0 24px;
+  font-weight: 550;
+}
+.ks-gold-rule {
+  display: block;
+  width: 45px;
+  height: 1px;
+  background: var(--ks-gold);
+  margin-bottom: 24px;
+}
+.ks-story-copy > p:not(.ks-kicker) {
+  font-size: 12px;
+  color: #d2e3e6;
+  line-height: 1.9;
+  max-width: 360px;
+}
+.ks-story-copy > button {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  margin-top: 29px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--ks-gold);
+  padding-bottom: 12px;
+}
+.ks-benefits {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 35px 6%;
+  gap: 45px;
+  border-bottom: 1px solid var(--ks-line);
+  background: #f6f8f7;
+}
+.ks-benefits > div {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.ks-benefits svg {
+  color: var(--ks-teal);
+}
+.ks-benefits b {
+  font-size: 12px;
+  font-weight: 600;
+}
+.ks-benefits p {
+  font-size: 10px;
+  color: var(--ks-muted);
+  margin-top: 6px;
+}
+.modern-storefront,
+.catalog-storefront {
+  background: #fff;
+  color: var(--ks-ink);
+}
+.catalog.page {
+  max-width: 1450px;
+  padding-top: 30px;
+  padding-bottom: 60px;
+}
+.catalog .catalog-title h1 {
+  font-size: 36px;
+  letter-spacing: -0.035em;
+  color: var(--ks-teal);
+}
+.catalog-title {
+  border-bottom: 1px solid var(--ks-line);
+  padding-bottom: 28px;
+  margin-bottom: 32px;
+}
+.catalog .eyebrow {
+  color: var(--ks-teal);
+  letter-spacing: 0.14em;
+}
+.catalog-layout {
+  grid-template-columns: 205px minmax(0, 1fr);
+  gap: 40px;
+}
+.catalog aside h3 {
+  color: var(--ks-teal);
+  font-size: 13px;
+}
+.catalog aside button.active {
+  color: var(--ks-teal);
+  font-weight: 750;
+  background: #edf5f5;
+  border-left: 2px solid var(--ks-gold);
+  padding-left: 10px;
+}
+.catalog-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  row-gap: 37px;
+}
+.product-image {
+  border-radius: 0;
+  aspect-ratio: 3/4;
+}
+.product-image img {
+  height: 100%;
+}
+.product .product-tag {
+  border-radius: 0;
+  background: white;
+  color: var(--ks-teal);
+  font-size: 8px;
+  border-left: 2px solid var(--ks-gold);
+}
+.product .product-tag.red {
+  background: white;
+  color: var(--ks-teal);
+}
+.wish-btn {
+  border-radius: 0;
+  background: #ffffffdd;
+  color: var(--ks-teal);
+}
+.wish-btn.liked {
+  color: var(--ks-teal);
+}
+.product-name {
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.price,
+.price.sale {
+  color: var(--ks-teal);
+  font-size: 17px;
+  font-weight: 750;
+}
+.price del {
+  color: #7c8b8e;
+  font-weight: 400;
+}
+.product-meta {
+  color: #728182;
+  font-size: 9px;
+}
+.swatches {
+  gap: 6px;
+  margin-top: 14px;
+  margin-bottom: 12px;
+}
+.swatches span {
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  border: 1px solid #b6c4c4;
+}
+.rating {
+  color: var(--ks-teal);
+}
+.btn.black {
+  background: var(--ks-teal);
+  border-color: var(--ks-teal);
+  border-radius: 0;
+}
+.btn.outline {
+  border-color: var(--ks-teal);
+  color: var(--ks-teal);
+  border-radius: 0;
+}
+.detail-price {
+  color: var(--ks-teal);
+}
+.size-choices button.active {
+  background: var(--ks-teal);
+  border-color: var(--ks-teal);
+  color: #fff;
+}
+.product-dialog {
+  border-radius: 0;
+}
+.color-choices button.selected {
+  outline-color: var(--ks-gold);
+}
+.newsletter {
+  background: #eef4f3;
+  border-top: 1px solid var(--ks-line);
+  border-bottom: 1px solid var(--ks-line);
+  padding-top: 44px;
+  padding-bottom: 44px;
+}
+.newsletter h2 {
+  font-size: 25px;
+  color: var(--ks-teal);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.newsletter input {
+  background: white;
+  border-color: var(--ks-line);
+}
+.site-footer {
+  background: #fff;
+  color: var(--ks-ink);
+}
+.footer-brand .brand {
+  background: transparent;
+}
+.footer-brand .kintsugi-logo {
+  width: 190px;
+  height: auto;
+}
+.footer-brand p {
+  color: var(--ks-teal);
+}
+.footer-column h4 {
+  color: var(--ks-teal);
+}
+.footer-bottom {
+  border-top: 1px solid var(--ks-line);
+}
+.cookie-notice {
+  border-top: 2px solid var(--ks-gold);
+}
+.workspace {
+  --ws-accent: var(--ks-teal);
+  --ws-accent-dark: var(--ks-deep);
+  --ws-bg: #f5f8f7;
+  --ws-border: var(--ks-line);
+  --ws-text: var(--ks-ink);
+  --ws-muted: var(--ks-muted);
+}
+.workspace .ws-button {
+  border-radius: 2px;
+}
+.workspace .ws-button.primary {
+  background: var(--ks-teal);
+  border-color: var(--ks-teal);
+  color: #fff;
+}
+.workspace .ws-button.primary:hover {
+  background: var(--ks-deep);
+}
+.workspace input,
+.workspace select,
+.workspace textarea {
+  border-radius: 2px;
+}
+.workspace .ws-panel {
+  border-radius: 3px;
+  box-shadow: none;
+}
+.workspace .ws-panel-heading h2 {
+  color: var(--ks-teal);
+}
+.ws-logo {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+.ws-logo .kintsugi-logo {
+  width: 190px;
+  height: 76px;
+  object-fit: contain;
+  border: 1px solid #e5dfd0;
+  padding: 2px 8px;
+}
+.ws-logo small {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+}
+.ws-sidebar .ws-logo {
+  padding: 0 5px 25px;
+}
+.ws-sidebar .ws-logo .kintsugi-logo {
+  width: 194px;
+}
+.ws-customer .ws-sidebar {
+  border-right: 1px solid var(--ks-line);
+}
+.ws-customer .ws-sidebar nav button.active {
+  background: #eaf3f2;
+  color: var(--ks-teal);
+  box-shadow: inset 2px 0 var(--ks-gold);
+  border-radius: 2px;
+}
+.ws-customer .ws-avatar {
+  color: var(--ks-teal);
+  background: #e2efed;
+}
+.ws-customer .ws-page-heading h1 {
+  color: var(--ks-teal);
+}
+.ws-admin {
+  --ws-accent: var(--ks-teal);
+  --ws-accent-dark: var(--ks-deep);
+}
+.ws-admin .ws-sidebar {
+  background: #083f4d;
+  border-color: #083f4d;
+  background-image: url("/brand/kintsugi-gold-cracks-gold-only.png");
+  background-size: auto 100%;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+}
+.ws-admin .ws-sidebar nav button {
+  color: #c3dcdd;
+}
+.ws-admin .ws-sidebar nav button.active {
+  background: #126175;
+  box-shadow: inset 2px 0 var(--ks-gold);
+}
+.ws-admin .ws-sidebar nav button:hover {
+  background: #105364;
+}
+.ws-admin .ws-sidebar nav button > b {
+  color: #17424b;
+  background: #e9d6b0;
+}
+.ws-admin .ws-logo small {
+  color: #c4dadd;
+}
+.ws-admin .ws-sidebar-bottom {
+  border-color: #ffffff25;
+}
+.ws-admin .ws-topbar {
+  border-bottom: 1px solid var(--ks-gold);
+}
+.ws-admin .ws-status.success {
+  background: #e4f1ed;
+  color: #176854;
+}
+.ws-admin .ws-stats > div,
+.ws-admin .ws-stats > a {
+  border-radius: 3px;
+  border-top: 2px solid #d2b880;
+}
+.auth-screen {
+  background: #f4f8f7;
+  --ws-accent: var(--ks-teal);
+  --ws-accent-dark: var(--ks-deep);
+}
+.auth-brandbar {
+  border-bottom: 1px solid var(--ks-line);
+}
+.auth-brandbar .ws-logo {
+  gap: 0;
+}
+.auth-symbol,
+.auth-card-icon {
+  border-radius: 0;
+  background: #e4efee;
+  color: var(--ks-teal);
+}
+.auth-intro h1 {
+  color: var(--ks-teal);
+}
+.auth-intro-points > div {
+  color: #49696b;
+}
+.auth-intro-points svg {
+  color: var(--ks-teal);
+}
+.auth-card {
+  border-radius: 3px;
+  border-top: 2px solid var(--ks-gold);
+  box-shadow: 0 15px 45px #044b5810;
+}
+.auth-container {
+  gap: 75px;
+}
+.ks-shopping {
+  background: white;
+  min-height: 100vh;
+}
+.ks-shopping-content {
+  max-width: 1250px;
+  margin: auto;
+  padding: 28px 4% 75px;
+  min-height: 60vh;
+}
+.ks-shopping .breadcrumb {
+  margin-bottom: 30px;
+}
+.ks-shopping-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-end;
+  margin-bottom: 35px;
+  padding-bottom: 25px;
+  border-bottom: 1px solid var(--ks-line);
+}
+.ks-shopping-title h1 {
+  font-size: 33px;
+  color: var(--ks-teal);
+  letter-spacing: -0.035em;
+  margin: 10px 0;
+}
+.ks-shopping-title > div > p:last-child {
+  font-size: 12px;
+  color: var(--ks-muted);
+}
+.ks-shopping .ws-cart-layout {
+  grid-template-columns: minmax(0, 1fr) 350px;
+  gap: 35px;
+  align-items: start;
+}
+.ks-shopping .ws-panel {
+  border-radius: 0;
+}
+.ks-shopping .ws-cart-list {
+  border: 0;
+  padding: 0;
+}
+.ks-shopping .ws-cart-list > .ws-panel-heading {
+  padding: 0 0 18px;
+}
+.ks-shopping .ws-cart-item {
+  padding: 25px 0;
+  gap: 20px;
+}
+.ks-shopping .ws-cart-item img {
+  width: 100px;
+  height: 135px;
+  border-radius: 0;
+}
+.ks-shopping .ws-cart-item h3 {
+  font-size: 14px;
+}
+.ks-shopping .ws-cart-item > b,
+.ks-shopping .ws-cart-item strong {
+  color: var(--ks-teal);
+}
+.ks-shopping .checkout-summary {
+  border-top: 2px solid var(--ks-gold);
+  background: #f8faf9;
+}
+.ks-shopping .ws-quantity {
+  border-radius: 0;
+}
+.ks-shopping .ws-quantity button {
+  border-radius: 0;
+}
+.ks-shopping .ws-favorites > article {
+  border: 0;
+  box-shadow: none;
+}
+.ks-shopping .ws-favorite-image {
+  border-radius: 0;
+}
+.ks-shopping .ws-favorites > article > div {
+  padding: 15px 0;
+}
+.ks-shopping .ws-favorites > article h3 {
+  margin: 10px 0;
+}
+.ks-simple-footer {
+  background: #eff4f3;
+  border-top: 1px solid var(--ks-line);
+  padding: 35px 5% 25px;
+  display: flex;
+  align-items: center;
+  gap: 25px;
+  flex-wrap: wrap;
+}
+.ks-simple-footer .kintsugi-logo {
+  width: 160px;
+  height: 64px;
+  padding: 0 10px;
+}
+.ks-simple-footer > p {
+  font-size: 11px;
+  color: var(--ks-muted);
+}
+.ks-simple-footer nav {
+  margin-left: auto;
+  display: flex;
+  gap: 25px;
+  font-size: 11px;
+  color: var(--ks-teal);
+}
+.ks-simple-footer small {
+  width: 100%;
+  border-top: 1px solid #d3e0df;
+  padding-top: 20px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--ks-muted);
+}
+.ks-checkout {
+  background: #f5f8f7;
+}
+.ks-checkout .checkout-header {
+  background: var(--ks-teal) url("/brand/kintsugi-gold-cracks-gold-only.png") center/cover no-repeat;
+  border-bottom: 2px solid var(--ks-gold);
+  padding-top: 13px;
+  padding-bottom: 13px;
+  color: #fff;
+}
+.ks-checkout .checkout-header > span {
+  color: #e4eff0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+.ks-checkout .checkout-header .ks-brand .kintsugi-logo {
+  height: 57px;
+  width: 168px;
+}
+.ks-checkout .checkout-content {
+  max-width: 1220px;
+}
+.ks-checkout .checkout-page-title h1 {
+  color: var(--ks-teal);
+  font-size: 32px;
+  letter-spacing: -0.04em;
+  margin-top: 10px;
+}
+.ks-checkout .checkout-layout {
+  gap: 35px;
+  align-items: start;
+}
+.ks-checkout .checkout-flow .active {
+  color: var(--ks-teal);
+}
+.ks-checkout .checkout-flow .done {
+  color: #5c7978;
+}
+.ks-checkout .checkout-flow i {
+  background: #d9c490;
+}
+.ks-checkout-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.ks-checkout-fields:disabled {
+  opacity: 0.6;
+}
+.ks-checkout .ws-form-panel {
+  margin-bottom: 20px;
+}
+.ks-checkout .checkout-summary {
+  border-top: 2px solid var(--ks-gold);
+}
+.ks-checkout .checkout-products img {
+  border-radius: 0;
+}
+.ks-checkout .checkout-shipping label {
+  border-radius: 2px;
+}
+.ks-checkout .checkout-shipping label.selected {
+  background: #f0f7f5;
+  border-color: var(--ks-teal);
+}
+.ks-checkout .checkout-totals .total {
+  color: var(--ks-teal);
+}
+.ks-checkout .checkout-payment-option {
+  background: #f1f7f6;
+  border-radius: 2px;
+  border-color: var(--ks-line);
+  color: var(--ks-teal);
+}
+.ks-identity {
+  border: 1px solid #97b6b8 !important;
+  border-top: 2px solid var(--ks-gold) !important;
+  padding: 30px;
+  margin: 20px 0;
+  scroll-margin-top: 25px;
+}
+.ks-identity-icon {
+  width: 50px;
+  height: 50px;
+  background: #e7f0ee;
+  display: grid;
+  place-items: center;
+  color: var(--ks-teal);
+  margin-bottom: 22px;
+}
+.ks-identity h2 {
+  font-size: 24px;
+  color: var(--ks-teal);
+  margin: 10px 0 15px;
+  letter-spacing: -0.03em;
+}
+.ks-identity > p:not(.ks-kicker) {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--ks-muted);
+  max-width: 480px;
+}
+.ks-identity strong {
+  color: var(--ks-teal);
+}
+.ks-identity form {
+  margin: 23px 0;
+}
+.ks-identity form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+.ks-identity .ks-consent {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: #f4f7f5;
+  border: 1px solid var(--ks-line);
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+.ks-consent input {
+  margin-top: 4px;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.ks-identity .ws-button {
+  margin-top: 16px;
+  width: 100%;
+}
+.ks-identity > button {
+  margin: 0 18px 16px 0;
+  font-size: 11px;
+}
+.ks-identity > small {
+  display: block;
+  color: var(--ks-muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+.workspace .ks-otp-input {
+  width: 100%;
+  max-width: 300px;
+  letter-spacing: 0.5em;
+  font-size: 28px;
+  padding: 16px 20px;
+  color: var(--ks-teal);
+}
+.ks-verify-summary {
+  display: flex;
+  gap: 12px;
+  color: var(--ks-teal);
+  font-size: 12px;
+  line-height: 1.8;
+  padding: 15px 0;
+}
+.ks-checkout .ws-payment-guide {
+  border-radius: 0;
+}
+@media (min-width: 1600px) {
+  .ks-hero-content {
+    padding-left: 6%;
+    padding-top: 85px;
+  }
+  .ks-header-inner {
+    padding: 0 60px;
+  }
+}
+@media (max-width: 1200px) {
+  .ks-header-inner {
+    gap: 26px;
+    padding: 0 3%;
+  }
+  .ks-departments {
+    gap: 20px;
+  }
+  .ks-actions {
+    gap: 18px;
+  }
+  .ks-actions .ks-search {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+  }
+  .ks-search span {
+    display: none;
+  }
+  .ks-quick-links button {
+    padding: 0 17px;
+    gap: 14px;
+  }
+  .catalog-layout {
+    grid-template-columns: 175px minmax(0, 1fr);
+    gap: 25px;
+  }
+  .catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ks-hero-content {
+    padding-top: 65px;
+  }
+  .ks-story-copy {
+    padding: 50px 10%;
+  }
+}
+@media (max-width: 900px) {
+  .ks-announcement > span:first-child,
+  .ks-announcement > a {
+    display: none;
+  }
+  .ks-announcement {
+    justify-content: center;
+  }
+  .ks-header-inner {
+    height: 83px;
+    gap: 22px;
+  }
+  .ks-brand .kintsugi-logo {
+    width: 150px;
+    height: 55px;
+  }
+  .ks-departments {
+    gap: 15px;
+  }
+  .ks-departments button {
+    font-size: 10px;
+  }
+  .ks-actions {
+    gap: 17px;
+  }
+  .ks-hero {
+    height: 570px;
+    min-height: 0;
+  }
+  .ks-hero-content {
+    padding: 65px 5%;
+  }
+  .ks-hero h1 {
+    font-size: 60px;
+  }
+  .ks-quick-links {
+    overflow-x: auto;
+    justify-content: flex-start;
+    padding: 23px 2%;
+  }
+  .ks-section {
+    padding: 45px 4%;
+  }
+  .ks-department-grid,
+  .ks-home-products {
+    gap: 15px;
+  }
+  .ks-section-heading h2 {
+    font-size: 24px;
+  }
+  .ks-section-heading > button {
+    font-size: 10px;
+    gap: 12px;
+  }
+  .ks-story {
+    min-height: 420px;
+  }
+  .ks-story-photo {
+    min-height: 420px;
+  }
+  .ks-story h2 {
+    font-size: 30px;
+  }
+  .ks-benefits {
+    padding: 30px 4%;
+    gap: 20px;
+  }
+  .ks-benefits > div {
+    gap: 12px;
+  }
+  .ks-benefits b {
+    font-size: 11px;
+  }
+  .ks-benefits p {
+    line-height: 1.7;
+  }
+  .ks-shopping .ws-cart-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 22px;
+  }
+  .ks-shopping .ws-cart-item {
+    gap: 14px;
+    grid-template-columns: 80px 1fr;
+  }
+  .ks-shopping .ws-cart-item img {
+    width: 80px;
+    height: 110px;
+  }
+  .ks-shopping .ws-cart-item-end {
+    grid-column: 2;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ks-shopping .ws-cart-item h3 {
+    font-size: 12px;
+  }
+  .ks-checkout .checkout-layout {
+    gap: 24px;
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .ks-checkout .ws-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .ks-checkout .ws-wide {
+    grid-column: auto;
+  }
+  .ks-checkout .ws-form-panel {
+    padding: 23px;
+  }
+  .ks-checkout .checkout-shipping label {
+    gap: 10px;
+    padding: 13px;
+  }
+  .ks-checkout .checkout-shipping label strong {
+    font-size: 11px;
+  }
+  .auth-container {
+    gap: 35px;
+    grid-template-columns: 1fr 420px;
+  }
+  .auth-intro h1 {
+    font-size: 32px;
+  }
+}
+@media (max-width: 700px) {
+  .ks-header-inner {
+    height: 78px;
+    padding: 0 5%;
+    gap: 10px;
+  }
+  .ks-departments {
+    display: none;
+  }
+  .ks-actions {
+    gap: 17px;
+  }
+  .ks-actions .ks-menu {
+    display: flex;
+  }
+  .ks-actions > button:nth-child(3) {
+    display: none;
+  }
+  .ks-actions > button > svg {
+    width: 20px;
+  }
+  .ks-brand {
+    padding: 1px 5px;
+  }
+  .ks-brand .kintsugi-logo {
+    width: 128px;
+    height: 51px;
+  }
+  .ks-mobile-departments {
+    display: flex;
+    justify-content: space-around;
+    padding: 12px 4%;
+    border-top: 1px solid #ffffff25;
+    background: #064c5d;
+    color: white;
+    font-size: 11px;
+    font-weight: 550;
+    letter-spacing: 0.03em;
+  }
+  .ks-mobile-departments.expanded {
+    padding: 21px 4%;
+  }
+  .ks-header {
+    border-bottom-width: 1px;
+  }
+  .ks-announcement {
+    height: 27px;
+    font-size: 9px;
+  }
+  .ks-hero {
+    height: 590px;
+  }
+  .ks-hero > img {
+    width: 100%;
+    object-position: 57% 35%;
+    opacity: 0.78;
+  }
+  .ks-hero-shade {
+    background:
+      linear-gradient(90deg, #064b5bea 0%, #07536485 53%, #053b4510 100%),
+      linear-gradient(0deg, #073d4f66, transparent);
+  }
+  .ks-hero-content {
+    padding: 75px 7% 40px;
+  }
+  .ks-hero h1 {
+    font-size: 61px;
+    margin: 20px 0;
+  }
+  .ks-hero-content .ks-kicker {
+    font-size: 9px;
+  }
+  .ks-hero p {
+    font-size: 12px;
+    max-width: 245px;
+  }
+  .ks-hero-content > button {
+    padding: 15px 19px;
+    gap: 27px;
+    margin-top: 28px;
+    font-size: 10px;
+  }
+  .ks-hero-index {
+    bottom: 22px;
+    right: 7%;
+    font-size: 8px;
+  }
+  .ks-hero-caption {
+    font-size: 9px;
+  }
+  .ks-quick-links {
+    padding: 20px 2%;
+  }
+  .ks-quick-links button {
+    font-size: 10px;
+    padding: 0 20px;
+  }
+  .ks-section {
+    padding: 40px 5%;
+  }
+  .ks-section-heading {
+    margin-bottom: 24px;
+  }
+  .ks-section-heading h2 {
+    font-size: 23px;
+    max-width: 230px;
+    line-height: 1.4;
+  }
+  .ks-section-heading > button {
+    font-size: 9px;
+    gap: 7px;
+    white-space: nowrap;
+  }
+  .ks-kicker {
+    font-size: 9px;
+  }
+  .ks-department-grid,
+  .ks-home-products {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 25px 15px;
+  }
+  .ks-department-grid h3 {
+    font-size: 13px;
+    margin: 13px 0 7px;
+  }
+  .ks-department-grid p {
+    font-size: 10px;
+    line-height: 1.7;
+  }
+  .ks-home-product-name {
+    font-size: 12px;
+  }
+  .ks-home-products strong {
+    font-size: 16px;
+  }
+  .ks-home-products small {
+    font-size: 8px;
+  }
+  .ks-home-product-image > span {
+    font-size: 7px;
+    padding: 7px;
+  }
+  .ks-products-section {
+    padding-top: 5px;
+  }
+  .ks-story {
+    grid-template-columns: 1fr;
+  }
+  .ks-story-photo {
+    min-height: 0;
+    height: 310px;
+  }
+  .ks-story-copy {
+    padding: 42px 7% 50px;
+  }
+  .ks-story h2 {
+    font-size: 34px;
+  }
+  .ks-benefits {
+    grid-template-columns: 1fr;
+    padding: 30px 7%;
+    gap: 27px;
+  }
+  .ks-benefits > div {
+    gap: 20px;
+  }
+  .ks-benefits b {
+    font-size: 12px;
+  }
+  .ks-benefits p {
+    font-size: 11px;
+  }
+  .catalog.page {
+    padding: 20px 5% 45px;
+  }
+  .catalog .catalog-title h1 {
+    font-size: 29px;
+  }
+  .catalog-title p {
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .catalog .catalog-title {
+    margin-bottom: 22px;
+    padding-bottom: 23px;
+  }
+  .catalog-layout {
+    display: block;
+  }
+  .catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 25px 13px;
+  }
+  .catalog aside {
+    margin-bottom: 22px;
+  }
+  .catalog-toolbar {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .catalog-toolbar > span {
+    font-size: 9px;
+  }
+  .catalog-toolbar select {
+    font-size: 10px;
+  }
+  .product-name {
+    font-size: 12px;
+  }
+  .price,
+  .price.sale {
+    font-size: 17px;
+  }
+  .product .product-tag {
+    font-size: 7px;
+    padding: 6px;
+  }
+  .product-meta {
+    font-size: 8px;
+  }
+  .newsletter {
+    padding: 30px 5%;
+    gap: 24px;
+  }
+  .newsletter h2 {
+    font-size: 22px;
+  }
+  .newsletter p {
+    font-size: 11px;
+  }
+  .footer-brand .kintsugi-logo {
+    width: 170px;
+  }
+  .ks-shopping-content {
+    padding: 23px 5% 45px;
+  }
+  .ks-shopping-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 17px;
+    margin-bottom: 25px;
+  }
+  .ks-shopping-title h1 {
+    font-size: 28px;
+  }
+  .ks-shopping-title .ws-link {
+    font-size: 11px;
+  }
+  .ks-shopping .ws-cart-layout {
+    grid-template-columns: 1fr;
+  }
+  .ks-shopping .ws-cart-item {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+  .ks-shopping .ws-cart-item img {
+    width: 90px;
+    height: 120px;
+  }
+  .ks-shopping .ws-cart-item-end {
+    grid-column: 2;
+  }
+  .ks-shopping .ws-cart-item h3 {
+    font-size: 13px;
+  }
+  .ks-shopping .checkout-summary {
+    position: static;
+  }
+  .ks-simple-footer {
+    gap: 15px;
+    padding: 25px 5%;
+  }
+  .ks-simple-footer > p {
+    font-size: 10px;
+    max-width: 160px;
+    line-height: 1.7;
+  }
+  .ks-simple-footer nav {
+    margin: 10px 0 0;
+    width: 100%;
+    font-size: 10px;
+    gap: 25px;
+  }
+  .ks-simple-footer .kintsugi-logo {
+    width: 140px;
+    height: 56px;
+  }
+  .ks-checkout .checkout-header {
+    padding: 12px 5%;
+    position: static;
+  }
+  .ks-checkout .checkout-header .ks-brand .kintsugi-logo {
+    height: 47px;
+    width: 135px;
+  }
+  .ks-checkout .checkout-header > span {
+    font-size: 8px;
+    gap: 6px;
+  }
+  .ks-checkout .checkout-content {
+    padding: 25px 5% 40px;
+  }
+  .ks-checkout .checkout-page-title h1 {
+    font-size: 27px;
+    line-height: 1.3;
+  }
+  .ks-checkout .checkout-page-title > p:last-child {
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .ks-checkout .checkout-layout {
+    grid-template-columns: 1fr;
+    gap: 25px;
+  }
+  .ks-checkout .checkout-summary {
+    position: static;
+  }
+  .ks-checkout .checkout-flow {
+    gap: 13px;
+    font-size: 10px;
+  }
+  .ks-checkout .ws-form-panel {
+    padding: 22px 19px;
+  }
+  .ks-checkout .ws-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .ks-checkout .checkout-shipping label strong {
+    margin-left: auto;
+  }
+  .ks-identity {
+    padding: 25px 20px;
+  }
+  .ks-identity h2 {
+    font-size: 23px;
+  }
+  .ks-identity > p:not(.ks-kicker) {
+    font-size: 12px;
+  }
+  .ks-consent span {
+    font-size: 11px;
+  }
+  .ks-identity form > label {
+    font-size: 11px;
+  }
+  .auth-brandbar {
+    padding: 20px 5%;
+  }
+  .auth-brandbar .ws-logo .kintsugi-logo {
+    width: 155px;
+    height: 62px;
+  }
+  .auth-brandbar > .ws-link {
+    font-size: 10px;
+  }
+  .auth-container {
+    display: block;
+    padding: 25px 5%;
+  }
+  .auth-intro {
+    display: none;
+  }
+  .auth-card {
+    max-width: 470px;
+    margin: auto;
+  }
+  .ws-topbar {
+    padding: 14px 20px;
+  }
+  .ws-page-heading h1 {
+    font-size: 26px;
+  }
+  .ws-logo .kintsugi-logo {
+    width: 170px;
+    height: 68px;
+  }
+  .workspace .ws-panel {
+    border-radius: 2px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Kintsugi retail refinement: disciplined, airy, product-first storefront.
+   The public shop takes cues from modern Japanese retail: clear hierarchy,
+   generous white space, sharp product cards, and one calm brand accent.
+   -------------------------------------------------------------------------- */
+:root {
+  --ks-teal: #075b6e;
+  --ks-deep: #043f4d;
+  --ks-gold: #b9924c;
+  --ks-ink: #142b31;
+  --ks-muted: #64777a;
+  --ks-line: #dbe5e3;
+  --ks-paper: #fbfcfb;
+  --ks-sand: #f2f5f3;
+}
+
+html { background: var(--ks-paper); }
+body,
+button,
+input,
+select,
+textarea {
+  font-family: Arial, Helvetica, sans-serif;
+}
+body { background: var(--ks-paper); }
+
+.ks-announcement {
+  height: 30px;
+  background: var(--ks-deep);
+  border: 0;
+  color: #f7faf9;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.ks-announcement a { color: #f7faf9; }
+.ks-header {
+  background: #fff;
+  border-top: 2px solid var(--ks-gold);
+  border-bottom: 1px solid var(--ks-line);
+  color: var(--ks-ink);
+  box-shadow: 0 3px 16px #123c4010;
+}
+.ks-header:before { display: none; }
+.ks-header-inner {
+  height: 80px;
+  max-width: 1440px;
+  padding: 0 4.5%;
+  gap: 42px;
+}
+.ks-brand { padding: 0; }
+.ks-brand .kintsugi-logo {
+  width: 176px;
+  height: 61px;
+  filter: none;
+}
+.ks-departments { gap: 31px; }
+.ks-departments button {
+  color: var(--ks-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.ks-departments button.active:after {
+  bottom: 19px;
+  height: 2px;
+  background: var(--ks-teal);
+}
+.ks-actions { gap: 18px; }
+.ks-actions > button { color: var(--ks-ink); }
+.ks-actions > button > b {
+  background: var(--ks-teal);
+  color: white;
+  top: -2px;
+}
+.ks-actions .ks-search {
+  min-height: 34px;
+  padding: 0 0 0 4px;
+  margin-right: 8px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #b8c8c6;
+  color: #466468;
+}
+.ks-actions .ks-search:hover { border-color: var(--ks-teal); }
+.ks-mobile-departments {
+  background: #fff;
+  color: var(--ks-ink);
+  border-top: 1px solid var(--ks-line);
+  border-bottom: 1px solid var(--ks-line);
+}
+
+.ks-hero {
+  height: min(650px, calc(100vh - 110px));
+  min-height: 520px;
+  background: #0a4856;
+}
+.ks-hero > img {
+  width: 61%;
+  object-position: center;
+}
+.ks-hero-shade {
+  background: linear-gradient(90deg, #063f4eef 0%, #075466e5 33%, #07546672 57%, #063f4d05 79%);
+}
+.ks-hero-content {
+  max-width: 1440px;
+  padding: 82px 6%;
+}
+.ks-hero-content .ks-kicker { color: #ead4a1; }
+.ks-hero h1 {
+  max-width: 570px;
+  font-size: clamp(49px, 5.4vw, 78px);
+  font-weight: 700;
+  line-height: 1.01;
+  letter-spacing: -.06em;
+  margin: 19px 0;
+}
+.ks-hero h1 em { color: #f0d79d; }
+.ks-hero p { max-width: 345px; font-size: 14px; }
+.ks-hero-content > button {
+  background: #fff;
+  color: var(--ks-deep);
+  border: 0;
+  border-left: 3px solid var(--ks-gold);
+  padding: 16px 20px;
+  gap: 32px;
+}
+.ks-hero-content > button:hover { background: #eaf3f1; }
+.ks-hero-index { right: 6%; bottom: 30px; }
+
+.ks-quick-links {
+  justify-content: flex-start;
+  max-width: 1440px;
+  margin: auto;
+  padding: 0 4.5%;
+  min-height: 64px;
+  background: transparent;
+  border-bottom: 1px solid var(--ks-line);
+}
+.ks-quick-links button {
+  min-height: 64px;
+  padding: 0 22px;
+  color: var(--ks-ink);
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+.ks-quick-links button:first-child { padding-left: 0; }
+.ks-quick-links button:hover { color: var(--ks-teal); }
+
+.ks-section { max-width: 1440px; padding: 88px 4.5%; }
+.ks-section-heading { margin-bottom: 37px; }
+.ks-section-heading h2 {
+  max-width: 540px;
+  font-size: clamp(27px, 3vw, 39px);
+  line-height: 1.14;
+  font-weight: 700;
+  letter-spacing: -.055em;
+}
+.ks-section-heading > button {
+  color: var(--ks-ink);
+  border-bottom: 2px solid var(--ks-gold);
+  padding-bottom: 10px;
+}
+.ks-section-heading > button:hover { color: var(--ks-teal); }
+.ks-department-grid { gap: 18px; }
+.ks-department-grid > button > div {
+  aspect-ratio: 4 / 5;
+  background: #eaf0ee;
+}
+.ks-department-grid h3 {
+  font-size: 14px;
+  margin: 15px 0 7px;
+  letter-spacing: .03em;
+}
+.ks-department-grid h3 svg { color: var(--ks-gold); }
+.ks-department-grid p { font-size: 11px; line-height: 1.65; }
+.ks-products-section { padding-top: 20px; }
+.ks-home-products { gap: 18px; }
+.ks-home-product-image { aspect-ratio: 4 / 5; background: #eef2f0; }
+.ks-home-product-image > span {
+  padding: 8px 9px;
+  border-left: 0;
+  border-top: 2px solid var(--ks-gold);
+  color: var(--ks-ink);
+}
+.ks-home-product-name { font-size: 12px; margin: 8px 0 7px; }
+.ks-home-products strong { color: var(--ks-ink); font-size: 15px; }
+.ks-home-products del { color: #869596; }
+.ks-home-products article:hover .ks-home-product-name { color: var(--ks-teal); }
+
+.ks-story { min-height: 520px; background: var(--ks-deep); }
+.ks-story-copy {
+  position: relative;
+  background-color: var(--ks-deep);
+  background-image: none;
+  padding: 72px 14% 72px 13%;
+}
+.ks-story-copy:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("/brand/kintsugi-gold-cracks-gold-only.png") center / cover no-repeat;
+  opacity: .16;
+  pointer-events: none;
+}
+.ks-story-copy > * { position: relative; z-index: 1; }
+.ks-story h2 { font-size: clamp(33px, 3.2vw, 48px); line-height: 1.12; }
+.ks-story-copy > button { border-bottom-width: 2px; }
+.ks-benefits {
+  max-width: 1440px;
+  margin: auto;
+  padding: 35px 4.5%;
+  background: #fff;
+  border-top: 1px solid var(--ks-line);
+  border-bottom: 1px solid var(--ks-line);
+}
+.ks-benefits > div { padding-right: 20px; border-right: 1px solid var(--ks-line); }
+.ks-benefits > div:last-child { border-right: 0; }
+.ks-benefits svg { color: var(--ks-gold); }
+
+.modern-storefront,
+.catalog-storefront,
+.ks-shopping { background: var(--ks-paper); }
+.catalog.page { max-width: 1440px; padding: 42px 4.5% 96px; }
+.catalog-title { padding-bottom: 31px; margin-bottom: 36px; }
+.catalog .catalog-title h1 { color: var(--ks-ink); font-size: clamp(32px, 4vw, 48px); }
+.catalog .eyebrow { color: var(--ks-teal); }
+.catalog-layout { grid-template-columns: 195px minmax(0, 1fr); gap: 46px; }
+.catalog aside h3 { color: var(--ks-ink); text-transform: uppercase; letter-spacing: .08em; font-size: 10px; }
+.catalog aside button { font-size: 11px; }
+.catalog aside button.active { background: transparent; border-left: 2px solid var(--ks-gold); color: var(--ks-ink); }
+.catalog-grid { gap: 44px 18px; }
+.product-image { aspect-ratio: 4 / 5; background: #eef2f0; }
+.product-image img { transition: transform .45s ease; }
+.product:hover .product-image img { transform: scale(1.025); }
+.product .product-tag { border: 0; border-top: 2px solid var(--ks-gold); font-size: 8px; color: var(--ks-ink); }
+.wish-btn { background: #ffffffed; color: var(--ks-ink); }
+.product-name { font-size: 12px; font-weight: 650; }
+.price,.price.sale { color: var(--ks-ink); font-size: 15px; }
+.rating { color: var(--ks-gold); }
+.catalog-toolbar { border-top: 1px solid var(--ks-line); border-bottom: 1px solid var(--ks-line); padding: 16px 0; }
+.newsletter { background: #eaf2f0; border: 0; padding: 58px max(5%, calc((100vw - 1280px) / 2)); }
+.newsletter h2 { color: var(--ks-ink); font-size: 31px; }
+.newsletter form { border-bottom: 1px solid var(--ks-ink); }
+.newsletter input { background: transparent; border: 0; }
+.newsletter button { color: var(--ks-teal); }
+.site-footer { background: var(--ks-deep); color: #e6f0ef; }
+.footer-brand p,.footer-brand span,.footer-column h4 { color: #fff; }
+.footer-column button,.footer-bottom { color: #bed1d0; border-color: #ffffff26; }
+.footer-brand .kintsugi-logo { filter: none; background: #fff; padding: 4px 8px; }
+
+/* Cart, account, checkout, and admin become quiet operational spaces. */
+.ks-shopping-content { max-width: 1340px; padding: 42px 4.5% 90px; }
+.ks-shopping-title { border-bottom: 1px solid var(--ks-line); padding-bottom: 27px; margin-bottom: 30px; }
+.ks-shopping-title h1 { font-size: clamp(29px, 3.5vw, 43px); color: var(--ks-ink); }
+.workspace { background: #f5f8f7; }
+.workspace .ws-panel { border: 1px solid var(--ks-line); box-shadow: none; border-radius: 0; background: #fff; }
+.workspace .ws-button { border-radius: 0; font-weight: 700; letter-spacing: .02em; }
+.workspace .ws-button.primary { background: var(--ks-teal); border-color: var(--ks-teal); }
+.workspace .ws-button.primary:hover { background: var(--ks-deep); }
+.ws-customer .ws-sidebar { background: #fff; border-color: var(--ks-line); }
+.ws-customer .ws-sidebar nav button.active { background: #edf5f3; box-shadow: inset 3px 0 var(--ks-gold); }
+.ws-admin .ws-sidebar { background: var(--ks-deep); background-image: none; }
+.ws-admin .ws-sidebar nav button.active { background: #0b6171; box-shadow: inset 3px 0 var(--ks-gold); }
+.ws-topbar { background: #fff; border-bottom: 1px solid var(--ks-line); }
+.ws-content { max-width: 1520px; }
+.ws-page-heading { border-bottom: 1px solid var(--ks-line); padding-bottom: 24px; }
+.ws-page-heading h1 { color: var(--ks-ink); font-size: clamp(28px, 3vw, 40px); }
+.ws-stats > div,.ws-stats > a { border-top: 3px solid var(--ks-gold); border-radius: 0; }
+.ws-welcome { background: var(--ks-deep); border: 0; }
+.ws-welcome .ws-kicker { color: #e6ca8d; }
+.ws-welcome-symbol { color: #e6ca8d; background: #ffffff12; }
+.ws-form-panel,.checkout-summary { border-top: 3px solid var(--ks-gold) !important; }
+.ws-table th { background: #f2f6f4; color: var(--ks-ink); }
+.ws-table tr { border-color: var(--ks-line); }
+.auth-screen { background: #f3f7f5; }
+.auth-brandbar { background: #fff; border-top: 2px solid var(--ks-gold); }
+.auth-card { border-radius: 0; border-top: 3px solid var(--ks-gold); box-shadow: none; }
+.ks-checkout { background: #f5f8f7; }
+.ks-checkout .checkout-header { background: #fff; border-top: 2px solid var(--ks-gold); border-bottom: 1px solid var(--ks-line); color: var(--ks-ink); }
+.ks-checkout .checkout-header > span { color: var(--ks-muted); }
+.ks-checkout .checkout-header .ks-brand .kintsugi-logo { filter: none; }
+.ks-identity { background: #fffdf8; border-color: #d7c28c !important; }
+.ws-logo .kintsugi-logo {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.ws-admin .ws-logo .kintsugi-logo {
+  background: #fff;
+  padding: 4px 7px;
+  border-left: 2px solid var(--ks-gold);
+}
+.ks-simple-footer { background: #fff; border-top: 1px solid var(--ks-line); }
+.ks-simple-footer .kintsugi-logo { background: transparent; padding: 0; }
+.product-dialog,
+.search-panel,
+.menu-panel,
+.info-dialog { border-radius: 0; border-top: 3px solid var(--ks-gold); }
+.detail-info h1 { color: var(--ks-ink); letter-spacing: -.04em; }
+.detail-price { color: var(--ks-ink); }
+.detail-delivery { border-color: var(--ks-line); }
+.search-panel form { border-bottom-color: var(--ks-ink); }
+.search-tags button { border-radius: 0; border-color: var(--ks-line); }
+.cookie-notice { border-top-width: 3px; border-radius: 0; }
+
+@media (max-width: 900px) {
+  .ks-header-inner { height: 72px; padding: 0 4%; gap: 18px; }
+  .ks-brand .kintsugi-logo { width: 155px; height: 54px; }
+  .ks-departments { gap: 16px; }
+  .ks-hero { min-height: 540px; }
+  .ks-hero-content { padding: 67px 6%; }
+  .ks-section { padding: 65px 4%; }
+  .ks-benefits { padding: 28px 4%; }
+}
+@media (max-width: 700px) {
+  .ks-announcement { height: 27px; }
+  .ks-header-inner { height: 68px; padding: 0 5%; }
+  .ks-brand .kintsugi-logo { width: 136px; height: 48px; }
+  .ks-actions .ks-search { border: 0; padding: 0; margin: 0; }
+  .ks-mobile-departments { background: #fff; color: var(--ks-ink); }
+  .ks-hero { height: 575px; }
+  .ks-hero > img { width: 100%; opacity: .72; }
+  .ks-hero-shade { background: linear-gradient(90deg, #063f4ee8 0%, #075466a3 61%, #063f4d20 100%); }
+  .ks-hero-content { padding: 72px 7% 40px; }
+  .ks-hero h1 { font-size: 56px; }
+  .ks-quick-links { padding: 0 5%; overflow-x: auto; }
+  .ks-quick-links button { min-height: 56px; padding: 0 18px; }
+  .ks-section { padding: 54px 5%; }
+  .ks-section-heading h2 { font-size: 27px; }
+  .ks-department-grid,.ks-home-products { gap: 28px 13px; }
+  .ks-story-copy { padding: 52px 8% 58px; }
+  .ks-benefits { grid-template-columns: 1fr; gap: 0; padding: 0 7%; }
+  .ks-benefits > div { border-right: 0; border-bottom: 1px solid var(--ks-line); padding: 22px 0; }
+  .ks-benefits > div:last-child { border-bottom: 0; }
+  .catalog.page { padding: 28px 5% 60px; }
+  .catalog-grid { gap: 32px 13px; }
+  .ks-shopping-content { padding: 30px 5% 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+.catalog-category-filter,
+.catalog-departments-filter {
+  display: contents;
+}
+.ks-profile-menu {
+  position: fixed; top: 116px; right: 4%; width: 350px; max-height: calc(100dvh - 135px); overflow-y: auto;
+  padding: 12px; background: #fff; color: var(--ks-ink); border: 1px solid var(--ks-line);
+  box-shadow: 0 16px 48px #073f5026; z-index: 120;
+}
+.ks-profile-heading { display: flex; align-items: center; gap: 12px; padding: 12px 6px 20px; border-bottom: 1px solid var(--ks-line); margin-bottom: 8px; }
+.ks-profile-heading strong { display: block; font-size: 15px; }
+.ks-profile-heading small { display: block; color: #6b7c80; font-size: 11px; margin-top: 4px; }
+.ks-profile-heading > button { margin-left: auto; padding: 8px; }
+.ks-profile-avatar { background: #eaf3f3; color: var(--ks-teal); width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; }
+.ks-profile-menu > button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 15px 12px; font-size: 13px; text-align: left; }
+.ks-profile-menu > button span { flex: 1; }
+.ks-profile-menu > button:hover, .ks-profile-menu > button:focus-visible { background: #edf5f5; color: var(--ks-teal); }
+.ks-profile-menu > .ks-profile-logout { border-top: 1px solid var(--ks-line); margin-top: 8px; color: #925044; }
+.ks-bottom-nav { display: none; }
+.ks-profile-label { font-size: 11px; margin-left: 4px; }
+.ks-product-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 14px; }
+.ks-product-actions > button { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 11px 6px; min-height: 39px; border: 1px solid var(--ks-teal); color: var(--ks-teal); font-size: 11px; font-weight: 600; }
+.ks-product-actions > button:last-child { background: var(--ks-teal); color: #fff; }
+.ks-product-actions > button:hover { filter: brightness(.9); }
+.ks-payment-methods > fieldset { border: 0; padding: 0; margin: 0 0 22px; min-width: 0; }
+.ks-payment-methods legend { padding: 0 0 12px; font-size: 12px; font-weight: 700; color: #61777a; }
+.ks-payment-methods label { display: flex; flex-direction: row; text-align: left; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--ks-line); margin-bottom: 8px; cursor: pointer; background: #fff; }
+.ks-payment-methods label.selected { border-color: var(--ks-teal); background: #f0f7f6; }
+.ks-payment-methods input { width: 16px; height: 16px; min-height: 0; accent-color: var(--ks-teal); flex-shrink: 0; }
+.ks-payment-methods b { display: block; font-size: 13px; }
+.ks-payment-methods small { display: block; margin-top: 4px; color: #6c7e81; font-size: 11px; line-height: 1.5; }
+.ks-payment-mark { display: grid; place-items: center; min-width: 48px; height: 32px; border: 1px solid #d9e7e7; background: #fff; font-size: 10px; font-weight: 800; color: var(--ks-teal); letter-spacing: .04em; }
+.ks-flying-product { position: fixed; width: 90px; height: 90px; object-fit: cover; border-radius: 12px; border: 2px solid #fff; box-shadow: 0 8px 25px #073f5040; z-index: 2000; pointer-events: none; }
+.ks-customer-account .ks-shopping-content { max-width: 1120px; min-height: 65vh; }
+.ks-customer-account .ws-form-grid { min-width: 0; }
+@media (min-width: 701px) {
+  .catalog-layout > aside { align-self: start; position: sticky; top: 110px; max-height: calc(100vh - 130px); overflow-y: auto; }
+}
+@media (max-width: 1024px) {
+  body:has(.ks-bottom-nav) { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .ks-departments { display: none; }
+  .ks-header-inner { height: 64px; }
+  .ks-actions > button:not(.ks-search) { display: none; }
+  .ks-actions .ks-search { display: flex; }
+  .ks-bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 110; display: grid; grid-template-columns: repeat(5, 1fr); padding: 7px 6px calc(7px + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid #dce7e7; box-shadow: 0 -4px 22px #063d4b08; }
+  .ks-bottom-nav > button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 49px; color: #778589; font-size: 10px; }
+  .ks-bottom-nav > button.active { color: var(--ks-teal); font-weight: 700; }
+  .ks-bottom-nav > button.active:before { content: ''; position: absolute; top: -7px; width: 22px; height: 2px; background: var(--ks-gold, #bd9955); }
+  .ks-bottom-nav b { position: absolute; top: 0; left: calc(50% + 4px); min-width: 16px; height: 16px; padding: 1px 4px; background: var(--ks-teal); border: 1px solid #fff; border-radius: 20px; color: #fff; font-size: 9px; }
+  .ks-profile-menu { position: fixed; top: auto; bottom: calc(80px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 160px); overflow-y: auto; border-radius: 14px; box-shadow: 0 -8px 60px #073f5033; }
+  .ks-mobile-departments { display: none; }
+  .ks-mobile-departments.expanded { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); position: fixed; left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); padding: 18px; gap: 8px; max-height: calc(100dvh - 160px); overflow-y: auto; background: #fff; color: var(--ks-ink); border: 1px solid var(--ks-line); border-radius: 14px; box-shadow: 0 -8px 60px #073f5033; }
+  .ks-mobile-departments.expanded > button { padding: 14px 8px; text-align: left; background: #f1f6f6; font-size: 12px; }
+  .catalog-layout { display: block; }
+  .product-dialog { padding-bottom: 24px; max-height: calc(100dvh - 28px); }
+  .cookie-notice { bottom: calc(74px + env(safe-area-inset-bottom)); }
+  .ws-toast, .toast { bottom: calc(90px + env(safe-area-inset-bottom)); }
+  .ks-customer-account .ks-shopping-content { padding: 26px 5%; }
+}
+@media (max-width: 700px) {
+  .catalog .catalog-title { padding-bottom: 18px; margin-bottom: 18px; }
+  .catalog .catalog-title h1 { font-size: 29px; margin-top: 8px; }
+  .catalog .catalog-title p { font-size: 12px; line-height: 1.6; }
+  .catalog-category-filter {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    gap: 8px;
+    flex-wrap: nowrap;
+    padding: 0 0 9px;
+    scrollbar-width: none;
+  }
+  .catalog .catalog-category-filter > button {
+    flex: none;
+    white-space: nowrap;
+    font-size: 10px;
+    padding: 11px 13px;
+    margin: 0;
+  }
+  .catalog-departments-filter {
+    display: none;
+  }
+  .catalog .advanced-filters {
+    width: 100%;
+    border-bottom: 1px solid var(--ks-line);
+    margin-bottom: 0;
+  }
+  .catalog .advanced-filters summary {
+    font-size: 11px;
+    padding: 14px 0;
+  }
+  .catalog aside {
+    gap: 5px;
+  }
+  .catalog-category-filter::-webkit-scrollbar {
+    display: none;
+  }
+}

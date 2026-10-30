@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { fail, queueEmail, escapeHtml } from "./integrations.js";
+import { fail, queueWhatsApp } from "./integrations.js";
 
 export const orderRow = (o) => ({
   ...o,
@@ -60,7 +60,7 @@ export function createPayments(pool, gateway) {
           Number(invoice.amount) !== o.total ||
           invoice.currency !== "IDR"
         )
-          throw fail(502, "Respons pembayaran Xendit tidak valid.");
+          throw fail(502, "Respons pembayaran tidak valid.");
         const expires = new Date(invoice.expiry_date);
         if (!Number.isFinite(expires.getTime()))
           throw fail(502, "Batas waktu pembayaran tidak valid.");
@@ -135,16 +135,15 @@ export function createPayments(pool, gateway) {
             [o.id],
           );
           const address = orderRow(o).address;
-          await queueEmail(
+          // Kirim notifikasi pembayaran diterima via WhatsApp
+          await queueWhatsApp(
             c,
             "paid/" + o.id,
-            address.email,
-            "Pembayaran diterima · " + o.id,
-            "<h1>Pembayaran diterima</h1><p>Halo " +
-              escapeHtml(address.name) +
-              ", pesanan " +
-              escapeHtml(o.id) +
-              " sedang diproses.</p>",
+            address.phone,
+            `*Kintsugi - Pembayaran Diterima*\n\n` +
+              `Halo ${address.name}, pembayaran untuk pesanan ${o.id} telah diterima.\n` +
+              `Pesanan Anda sedang diproses.\n\n` +
+              `Terima kasih telah berbelanja di Kintsugi!`,
           );
         }
       } else if (["EXPIRED", "FAILED"].includes(invoice.status)) {
@@ -206,7 +205,7 @@ export function createPayments(pool, gateway) {
       if (["PAID", "SETTLED"].includes(expired.status)) await apply(expired);
       throw fail(
         409,
-        "Xendit belum mengonfirmasi pembatalan. Coba muat ulang.",
+        "Pembatalan pembayaran belum dikonfirmasi. Coba muat ulang.",
       );
     }
     await apply(expired, true);

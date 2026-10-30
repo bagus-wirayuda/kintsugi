@@ -4,14 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
-    "dev:frontend": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
-    "preview": "npm run start",
-    "server": "node --env-file-if-exists=.env server/index.js",
     "db:init": "node --env-file-if-exists=.env server/init.js",
-    "test": "node --env-file-if-exists=.env --test tests/*.test.js",
-    "prestart": "npm run build",
     "start": "node --env-file-if-exists=.env server/index.js"
   },
   "dependencies": {
@@ -28,7 +22,6 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",
-    "prettier": "^3.9.10",
     "vite": "^7.1.7"
   }
 }

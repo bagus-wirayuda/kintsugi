@@ -43,7 +43,7 @@ export async function startRuntime(
   }
   const timer = setInterval(background, interval);
   timer.unref();
-  log(`Liny Jaya: http://localhost:${server.address().port} · MySQL Laragon`);
+  log(`Kintsugi aktif pada ${host}:${server.address().port}`);
   background();
 
   function close() {

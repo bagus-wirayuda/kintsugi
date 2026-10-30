@@ -4,160 +4,111 @@ export const money = (n) =>
     currency: "IDR",
     maximumFractionDigits: 0,
   }).format(n);
+
 export const photo = (id, w = 900) =>
   `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=85`;
-export const assetSources = {
-  hero: photo("photo-1483985988355-763728e1935b", 2000),
-  men: photo("photo-1617137968427-85924c800a22", 1600),
-  kids: photo("photo-1519689680058-324335c77eba", 1600),
-  baby: photo("photo-1519689680058-324335c77eba", 1600),
-  editorial: photo("photo-1445205170230-053b83016050", 1200),
-  linen: photo("photo-1598554747436-c9293d6a588f", 1200),
-  shirt: photo("photo-1434389677669-e08b4cac3105", 900),
-  tshirt: photo("photo-1521572163474-6864f9cf17ab", 900),
-  jacket: photo("photo-1544022613-e87ca75a784a", 900),
-  denim: photo("photo-1542272604-787c3835535d", 900),
-  dress: photo("photo-1515372039744-b8f02a3ae446", 900),
-  bag: photo("photo-1544816155-12df9643f363", 900),
+
+// Seluruh visual katalog menggambarkan tekstil untuk kasur/spring bed.
+export const assets = {
+  hero: photo("photo-1505693416388-ac5ce068fe85", 2000),
+  sheets: photo("photo-1586023492125-27b2c045efd7", 1600),
+  fitted: photo("photo-1586023492125-27b2c045efd7", 1100),
+  hotel: photo("photo-1616486338812-3dadae4b4ace", 1600),
+  kids: photo("photo-1519710164239-da123dc03ef4", 1200),
+  baby: photo("photo-1584100936595-c0654b55a2e2", 1200),
+  protector: photo("photo-1505693416388-ac5ce068fe85", 900),
+  pillow: photo("photo-1616486338812-3dadae4b4ace", 900),
+  linen: photo("photo-1505693416388-ac5ce068fe85", 1200),
+  stripe: photo("photo-1618221195710-dd6b41faaea6", 1000),
 };
-export const assets = Object.fromEntries(
-  Object.keys(assetSources).map((key) => [key, `/images/${key}.jpg`]),
-);
-const basics = [
-  [
-    "Kemeja Linen Blend Lengan Panjang",
-    "Kemeja & Blus",
-    299000,
-    399000,
-    "linen",
-    ["#e5dfd2", "#c5d3cf", "#fff"],
-    "Lembut, ringan, dan terasa sejuk. Kemeja linen untuk menemani hari-hari Anda.",
-  ],
-  [
-    "T-Shirt Katun Premium Relaxed",
-    "T-Shirt",
-    149000,
-    199000,
-    "tshirt",
-    ["#e8e6e1", "#333e44", "#9c987f"],
-    "Potongan rileks dengan katun berkualitas yang nyaman sepanjang hari.",
-  ],
-  [
-    "Celana Jeans Straight Fit",
-    "Celana",
-    399000,
-    0,
-    "denim",
-    ["#627c92", "#272c36", "#d3cfbe"],
-    "Siluet lurus yang timeless dengan sentuhan denim yang semakin nyaman.",
-  ],
-  [
-    "Cardigan Rajut Soft Touch",
-    "Sweater & Cardigan",
-    349000,
-    0,
-    "shirt",
-    ["#d8c8b6", "#8d554d", "#2f383a"],
-    "Rajutan halus untuk layering yang ringan dan effortless.",
-  ],
-  [
-    "Jaket Utility Ringan",
-    "Luaran",
-    499000,
-    599000,
-    "jacket",
-    ["#656c5c", "#d2c2ab", "#303438"],
-    "Fungsional, ringan, dan mudah dipadukan untuk aktivitas Anda.",
-  ],
-  [
-    "Gaun Midi Linen Blend",
-    "Rok & Gaun",
-    449000,
-    0,
-    "dress",
-    ["#cfaf75", "#262f35", "#ece3d6"],
-    "Gaun berpotongan santai dengan detail sederhana yang elegan.",
-  ],
-  [
-    "Tas Bahu Mini Serbaguna",
-    "Aksesoris",
-    199000,
-    249000,
-    "bag",
-    ["#e0d6bf", "#333", "#78806d"],
-    "Ringkas dengan ruang yang pas untuk semua barang esensial Anda.",
-  ],
-  [
-    "Sweater Katun Crew Neck",
-    "Sweater & Cardigan",
-    299000,
-    0,
-    "shirt",
-    ["#d9d0c1", "#7b818a", "#54574d"],
-    "Esensial sehari-hari dengan tekstur lembut dan potongan modern.",
-  ],
+
+const colorNames = {
+  "#F7F1E7": "Putih Ivory",
+  "#0E6575": "Teal Samudra",
+  "#9CB8B5": "Hijau Sage",
+  "#6F8294": "Biru Kabut",
+  "#B88C62": "Mocha Hangat",
+  "#D7B28A": "Champagne",
+  "#E8D8CB": "Rose Dust",
+  "#6E7479": "Abu Batu",
+  "#F4EFE2": "Krem Susu",
+  "#B7C8D5": "Biru Langit",
+  "#C9DDBB": "Hijau Mint",
+  "#EACD72": "Kuning Ceria",
+  "#F2C4C6": "Pink Lembut",
+  "#E7EEF0": "Putih Awan",
+};
+
+export const colorLabel = (color) => colorNames[color?.toUpperCase()] || color;
+
+const adultSizes = ["100×200", "120×200", "160×200", "180×200", "200×200"];
+const childSizes = ["90×200", "100×200", "120×200"];
+const babySizes = ["60×120", "70×140", "70×160"];
+
+const collections = [
+  {
+    gender: "Wanita",
+    items: [
+      ["Sprei Fitted Katun Jepang Signature", "T-Shirt", 299000, 359000, "fitted", ["#F7F1E7", "#0E6575", "#9CB8B5"], adultSizes, "Sprei fitted berkaret penuh untuk membungkus kasur spring bed dengan rapi. Katun lembut dan sejuk untuk pemakaian harian."],
+      ["Set Sprei Spring Bed Premium 4 pcs", "Kemeja & Blus", 379000, 429000, "sheets", ["#F4EFE2", "#6F8294", "#B88C62"], adultSizes, "Satu set sprei untuk spring bed: sprei utama, dua sarung bantal, dan satu sarung guling. Pilih ukuran kasur sebelum membeli."],
+      ["Sprei Karet Bamboo Soft", "Celana", 339000, 0, "linen", ["#9CB8B5", "#E8D8CB", "#6E7479"], adultSizes, "Sprei karet elastis yang mengikuti sudut kasur spring bed dan tidak mudah bergeser saat digunakan."],
+      ["Set Sarung Bantal & Guling Kintsugi", "Sweater & Cardigan", 119000, 0, "pillow", ["#F7F1E7", "#0E6575", "#D7B28A"], ["Standar", "King"], "Pelengkap sprei untuk bantal dan guling dengan warna senada, dirancang untuk melengkapi set kasur Anda."],
+    ],
+  },
+  {
+    gender: "Pria",
+    items: [
+      ["Sprei Hotel Stripe 300TC", "Luaran", 419000, 479000, "stripe", ["#F7F1E7", "#E7EEF0", "#6F8294"], adultSizes, "Sprei motif garis hotel untuk membungkus kasur spring bed. Tenunan rapat memberi tampilan kamar lebih bersih dan teratur."],
+      ["Sprei Fitted Hotel Deep Pocket", "T-Shirt", 359000, 0, "hotel", ["#F7F1E7", "#6F8294", "#0E6575"], adultSizes, "Sprei fitted dengan karet sudut dan ruang kasur lebih dalam, cocok untuk spring bed ber-topper."],
+      ["Set Sprei Guest House 4 pcs", "Kemeja & Blus", 389000, 449000, "sheets", ["#F4EFE2", "#9CB8B5", "#B88C62"], adultSizes, "Set sprei praktis untuk kamar tamu: membungkus kasur spring bed sekaligus menyamakan warna bantal dan guling."],
+      ["Sarung Bantal Hotel 2 pcs", "Sweater & Cardigan", 99000, 0, "pillow", ["#F7F1E7", "#E7EEF0", "#0E6575"], ["Standar", "King"], "Sarung bantal lembut berpasangan untuk dipadukan dengan sprei spring bed koleksi hotel."],
+    ],
+  },
+  {
+    gender: "Anak",
+    items: [
+      ["Sprei Anak Motif Langit Ceria", "Rok & Gaun", 249000, 289000, "kids", ["#B7C8D5", "#C9DDBB", "#EACD72"], childSizes, "Sprei berkaret untuk membungkus spring bed anak. Motif dan warna ceria tetap mudah dipadukan dengan kamar anak."],
+      ["Sprei Fitted Anak Cotton Cool", "T-Shirt", 219000, 0, "fitted", ["#B7C8D5", "#F2C4C6", "#E7EEF0"], childSizes, "Sprei fitted katun dengan karet di sekeliling sudut agar tetap rapi di kasur spring bed anak."],
+      ["Sprei Karet Anak Playful", "Celana", 229000, 0, "sheets", ["#C9DDBB", "#EACD72", "#F2C4C6"], childSizes, "Sprei karet lembut dan ringan untuk penggunaan sehari-hari pada kasur spring bed ukuran anak."],
+      ["Set Sprei Anak 4 pcs", "Kemeja & Blus", 299000, 349000, "kids", ["#B7C8D5", "#C9DDBB", "#F2C4C6"], childSizes, "Satu set sprei spring bed anak lengkap dengan sarung bantal dan guling dalam warna yang serasi."],
+    ],
+  },
+  {
+    gender: "Bayi",
+    items: [
+      ["Sprei Fitted Box Bayi Soft Touch", "T-Shirt", 159000, 0, "baby", ["#E7EEF0", "#F2C4C6", "#C9DDBB"], babySizes, "Sprei fitted lembut untuk kasur box bayi. Karet sekeliling membantu sprei membungkus kasur secara rapi."],
+      ["Set Sprei Bayi Motif Awan 3 pcs", "Rok & Gaun", 199000, 239000, "baby", ["#B7C8D5", "#F2C4C6", "#E7EEF0"], babySizes, "Set sprei kasur bayi berisi sprei fitted dan sarung bantal kecil. Pilih ukuran sesuai kasur box bayi."],
+      ["Pelindung Kasur Bayi Waterproof", "Aksesoris", 139000, 0, "protector", ["#F7F1E7", "#E7EEF0", "#C9DDBB"], babySizes, "Lapisan pelindung di bawah sprei untuk membantu menjaga kasur bayi tetap bersih tanpa mengubah kenyamanan."],
+      ["Sarung Bantal Bayi 2 pcs", "Sweater & Cardigan", 69000, 0, "pillow", ["#E7EEF0", "#F2C4C6", "#C9DDBB"], ["Baby", "Toddler"], "Sarung bantal kecil yang lembut untuk melengkapi set sprei kasur bayi."],
+    ],
+  },
 ];
-export const products = ["Wanita", "Pria", "Anak", "Bayi"].flatMap(
-  (gender, g) =>
-    basics.map((b, i) => ({
-      id: `lj-${g + 1}-${i + 1}`,
-      sku: `LJ-${1000 + g * 100 + i}`,
-      name: b[0],
-      category: b[1],
-      gender,
-      price: g > 1 ? Math.round((b[2] * 0.7) / 1000) * 1000 : b[2],
-      oldPrice: b[3],
-      image: assets[b[4]],
-      colors: b[5],
-      sizes:
-        g === 3
-          ? ["60", "70", "80", "90"]
-          : g === 2
-            ? ["100", "110", "120", "130", "140"]
-            : ["XS", "S", "M", "L", "XL", "XXL"],
-      description: b[6],
-      rating: 4.7 + (i % 3) * 0.1,
-      reviews: 24 + i * 17,
-      stock: 30,
-      isNew: i < 4,
-    })),
+
+export const products = collections.flatMap(({ gender, items }, groupIndex) =>
+  items.map((item, itemIndex) => ({
+    id: `lj-${groupIndex + 1}-${itemIndex + 1}`,
+    sku: `KTS-SPR-${groupIndex + 1}${String(itemIndex + 1).padStart(2, "0")}`,
+    name: item[0],
+    category: item[1],
+    gender,
+    price: item[2],
+    oldPrice: item[3],
+    image: assets[item[4]],
+    colors: item[5],
+    sizes: item[6],
+    description: item[7],
+    rating: 4.7 + (itemIndex % 3) * 0.1,
+    reviews: 38 + groupIndex * 21 + itemIndex * 13,
+    stock: 36,
+    isNew: itemIndex < 2,
+  })),
 );
-export const categories = [
-  "Semua",
-  "T-Shirt",
-  "Kemeja & Blus",
-  "Celana",
-  "Luaran",
-  "Sweater & Cardigan",
-  "Rok & Gaun",
-  "Aksesoris",
-];
+
+// Nilai internal dipertahankan demi kompatibilitas API dan database lama.
+export const categories = ["Semua", "T-Shirt", "Kemeja & Blus", "Celana", "Luaran", "Sweater & Cardigan", "Rok & Gaun", "Aksesoris"];
+
 export const campaigns = [
-  {
-    eyebrow: "THE EVERYDAY EDIT",
-    title: "Sederhana.\nSelalu istimewa.",
-    desc: "Ruang untuk bergerak. Kebebasan untuk menjadi diri sendiri.",
-    image: assets.hero,
-    tag: "Koleksi baru",
-    product: "Koleksi Esensial Sehari-hari",
-    price: "Mulai Rp149.000",
-  },
-  {
-    eyebrow: "LINEN COLLECTION",
-    title: "Ringan terasa.\nBebas bergaya.",
-    desc: "Tekstur alami, kenyamanan yang mengikuti setiap langkah.",
-    image: assets.linen,
-    tag: "Linen blend",
-    product: "Kemeja Linen Blend",
-    price: "Rp299.000",
-  },
-  {
-    eyebrow: "A NEW PERSPECTIVE",
-    title: "Gaya Anda.\nCerita Anda.",
-    desc: "Temukan esensial baru untuk semua rencana hari ini.",
-    image: assets.men,
-    tag: "Everyday essentials",
-    product: "Koleksi Pilihan Minggu Ini",
-    price: "Mulai Rp149.000",
-  },
+  { eyebrow: "KINTSUGI SPRING BED", title: "Sprei rapi.\nTidur lebih utuh.", desc: "Sprei fitted untuk membungkus spring bed dengan nyaman dan presisi.", image: assets.hero, tag: "Sprei spring bed", product: "Sprei Fitted Katun Jepang", price: "Mulai Rp159.000" },
+  { eyebrow: "EVERYDAY FITTED", title: "Pas di sudut.\nLembut di tidur.", desc: "Pilih ukuran dan warna sprei yang sesuai dengan kasur Anda.", image: assets.fitted, tag: "Karet penuh", product: "Sprei Karet Bamboo Soft", price: "Rp339.000" },
+  { eyebrow: "COLOUR YOUR ROOM", title: "Warna yang rapi.\nKamar yang tenang.", desc: "Pilihan warna jelas untuk setiap ukuran spring bed.", image: assets.hotel, tag: "Pilihan warna", product: "Set Sprei Spring Bed", price: "Mulai Rp199.000" },
 ];

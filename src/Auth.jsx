@@ -4,24 +4,33 @@ import {
   ArrowRight,
   CheckCircle2,
   KeyRound,
-  Mail,
+  MessageCircle,
   ShieldCheck,
   Eye,
   EyeOff,
+  Phone,
 } from "lucide-react";
 import { api } from "./store";
 import { Notice } from "./Workspace";
+import Brand from "./Brand";
+import { StoreHeader } from './StoreChrome';
 export default function Auth({
   onAuthenticated,
   admin = false,
   config,
   pendingCart = false,
+  nav,
+  shop,
+  gender,
+  cartCount,
+  wishCount,
+  onSearch,
 }) {
   const pendingKey = "lj:verification:" + (admin ? "admin" : "customer");
   function readPending() {
     try {
       const p = JSON.parse(sessionStorage.getItem(pendingKey));
-      return p?.validUntil > Date.now() ? p : null;
+      return p?.validUntil > Date.now() && p.purpose !== 'login' ? p : null;
     } catch {
       return null;
     }
@@ -33,7 +42,7 @@ export default function Auth({
           ? "reset"
           : "login",
     ),
-    [method, setMethod] = useState("password"),
+    [method] = useState("password"),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
@@ -93,7 +102,7 @@ export default function Auth({
         config.registrationRequiresOtp !== true
       )
         throw Error(
-          "Layanan akun masih memakai versi lama. Hentikan server lama dengan Ctrl+C, lalu jalankan npm start kembali sebelum mendaftar.",
+          "Layanan pendaftaran sedang diperbarui. Silakan coba beberapa saat lagi.",
         );
       if (challenge) {
         if (
@@ -124,7 +133,7 @@ export default function Auth({
         received(
           await api("/auth/register", {
             method: "POST",
-            body: { name: f.name, email: f.email, password: f.password },
+            body: { name: f.name, phone: f.phone, password: f.password },
           }),
         );
       } else if (mode === "reset" || method === "otp") {
@@ -132,7 +141,7 @@ export default function Auth({
           await api("/auth/otp/request", {
             method: "POST",
             body: {
-              email: f.email,
+              phone: f.phone,
               purpose: mode === "reset" ? "reset" : "login",
             },
           }),
@@ -141,7 +150,12 @@ export default function Auth({
         await onAuthenticated(
           await api("/auth/login", {
             method: "POST",
-            body: { email: f.email, password: f.password },
+            body: {
+              ...(f.phone.includes("@")
+                ? { email: f.phone.trim() }
+                : { phone: f.phone }),
+              password: f.password,
+            },
           }),
         );
     } catch (e) {
@@ -167,7 +181,7 @@ export default function Auth({
     }
   }
   const title = challenge
-    ? "Periksa email Anda"
+    ? "Periksa WhatsApp Anda"
     : mode === "register"
       ? "Buat akun baru"
       : mode === "reset"
@@ -177,11 +191,11 @@ export default function Auth({
           : "Selamat datang kembali";
   return (
     <div className="workspace auth-screen">
-      <div className="auth-brandbar">
+      {!admin && <StoreHeader nav={nav} shop={shop} gender={gender} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
+      {admin && <div className="auth-brandbar">
         <a className="ws-logo" href="#home">
-          <span>LJ</span>
+          <Brand />
           <div>
-            Liny Jaya
             <small>{admin ? "ADMINISTRATION" : "CUSTOMER ACCOUNT"}</small>
           </div>
         </a>
@@ -189,7 +203,7 @@ export default function Auth({
           <ArrowLeft size={16} />
           {admin ? "Akun pelanggan" : "Kembali ke katalog"}
         </a>
-      </div>
+      </div>}
       <main className="auth-container">
         <section className="auth-intro">
           <span className="auth-symbol">
@@ -222,11 +236,11 @@ export default function Auth({
             {(admin
               ? [
                   "Pengelolaan produk & stok varian",
-                  "Verifikasi pembayaran dari Xendit",
+                  "Konfirmasi pembayaran otomatis",
                   "Proses pesanan dengan alur yang jelas",
                 ]
               : [
-                  "Verifikasi email sebelum akun dibuat",
+                  "Verifikasi WhatsApp sebelum akun dibuat",
                   "Status pesanan dan pembayaran yang jelas",
                   "Informasi pengiriman tersimpan",
                 ]
@@ -245,42 +259,36 @@ export default function Auth({
         </section>
         <section className="auth-card">
           <span className="auth-card-icon">
-            {challenge ? <Mail size={23} /> : <KeyRound size={23} />}
+            {challenge ? <MessageCircle size={23} /> : <KeyRound size={23} />}
           </span>
           <h2>{title}</h2>
           <p>
             {challenge ? (
               <>
-                Masukkan 6 digit kode yang dikirim ke <b>{challenge.email}</b>.
-                Kode berlaku 10 menit.
+                Masukkan 6 digit kode yang dikirim ke WhatsApp{" "}
+                <b>{challenge.phone}</b>. Kode berlaku 10 menit.
               </>
             ) : mode === "register" ? (
-              "Verifikasi email diperlukan untuk menyelesaikan pendaftaran."
+              "Verifikasi WhatsApp diperlukan untuk menyelesaikan pendaftaran."
             ) : mode === "reset" ? (
-              "Kami akan mengirimkan kode untuk mengatur ulang kata sandi."
+              "Kami akan mengirimkan kode ke WhatsApp untuk mengatur ulang kata sandi."
             ) : (
               "Masukkan informasi akun Anda untuk melanjutkan."
             )}
           </p>
-          {!challenge && mode === "login" && !admin && (
-            <div className="ws-segment">
+          {!challenge && mode !== 'reset' && !admin && (
+            <div className="ws-segment" aria-label="Login dan daftar">
               <button
-                className={method === "password" ? "active" : ""}
-                onClick={() => {
-                  setMethod("password");
-                  setError("");
-                }}
+                className={mode === "login" ? "active" : ""}
+                onClick={() => change('login')}
               >
-                Kata sandi
+                Login
               </button>
               <button
-                className={method === "otp" ? "active" : ""}
-                onClick={() => {
-                  setMethod("otp");
-                  setError("");
-                }}
+                className={mode === "register" ? "active" : ""}
+                onClick={() => change('register')}
               >
-                Kode email
+                Daftar
               </button>
             </div>
           )}
@@ -353,14 +361,29 @@ export default function Auth({
                   </label>
                 )}
                 <label>
-                  Alamat email
+                  {mode === "login" && method === "password"
+                    ? "WhatsApp atau email"
+                    : "Nomor WhatsApp"}
                   <input
-                    name="email"
-                    type="email"
-                    autoComplete="email"
+                    name="phone"
+                    type={
+                      mode === "login" && method === "password" ? "text" : "tel"
+                    }
+                    autoComplete={
+                      mode === "login" && method === "password"
+                        ? "username"
+                        : "tel"
+                    }
                     required
-                    maxLength={254}
-                    placeholder="nama@email.com"
+                    minLength={8}
+                    maxLength={
+                      mode === "login" && method === "password" ? 254 : 20
+                    }
+                    placeholder={
+                      mode === "login" && method === "password"
+                        ? "Nomor WhatsApp atau email Anda"
+                        : "08xxxxxxxxxx"
+                    }
                   />
                 </label>
                 {(mode === "register" ||
@@ -425,10 +448,10 @@ export default function Auth({
                 : challenge
                   ? "Verifikasi & lanjutkan"
                   : mode === "register"
-                    ? "Kirim kode verifikasi"
+                    ? "Daftar"
                     : mode === "reset" || method === "otp"
-                      ? "Kirim kode email"
-                      : "Masuk"}
+                      ? "Kirim kode WhatsApp"
+                      : "Login"}
               <ArrowRight size={17} />
             </button>
           </form>
@@ -449,7 +472,7 @@ export default function Auth({
                 disabled={busy}
                 onClick={() => change(mode)}
               >
-                Ganti email / mulai ulang
+                Ganti nomor / mulai ulang
               </button>
             </div>
           ) : (
@@ -482,11 +505,11 @@ export default function Auth({
             mode === "reset" ||
             method === "otp" ||
             challenge) && (
-            <div className="auth-test-note">
+            <div className="auth-verification-note">
               <ShieldCheck size={16} />
               <span>
-                Kode dikirim hanya ke alamat email yang Anda masukkan. Akun baru
-                akan dibuat setelah kode verifikasi benar.
+                Kode dikirim hanya ke nomor WhatsApp yang Anda masukkan. Akun
+                baru akan dibuat setelah kode verifikasi benar.
               </span>
             </div>
           )}
@@ -498,7 +521,7 @@ export default function Auth({
         </section>
       </main>
       <footer className="auth-footer">
-        © 2026 Liny Jaya · Akses akun yang aman
+        © 2026 Kintsugi · Akses akun yang aman
       </footer>
     </div>
   );
