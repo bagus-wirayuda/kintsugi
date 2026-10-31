@@ -13,7 +13,7 @@ export const orderSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1).max(40),
-        size: z.string().min(1).max(10),
+        size: z.string().min(1).max(15),
         color: z.string().regex(/^#[a-fA-F0-9]{3,6}$/),
         quantity: z.number().int().min(1).max(99),
       }),

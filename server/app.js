@@ -37,9 +37,9 @@ const imageSchema = z
   .max(1000)
   .refine(
     (s) =>
-      /^\/images\/[a-zA-Z0-9_.-]+$/.test(s) ||
-      /^https:\/\/images\.unsplash\.com\//.test(s),
-    "Gunakan gambar /images/ atau HTTPS images.unsplash.com.",
+      /^\/images\/[a-zA-Z0-9_\/.-]+$/.test(s) ||
+      /^https?:\/\//.test(s),
+    "Gunakan gambar /images/... atau URL HTTPS yang valid.",
   );
 const colorSchema = z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6})$/);
 const productFields = {
@@ -62,7 +62,7 @@ const productFields = {
   isNew: z.boolean(),
 };
 const variantSchema = z.object({
-  size: z.string().regex(/^[a-zA-Z0-9]{1,10}$/),
+  size: z.string().regex(/^[a-zA-Z0-9×xX\s-]{1,15}$/),
   color: colorSchema,
   stock: z.number().int().min(0).max(100000),
 });
@@ -92,7 +92,13 @@ export function createApp(pool, options = {}) {
             "https://fonts.googleapis.com",
           ],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          imgSrc: ["'self'", "https://images.unsplash.com", "data:"],
+          imgSrc: [
+            "'self'",
+            "https://down-id.img.susercontent.com",
+            "https://*.susercontent.com",
+            "https://images.unsplash.com",
+            "data:",
+          ],
           connectSrc: ["'self'"],
           upgradeInsecureRequests: env.NODE_ENV === "production" ? [] : null,
         },
@@ -184,11 +190,11 @@ export function createApp(pool, options = {}) {
     req.user?.role === "customer"
       ? next()
       : next(
-          fail(
-            403,
-            "Akun admin hanya untuk mengelola toko. Gunakan akun pelanggan untuk berbelanja.",
-          ),
-        );
+        fail(
+          403,
+          "Akun admin hanya untuk mengelola toko. Gunakan akun pelanggan untuk berbelanja.",
+        ),
+      );
   async function session(req, res, user) {
     if (req.cookies.lj_session)
       await pool.query("DELETE FROM sessions WHERE token_hash=?", [
@@ -447,10 +453,10 @@ export function createApp(pool, options = {}) {
     const rows = (
       await pool.query(
         "SELECT p.* FROM products p WHERE " +
-          clause +
-          " ORDER BY " +
-          order +
-          " LIMIT ? OFFSET ?",
+        clause +
+        " ORDER BY " +
+        order +
+        " LIMIT ? OFFSET ?",
         [...args, q.pageSize, (q.page - 1) * q.pageSize],
       )
     ).rows;
@@ -503,8 +509,8 @@ export function createApp(pool, options = {}) {
     const rows = (
       await pool.query(
         "SELECT * FROM orders" +
-          (filters.length ? " WHERE " + filters.join(" AND ") : "") +
-          " ORDER BY created_at DESC",
+        (filters.length ? " WHERE " + filters.join(" AND ") : "") +
+        " ORDER BY created_at DESC",
         args,
       )
     ).rows;
@@ -650,9 +656,9 @@ export function createApp(pool, options = {}) {
           "order/" + id,
           f.address.phone,
           `*Kintsugi - Pesanan Tersimpan*\n\n` +
-            `Halo ${f.address.name}, pesanan ${id} telah tersimpan.\n` +
-            `Total: Rp${total.total.toLocaleString("id-ID")}\n\n` +
-            `Lanjutkan pembayaran melalui halaman akun Anda.`,
+          `Halo ${f.address.name}, pesanan ${id} telah tersimpan.\n` +
+          `Total: Rp${total.total.toLocaleString("id-ID")}\n\n` +
+          `Lanjutkan pembayaran melalui halaman akun Anda.`,
         );
       }
       await c.query("COMMIT");
@@ -734,9 +740,9 @@ export function createApp(pool, options = {}) {
         "status/" + o.id + "/" + f.status,
         a.phone,
         `*Kintsugi - Status Pesanan*\n\n` +
-          `Pesanan ${o.id} telah diperbarui.\n` +
-          `Status: *${f.status}*\n\n` +
-          `Terima kasih telah berbelanja di Kintsugi.`,
+        `Pesanan ${o.id} telah diperbarui.\n` +
+        `Status: *${f.status}*\n\n` +
+        `Terima kasih telah berbelanja di Kintsugi.`,
       );
       await c.query("COMMIT");
       res.json({ ok: true });
@@ -825,10 +831,10 @@ export function createApp(pool, options = {}) {
       if (Object.keys(map).length)
         await c.query(
           "UPDATE products SET " +
-            Object.keys(map)
-              .map((k) => (names[k] || k) + "=?")
-              .join(",") +
-            " WHERE id=?",
+          Object.keys(map)
+            .map((k) => (names[k] || k) + "=?")
+            .join(",") +
+          " WHERE id=?",
           [...Object.values(map), req.params.id],
         );
       if (f.variants) {

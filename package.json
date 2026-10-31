@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "db:init": "node --env-file-if-exists=.env server/init.js",
+    "db:reset": "node --env-file-if-exists=.env scripts/reset-database.mjs",
     "start": "node --env-file-if-exists=.env server/index.js"
   },
   "dependencies": {

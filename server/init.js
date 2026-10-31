@@ -6,92 +6,51 @@ import { pool, databaseConfig } from "./db.js";
 import { products } from "../src/data.js";
 import { normalizePhone } from "./integrations.js";
 
-async function applyKintsugiBeddingCatalog(target) {
-  const migration = "kintsugi-bedding-catalog-v1";
-  await target.query(
-    "CREATE TABLE IF NOT EXISTS app_migrations (id VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-  );
-  if ((await target.query("SELECT id FROM app_migrations WHERE id=?", [migration])).rows.length)
-    return;
-
+async function syncSepraiCatalog(target) {
   const client = await target.connect();
   try {
     await client.query("START TRANSACTION");
-    for (const product of products) {
-      const updated = await client.query(
-        "UPDATE products SET sku=?,name=?,category=?,gender=?,price=?,old_price=?,image=?,description=?,rating=?,reviews=?,is_new=? WHERE id=?",
+    for (const p of products) {
+      await client.query(
+        `INSERT INTO products(id,sku,name,category,gender,price,old_price,image,description,rating,reviews,is_new,active)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)
+         ON DUPLICATE KEY UPDATE
+           sku=VALUES(sku),
+           name=VALUES(name),
+           category=VALUES(category),
+           gender=VALUES(gender),
+           price=VALUES(price),
+           old_price=VALUES(old_price),
+           image=VALUES(image),
+           description=VALUES(description),
+           rating=VALUES(rating),
+           reviews=VALUES(reviews),
+           is_new=VALUES(is_new),
+           active=1`,
         [
-          product.sku,
-          product.name,
-          product.category,
-          product.gender,
-          product.price,
-          product.oldPrice,
-          product.image,
-          product.description,
-          product.rating,
-          product.reviews,
-          product.isNew,
-          product.id,
+          p.id,
+          p.sku,
+          p.name,
+          p.category,
+          p.gender,
+          p.price,
+          p.oldPrice,
+          p.image,
+          p.description,
+          p.rating,
+          p.reviews,
+          p.isNew,
         ],
       );
-      if (!updated.affectedRows) continue;
-      await client.query("DELETE FROM product_variants WHERE product_id=?", [product.id]);
-      for (const size of product.sizes)
-        for (const color of product.colors)
+      for (const size of p.sizes) {
+        for (const color of p.colors) {
           await client.query(
-            "INSERT INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
-            [product.id, size, color, product.stock],
+            "INSERT IGNORE INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
+            [p.id, size, color, p.stock],
           );
+        }
+      }
     }
-    await client.query("INSERT INTO app_migrations(id) VALUES(?)", [migration]);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-async function applyKintsugiSheetCatalogV2(target) {
-  const migration = "kintsugi-spring-bed-sheets-v2";
-  if ((await target.query("SELECT id FROM app_migrations WHERE id=?", [migration])).rows.length)
-    return;
-
-  const client = await target.connect();
-  try {
-    await client.query("START TRANSACTION");
-    // Produk katalog lama tidak dihapus agar referensi pesanan historis tetap aman.
-    await client.query("UPDATE products SET active=0 WHERE id LIKE 'lj-%'");
-    for (const product of products) {
-      const updated = await client.query(
-        "UPDATE products SET sku=?,name=?,category=?,gender=?,price=?,old_price=?,image=?,description=?,rating=?,reviews=?,is_new=?,active=1 WHERE id=?",
-        [
-          product.sku,
-          product.name,
-          product.category,
-          product.gender,
-          product.price,
-          product.oldPrice,
-          product.image,
-          product.description,
-          product.rating,
-          product.reviews,
-          product.isNew,
-          product.id,
-        ],
-      );
-      if (!updated.affectedRows) continue;
-      await client.query("DELETE FROM product_variants WHERE product_id=?", [product.id]);
-      for (const size of product.sizes)
-        for (const color of product.colors)
-          await client.query(
-            "INSERT INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
-            [product.id, size, color, product.stock],
-          );
-    }
-    await client.query("INSERT INTO app_migrations(id) VALUES(?)", [migration]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -109,7 +68,11 @@ export async function initialize(target = pool, seed = true) {
   for (const sql of source.split(";").filter((s) => s.trim()))
     await target.query(sql);
 
-  // NULL mempertahankan akun email lama tanpa mengarang nomor atau benturan '' pada indeks unik.
+  await target.query(
+    "CREATE TABLE IF NOT EXISTS app_migrations (id VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  );
+
+  // NULL mempertahankan akun email lama tanpa benturan indeks unik
   const userPhone = (await target.query("SHOW COLUMNS FROM users LIKE 'phone'"))
     .rows[0];
   if (!userPhone)
@@ -129,6 +92,7 @@ export async function initialize(target = pool, seed = true) {
     ).rows.length
   )
     await target.query("ALTER TABLE users ADD UNIQUE INDEX idx_phone (phone)");
+
   const userEmail = (await target.query("SHOW COLUMNS FROM users LIKE 'email'"))
     .rows[0];
   if (userEmail?.Null !== "YES")
@@ -158,6 +122,7 @@ export async function initialize(target = pool, seed = true) {
     await target.query(
       "ALTER TABLE auth_challenges ADD UNIQUE INDEX idx_phone_purpose (phone,purpose)",
     );
+
   const authEmail = (
     await target.query("SHOW COLUMNS FROM auth_challenges LIKE 'email'")
   ).rows[0];
@@ -166,60 +131,34 @@ export async function initialize(target = pool, seed = true) {
       "ALTER TABLE auth_challenges MODIFY email VARCHAR(254) NULL DEFAULT NULL",
     );
 
-  // Migrasi satu kali: produk contoh lama menjadi katalog sprei Kintsugi tanpa
-  // mengubah pesanan terdahulu atau menimpa edit admin pada startup berikutnya.
-  await applyKintsugiBeddingCatalog(target);
-  // Koreksi katalog: seluruh produk aktif adalah sprei dan pelengkap kasur,
-  // bukan produk penutup tubuh. Produk lama cukup diarsipkan demi pesanan lama.
-  await applyKintsugiSheetCatalogV2(target);
+  // Sinkronisasi katalog seprai
+  await syncSepraiCatalog(target);
 
   if (!seed) return;
   const client = await target.connect();
   try {
     await client.query("START TRANSACTION");
-    for (const p of products) {
-      await client.query(
-        "INSERT IGNORE INTO products(id,sku,name,category,gender,price,old_price,image,description,rating,reviews,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-        [
-          p.id,
-          p.sku,
-          p.name,
-          p.category,
-          p.gender,
-          p.price,
-          p.oldPrice,
-          p.image,
-          p.description,
-          p.rating,
-          p.reviews,
-          p.isNew,
-        ],
-      );
-      for (const size of p.sizes)
-        for (const color of p.colors)
-          await client.query(
-            "INSERT IGNORE INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
-            [p.id, size, color, p.stock],
-          );
-    }
+
+    const adminEmail = process.env.ADMIN_EMAIL || "admin@linyjaya.test";
+    const adminPhone = normalizePhone(process.env.ADMIN_PHONE || "6281111111111");
+    const adminPassword = process.env.ADMIN_PASSWORD || "AdminLinyJaya2026!";
+
+    const customerEmail = "pelanggan@linyjaya.test";
+    const customerPhone = "6282222222222";
+    const customerPassword = "BelanjaLiny2026!";
+
     const accounts = [
-      [
-        process.env.ADMIN_EMAIL || '',
-        normalizePhone(process.env.ADMIN_PHONE || ''),
-        process.env.ADMIN_PASSWORD || '',
-        "Admin Kintsugi",
-        "admin",
-      ],
+      [adminEmail, adminPhone, adminPassword, "Admin Liny Jaya", "admin"],
+      [customerEmail, customerPhone, customerPassword, "Pelanggan Liny Jaya", "customer"],
     ];
-    if (
-      !process.env.ADMIN_PASSWORD || !process.env.ADMIN_PHONE || !process.env.ADMIN_EMAIL
-    )
-      throw new Error("ADMIN_EMAIL, ADMIN_PHONE, dan ADMIN_PASSWORD wajib diatur untuk inisialisasi administrator.");
+
     for (const [email, phone, password, name, role] of accounts) {
       if (password.length < 12)
         throw new Error("Password seed minimal 12 karakter.");
       await client.query(
-        "INSERT INTO users(id,name,email,phone,password_hash,role) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone),name=VALUES(name)",
+        `INSERT INTO users(id,name,email,phone,password_hash,role)
+         VALUES(?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE phone=VALUES(phone),name=VALUES(name)`,
         [
           randomUUID(),
           name,
@@ -256,7 +195,7 @@ if (process.argv[1]?.replaceAll("\\", "/").endsWith("/server/init.js")) {
     console.log(
       "Database MySQL " +
         config.database +
-        " siap: katalog sprei spring bed, varian, admin dan pelanggan. Seed tidak mereset data lama.",
+        " siap: 32 produk katalog sprei spring bed, varian lengkap, akun admin dan pelanggan demo.",
     );
   } catch (e) {
     console.error("Inisialisasi gagal:", e.message);

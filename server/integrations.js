@@ -7,7 +7,7 @@ export const escapeHtml = (s) =>
     /[&<>"']/g,
     (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
+      c
       ],
   );
 export function verifyToken(value, expected) {
@@ -18,7 +18,7 @@ export function verifyToken(value, expected) {
 }
 export function createGateway(env = process.env, transport = fetch) {
   async function request(path, method = "GET", body, key) {
-    if (!env.XENDIT_SECRET_KEY) throw fail(503, "Pembayaran belum dikonfigurasi.");
+    if (!env.XENDIT_SECRET_KEY) throw fail(503, "Xendit belum dikonfigurasi.");
     let res;
     try {
       res = await transport("https://api.xendit.co" + path, {
@@ -36,14 +36,14 @@ export function createGateway(env = process.env, transport = fetch) {
     } catch {
       throw fail(
         502,
-        "Koneksi pembayaran terputus. Pesanan tersimpan; coba muat pembayaran kembali.",
+        "Koneksi Xendit terputus. Pesanan tersimpan; coba muat pembayaran kembali.",
       );
     }
     const data = await res.json();
     if (!res.ok) {
       const error = fail(
         502,
-        "Pembayaran belum dapat diproses. Pilih metode lain atau hubungi pengelola.",
+        "Xendit menolak permintaan (" + (data.error_code || res.status) + ").",
       );
       error.definitive =
         res.status >= 400 &&
@@ -73,15 +73,14 @@ export function createGateway(env = process.env, transport = fetch) {
           external_id: order.id,
           amount: order.total,
           currency: "IDR",
-          description: "Pesanan Kintsugi " + order.id,
+          description: "Pesanan Liny Jaya " + order.id,
           invoice_duration: Math.min(
             86400,
             Math.max(300, Number(env.INVOICE_DURATION) || 3600),
           ),
           should_send_email: false,
-          ...(order.payment && order.payment !== 'xendit' ? { payment_methods: [order.payment] } : {}),
-          success_redirect_url: appUrl + "/#account/orders",
-          failure_redirect_url: appUrl + "/#account/orders",
+          success_redirect_url: appUrl + "/#account",
+          failure_redirect_url: appUrl + "/#account",
         },
         order.id,
       );
@@ -134,7 +133,7 @@ export async function sendWhatsApp(wa, env = process.env, transport = fetch) {
         phone: normalizePhone(wa.phone),
         message: wa.message,
         to: [wa.recipient || normalizePhone(wa.phone)],
-        subject: wa.subject || "Kode verifikasi Kintsugi",
+        subject: wa.subject || "Kode verifikasi Liny Jaya",
       }),
     });
   } catch {
@@ -190,7 +189,7 @@ export async function queueWhatsApp(db, id, phone, message) {
       "INSERT IGNORE INTO email_outbox(id,recipient,subject,html) VALUES(?,?,?,?)",
       [id, normalizePhone(phone), "WA: " + id, message],
     );
-  } catch {}
+  } catch { }
 }
 
 /**
