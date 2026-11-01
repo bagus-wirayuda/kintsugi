@@ -2076,3 +2076,103 @@ body { background: var(--ks-paper); }
     display: none;
   }
 }
+
+/* Alamat Tersimpan Checkout */
+.ks-saved-address-card {
+  background: #fdfbf7;
+  border: 1.5px solid #d7c28c;
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin-top: 10px;
+}
+.ks-saved-address-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #ebdcc0;
+  padding-bottom: 10px;
+}
+.ks-saved-address-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #e8f4f1;
+  color: #0e6575;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.ks-change-address-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0e6575;
+  cursor: pointer;
+  background: none;
+  border: none;
+  text-decoration: underline;
+  padding: 4px 8px;
+}
+.ks-change-address-btn:hover {
+  color: #094752;
+}
+.ks-saved-address-body strong {
+  font-size: 15px;
+  color: #1a1a1a;
+  display: block;
+  margin-bottom: 6px;
+}
+.ks-saved-phone {
+  font-weight: normal;
+  color: #555;
+  font-size: 14px;
+}
+.ks-saved-street {
+  font-size: 14px;
+  color: #333;
+  margin: 0 0 4px 0;
+  line-height: 1.5;
+}
+.ks-saved-city {
+  font-size: 14px;
+  color: #333;
+  margin: 0 0 8px 0;
+}
+.ks-saved-email {
+  font-size: 12px;
+  color: #777;
+  display: block;
+}
+
+/* Buat Kata Sandi Akun Baru Sebelum Pembayaran */
+.ks-new-account-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #fdfbf7;
+  border: 1px solid #ebdcc0;
+  border-radius: 6px;
+}
+.ks-new-account-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+}
+.ks-new-account-box input {
+  padding: 11px 14px;
+  border: 1px solid #d4c8b6;
+  border-radius: 4px;
+  font-size: 14px;
+  background: #fff;
+}
+.ks-new-account-box input:focus {
+  border-color: #0e6575;
+  outline: none;
+}
+

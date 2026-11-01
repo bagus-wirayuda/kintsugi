@@ -250,6 +250,33 @@ export function createApp(pool, options = {}) {
   app.post("/api/auth/checkout", authLimit, async (req, res) =>
     res.status(202).json(await otp.checkout(req.body)),
   );
+  app.post("/api/auth/lookup", authLimit, async (req, res) => {
+    const f = z
+      .object({
+        phone: z.string().optional(),
+        email: z.string().optional(),
+      })
+      .parse(req.body);
+    let exists = false;
+    if (f.phone) {
+      try {
+        const phone = normalizePhone(f.phone);
+        const user = (
+          await pool.query("SELECT id FROM users WHERE phone=?", [phone])
+        ).rows[0];
+        if (user) exists = true;
+      } catch (_) {}
+    }
+    if (!exists && f.email) {
+      const user = (
+        await pool.query("SELECT id FROM users WHERE email=?", [
+          f.email.toLowerCase(),
+        ])
+      ).rows[0];
+      if (user) exists = true;
+    }
+    res.json({ exists, isNew: !exists });
+  });
   app.post("/api/auth/otp/request", authLimit, async (req, res) =>
     res.status(202).json(await otp.request(req.body)),
   );
@@ -291,14 +318,43 @@ export function createApp(pool, options = {}) {
   });
   app.get("/api/me", auth, (req, res) => res.json(safeUser(req.user)));
   app.get("/api/me/profile", auth, customer, async (req, res) => {
-    const p =
+    let p =
       (
         await pool.query(
           "SELECT phone AS profile_phone,street,city,postal FROM customer_profiles WHERE user_id=?",
           [req.user.id],
         )
       ).rows[0] || {};
-    res.json({ ...safeUser(req.user), ...p });
+    let lastAddr = null;
+    if (!p.street || !p.city || !p.postal) {
+      const lastOrder = (
+        await pool.query(
+          "SELECT address FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+          [req.user.id],
+        )
+      ).rows[0];
+      if (lastOrder?.address) {
+        try {
+          lastAddr =
+            typeof lastOrder.address === "string"
+              ? JSON.parse(lastOrder.address)
+              : lastOrder.address;
+        } catch (_) {}
+      }
+    }
+    const resolvedPhone =
+      p.profile_phone || req.user.phone || lastAddr?.phone || "";
+    const resolvedStreet = p.street || lastAddr?.street || "";
+    const resolvedCity = p.city || lastAddr?.city || "";
+    const resolvedPostal = p.postal || lastAddr?.postal || "";
+    res.json({
+      ...safeUser(req.user),
+      phone: resolvedPhone,
+      profile_phone: resolvedPhone,
+      street: resolvedStreet,
+      city: resolvedCity,
+      postal: resolvedPostal,
+    });
   });
   app.patch("/api/me/profile", auth, customer, async (req, res) => {
     const f = z
@@ -650,6 +706,21 @@ export function createApp(pool, options = {}) {
               i.price,
             ],
           );
+        // Simpan alamat untuk belanja berikutnya tanpa perlu input ulang
+        await c.query(
+          "INSERT INTO customer_profiles(user_id,phone,street,city,postal) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone),street=VALUES(street),city=VALUES(city),postal=VALUES(postal)",
+          [
+            req.user.id,
+            f.address.phone,
+            f.address.street,
+            f.address.city,
+            f.address.postal,
+          ],
+        );
+        await c.query(
+          "UPDATE users SET phone=COALESCE(NULLIF(phone, ''), ?), name=COALESCE(NULLIF(name, ''), ?) WHERE id=?",
+          [f.address.phone, f.address.name, req.user.id],
+        );
         // Kirim notifikasi pesanan via WhatsApp
         await queueWhatsApp(
           c,
