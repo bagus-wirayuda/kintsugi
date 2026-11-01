@@ -202,7 +202,7 @@ export async function flushWhatsApp(pool, env = process.env, transport = fetch) 
     try {
       await c.query("START TRANSACTION");
       const { rows } = await c.query(
-        "SELECT * FROM wa_outbox WHERE status='pending' AND attempts<8 AND next_attempt_at<=UTC_TIMESTAMP(3) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED",
+        "SELECT * FROM wa_outbox WHERE status='pending' AND attempts<8 AND next_attempt_at<=UTC_TIMESTAMP(3) ORDER BY created_at LIMIT 1 FOR UPDATE",
       );
       const msg = rows[0];
       if (!msg) {

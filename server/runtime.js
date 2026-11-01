@@ -35,7 +35,7 @@ export async function startRuntime(
     activeJob = Promise.resolve()
       .then(() => app.locals.background())
       .catch((error) =>
-        reportError("Pekerjaan berkala gagal:", error.code || error.message),
+        reportError("Pekerjaan berkala gagal:", error.message, "\nSQL:", error.sql),
       )
       .finally(() => {
         activeJob = undefined;
