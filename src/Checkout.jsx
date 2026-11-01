@@ -50,6 +50,14 @@ export default function Checkout({
     phone: user?.phone || "",
     ...initial?.address,
   }));
+  const [editingAddress, setEditingAddress] = useState(false);
+  const hasSavedAddress = Boolean(
+    address.name &&
+      address.phone &&
+      address.street &&
+      address.city &&
+      address.postal,
+  );
   const [shipping, setShipping] = useState(initial?.shipping || "regular");
   const [payment, setPayment] = useState(initial?.payment || '');
   const methods = config.paymentMethods || [];
@@ -67,15 +75,15 @@ export default function Checkout({
     let alive = true;
     api("/me/profile")
       .then((profile) => {
-        if (!alive) return;
-        setAddress((current) =>
-          Object.fromEntries(
-            Object.keys(emptyAddress).map((key) => [
-              key,
-              current[key] || profile?.[key] || user[key] || "",
-            ]),
-          ),
-        );
+        if (!alive || !profile) return;
+        setAddress((current) => ({
+          name: profile.name || user.name || current.name || "",
+          email: profile.email || user.email || current.email || "",
+          phone: profile.phone || profile.profile_phone || user.phone || current.phone || "",
+          street: profile.street || current.street || "",
+          city: profile.city || current.city || "",
+          postal: profile.postal || current.postal || "",
+        }));
       })
       .catch(() => {});
     return () => {
@@ -161,8 +169,19 @@ export default function Checkout({
   }
   function submit(e) {
     e.preventDefault();
+    if (
+      !address.name ||
+      !address.phone ||
+      !address.street ||
+      !address.city ||
+      !address.postal
+    ) {
+      setEditingAddress(true);
+      return setError("Lengkapi alamat pengiriman terlebih dahulu.");
+    }
     if (!quote || checking || busy) return;
-    if (!methods.some((method) => method.id === payment)) return setError('Pilih metode pembayaran terlebih dahulu.');
+    if (!methods.some((method) => method.id === payment))
+      return setError("Pilih metode pembayaran terlebih dahulu.");
     setError("");
     if (!user) {
       setIdentity(true);
@@ -241,49 +260,96 @@ export default function Checkout({
                         <MapPin size={20} /> 01 / Alamat penerima
                       </h2>
                       <p>
-                        Data tersimpan di browser ini selama 24 jam agar Anda
-                        bisa melanjutkan nanti.
+                        {hasSavedAddress && !editingAddress
+                          ? "Alamat tersimpan Anda digunakan otomatis untuk pesanan ini."
+                          : "Lengkapi alamat pengiriman untuk pesanan Anda."}
                       </p>
                     </div>
-                    <div className="ws-form-grid">
-                      {field("name", "Nama lengkap", {
-                        minLength: 2,
-                        maxLength: 100,
-                        autoComplete: "name",
-                        placeholder: "Nama penerima",
-                      })}
-                      {field("email", "Email untuk pesanan", {
-                        type: "email",
-                        maxLength: 254,
-                        autoComplete: "email",
-                        placeholder: "nama@email.com",
-                      })}
-                      {field("phone", "Nomor WhatsApp", {
-                        type: "tel",
-                        pattern: "[0-9+ ()-]{8,20}",
-                        autoComplete: "tel",
-                        placeholder: "08xxxxxxxxxx",
-                      })}
-                      {field("city", "Kota / kabupaten", {
-                        minLength: 2,
-                        maxLength: 100,
-                        autoComplete: "address-level2",
-                        placeholder: "Kota / kabupaten",
-                      })}
-                      {field("street", "Alamat lengkap", {
-                        minLength: 10,
-                        maxLength: 500,
-                        autoComplete: "street-address",
-                        placeholder: "Jalan, nomor rumah, RT/RW, kecamatan",
-                      })}
-                      {field("postal", "Kode pos", {
-                        inputMode: "numeric",
-                        pattern: "[0-9]{5}",
-                        maxLength: 5,
-                        autoComplete: "postal-code",
-                        placeholder: "5 digit kode pos",
-                      })}
-                    </div>
+                    {hasSavedAddress && !editingAddress ? (
+                      <div className="ks-saved-address-card">
+                        <div className="ks-saved-address-header">
+                          <span className="ks-saved-address-badge">
+                            <Check size={14} /> Alamat Tersimpan (Otomatis)
+                          </span>
+                          <button
+                            type="button"
+                            className="ks-change-address-btn"
+                            onClick={() => setEditingAddress(true)}
+                          >
+                            Ubah Alamat
+                          </button>
+                        </div>
+                        <div className="ks-saved-address-body">
+                          <strong>
+                            {address.name}{" "}
+                            <span className="ks-saved-phone">
+                              ({address.phone})
+                            </span>
+                          </strong>
+                          <p className="ks-saved-street">{address.street}</p>
+                          <p className="ks-saved-city">
+                            {address.city}, {address.postal}
+                          </p>
+                          {address.email && (
+                            <small className="ks-saved-email">
+                              Email: {address.email}
+                            </small>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="ws-form-grid">
+                          {field("name", "Nama lengkap", {
+                            minLength: 2,
+                            maxLength: 100,
+                            autoComplete: "name",
+                            placeholder: "Nama penerima",
+                          })}
+                          {field("email", "Email untuk pesanan", {
+                            type: "email",
+                            maxLength: 254,
+                            autoComplete: "email",
+                            placeholder: "nama@email.com",
+                          })}
+                          {field("phone", "Nomor WhatsApp", {
+                            type: "tel",
+                            pattern: "[0-9+ ()-]{8,20}",
+                            autoComplete: "tel",
+                            placeholder: "08xxxxxxxxxx",
+                          })}
+                          {field("city", "Kota / kabupaten", {
+                            minLength: 2,
+                            maxLength: 100,
+                            autoComplete: "address-level2",
+                            placeholder: "Kota / kabupaten",
+                          })}
+                          {field("street", "Alamat lengkap", {
+                            minLength: 10,
+                            maxLength: 500,
+                            autoComplete: "street-address",
+                            placeholder: "Jalan, nomor rumah, RT/RW, kecamatan",
+                          })}
+                          {field("postal", "Kode pos", {
+                            inputMode: "numeric",
+                            pattern: "[0-9]{5}",
+                            maxLength: 5,
+                            autoComplete: "postal-code",
+                            placeholder: "5 digit kode pos",
+                          })}
+                        </div>
+                        {hasSavedAddress && editingAddress && (
+                          <button
+                            type="button"
+                            className="ws-link"
+                            style={{ marginTop: 12, display: "inline-block" }}
+                            onClick={() => setEditingAddress(false)}
+                          >
+                            Gunakan alamat tersimpan
+                          </button>
+                        )}
+                      </>
+                    )}
                   </section>
                   <section className="ws-panel ws-form-panel">
                     <div className="ws-panel-heading">

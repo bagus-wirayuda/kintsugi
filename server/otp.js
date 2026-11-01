@@ -136,13 +136,15 @@ export function createOtp({ pool, env, transport, session }) {
     });
   }
 
-  // Checkout mengenali akun melalui nomor terverifikasi tanpa meminta password baru.
+  // Checkout mengenali akun melalui nomor terverifikasi. Jika akun baru, wajib membuat password.
   async function checkout(body) {
     const f = z
       .object({
         name: z.string().trim().min(2).max(100),
         phone: phoneSchema,
         consent: z.literal(true),
+        email: z.string().email().max(254).optional().or(z.literal("")),
+        password: z.string().min(8).max(72).optional(),
       })
       .parse(body);
     const user = (
@@ -155,11 +157,13 @@ export function createOtp({ pool, env, transport, session }) {
       );
     if (user)
       return issue(f.phone, "login", { userId: user.id, checkout: true });
+    if (!f.password || f.password.length < 8)
+      throw fail(400, "Akun baru wajib membuat kata sandi (minimal 8 karakter).");
     return issue(f.phone, "register", {
       name: f.name,
-      email: "",
+      email: f.email || "",
       checkout: true,
-      passwordHash: await bcrypt.hash(randomBytes(32).toString("hex"), 12),
+      passwordHash: await bcrypt.hash(f.password, 12),
     });
   }
 
