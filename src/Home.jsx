@@ -7,7 +7,17 @@ import {
   Package,
 } from "lucide-react";
 import { assets, colorLabel, money } from "./data";
-import { categoryLabel, departmentLabel } from "./catalog";
+import { categoryLabel } from "./catalog";
+import SizeSummary from "./SizeSummary.jsx";
+const categoryTiles = [
+  ["Sprei Fitted", assets.fitted, "Sprei berkaret yang membungkus spring bed dengan rapi."],
+  ["Set Sprei", assets.sheets, "Paket sprei dan sarung bantal yang serasi."],
+  ["Sprei Karet", assets.stripe, "Pilihan sprei praktis untuk pemakaian harian."],
+  ["Sprei Hotel", assets.hotel, "Tampilan rapi dan nyaman untuk kamar inap."],
+  ["Sarung Bantal & Guling", assets.pillow, "Pelengkap tempat tidur dengan warna senada."],
+  ["Sprei Motif", assets.kids, "Pilihan motif untuk suasana kamar yang lebih personal."],
+  ["Pelindung Kasur", assets.protector, "Lapisan pelindung untuk menjaga kasur."],
+];
 export default function Home({ shop, products, openProduct }) {
   return (
     <main className="ks-home">
@@ -28,7 +38,7 @@ export default function Home({ shop, products, openProduct }) {
             <em>Setiap malam.</em>
           </h1>
           <p>Tekstil kamar yang lembut untuk menjaga setiap momen istirahat.</p>
-          <button onClick={() => shop("Semua", "Wanita")}>
+          <button onClick={() => shop()}>
             JELAJAHI KOLEKSI <ArrowRight size={19} />
           </button>
           <span className="ks-hero-caption">
@@ -45,10 +55,10 @@ export default function Home({ shop, products, openProduct }) {
         {[
           "Produk Baru",
           "Penawaran Terbatas",
-          "T-Shirt",
-          "Kemeja & Blus",
-          "Celana",
-          "Luaran",
+          "Sprei Fitted",
+          "Set Sprei",
+          "Sprei Karet",
+          "Sprei Hotel",
         ].map((c) => (
           <button key={c} onClick={() => shop(c)}>
             {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c)} <ArrowUpRight size={15} />
@@ -65,19 +75,14 @@ export default function Home({ shop, products, openProduct }) {
             Lihat semua <ArrowRight size={17} />
           </button>
         </div>
-        <div className="ks-department-grid">
-          {[
-            ["Wanita", assets.sheets, "Lembut untuk ritual tidur setiap hari."],
-            ["Pria", assets.hotel, "Rapi dan nyaman untuk kamar hotel & guest."],
-            ["Anak", assets.kids, "Motif yang membuat waktu tidur lebih ceria."],
-            ["Bayi", assets.baby, "Kelembutan sejak pelukan pertama."],
-          ].map(([g, image, description]) => (
-            <button key={g} onClick={() => shop("Semua", g)}>
+        <div className="ks-department-grid ks-product-category-grid">
+          {categoryTiles.map(([category, image, description]) => (
+            <button key={category} onClick={() => shop(category)}>
               <div>
-                <img src={image} alt={"Koleksi " + g} loading="lazy" />
+                <img src={image} alt={category} loading="lazy" />
               </div>
               <h3>
-                {departmentLabel(g).toUpperCase()} <ArrowUpRight size={19} />
+                {categoryLabel(category).toUpperCase()} <ArrowUpRight size={19} />
               </h3>
               <p>{description}</p>
             </button>
@@ -111,9 +116,8 @@ export default function Home({ shop, products, openProduct }) {
                   <span key={c} style={{ background: c }} title={colorLabel(c)} />
                 ))}
               </div>
-              <small>
-                {departmentLabel(p.gender).toUpperCase()} · {p.sizes[0]}–{p.sizes.at(-1)} · {colorLabel(p.colors[0])}
-              </small>
+              <small>{categoryLabel(p.category).toUpperCase()} · {colorLabel(p.colors[0])}</small>
+              <SizeSummary sizes={p.sizes} />
               <button
                 className="ks-home-product-name"
                 onClick={() => openProduct(p)}

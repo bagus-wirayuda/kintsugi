@@ -27,7 +27,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { categories, colorLabel, money } from "./data";
-import { categoryLabel, departments, departmentLabel } from "./catalog";
+import { categoryLabel } from "./catalog";
 import { storage, api } from "./store";
 import "./styles.css";
 const Admin = lazy(() => import("./Admin.jsx"));
@@ -38,6 +38,8 @@ import Home from "./Home.jsx";
 import { CartPage, WishlistPage, PaymentPage } from "./ShoppingPages.jsx";
 import "./workspace.css";
 import { policy } from "./policies.js";
+import { dimensionLabel, parseDimensions } from "./dimensions.js";
+import SizeSummary from "./SizeSummary.jsx";
 import Brand from "./Brand.jsx";
 import { StoreHeader } from "./StoreChrome.jsx";
 import {
@@ -62,7 +64,7 @@ const initialView = () =>
     : "home";
 function App() {
   const [products, setProducts] = useState([]),
-    [gender, setGender] = useState("Wanita"),
+    [activeCategory, setActiveCategory] = useState("Semua"),
     [view, setView] = useState(initialView),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
@@ -113,8 +115,14 @@ function App() {
   useEffect(() => {
     if (!authReady) return;
     const owner = user?.id || "guest";
-    setCart(storage.read("cart:" + owner, []));
-    setDirectPurchase(storage.read('direct:' + owner, null));
+    const savedCart = storage.read("cart:" + owner, []);
+    const restoreDimensions = (row) => {
+      const d = parseDimensions(row?.size);
+      return d ? { ...row, size: `${d.length}×${d.width}×${d.height}` } : row;
+    };
+    setCart(savedCart.map(restoreDimensions));
+    const savedDirect = storage.read('direct:' + owner, null);
+    setDirectPurchase(savedDirect ? restoreDimensions(savedDirect) : null);
     setWish(storage.read("wish:" + owner, []));
     setCartOwner(owner);
     setCoupon(storage.read("coupon:" + owner, ""));
@@ -222,8 +230,8 @@ function App() {
     setSearchOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  const shop = (cat = "Semua", g = gender) => {
-    setGender(g);
+  const shop = (cat = "Semua", g = "Semua") => {
+    setActiveCategory(g);
     setCategory(cat);
     setSearch("");
     nav("catalog");
@@ -253,7 +261,7 @@ function App() {
   useEffect(() => {
     setPage(1);
   }, [
-    gender,
+    activeCategory,
     category,
     search,
     sort,
@@ -270,14 +278,13 @@ function App() {
     setCatalogError("");
     const timer = setTimeout(() => {
       const params = new URLSearchParams({
-        category: view === "wishlist" ? "Semua" : category,
+        category: view === "wishlist" ? "Semua" : category === "Semua" ? activeCategory : category,
         search,
         sort,
         page: String(page),
         pageSize: "8",
       });
       if (view === "wishlist") params.set("ids", wish.join(","));
-      else params.set("gender", gender);
       if (filterSize) params.set("size", filterSize);
       if (filterColor) params.set("color", filterColor);
       if (minPrice) params.set("min", minPrice);
@@ -297,7 +304,7 @@ function App() {
     };
   }, [
     view,
-    gender,
+    activeCategory,
     category,
     search,
     sort,
@@ -405,11 +412,9 @@ function App() {
           ))}
         </div>
         <div className="product-meta">
-          {departmentLabel(p.gender).toUpperCase()} {" "}
-          <span>
-            {p.sizes[0]}–{p.sizes.at(-1)}
-          </span>
+          {categoryLabel(p.category).toUpperCase()}
         </div>
+        <SizeSummary sizes={p.sizes} />
         <button className="product-name" onClick={() => openProduct(p)}>
           {p.name}
         </button>
@@ -487,7 +492,7 @@ function App() {
           pendingCart={cart.length > 0}
           nav={nav}
           shop={shop}
-          gender={gender}
+          activeCategory={activeCategory}
           cartCount={count}
           wishCount={wish.length}
           onSearch={() => { nav('catalog'); setSearchOpen(true); }}
@@ -513,7 +518,7 @@ function App() {
     onLogout: logout,
     nav,
     shop,
-    gender,
+    activeCategory,
     cartCount: count,
     wishCount: wish.length,
     onSearch: () => {
@@ -608,7 +613,7 @@ function App() {
       <StoreHeader
         nav={nav}
         shop={shop}
-        gender={gender}
+        activeCategory={activeCategory}
         count={count}
         wishCount={wish.length}
         user={user}
@@ -623,7 +628,7 @@ function App() {
           <div className="breadcrumb">
             <button onClick={() => nav("home")}>Beranda</button>
             <ChevronRight size={12} />
-            {view === "wishlist" ? "Wishlist" : departmentLabel(gender)}
+            {view === "wishlist" ? "Wishlist" : categoryLabel(category === "Semua" ? activeCategory : category)}
             <ChevronRight size={12} />
             {categoryLabel(category)}
           </div>
@@ -635,8 +640,10 @@ function App() {
                   ? "Wishlist Anda"
                   : search
                     ? `Hasil pencarian “${search}”`
-                    : category === "Semua"
-                      ? `Koleksi ${departmentLabel(gender)}`
+                    : category === "Semua" && activeCategory === "Semua"
+                      ? "Koleksi Seprai"
+                      : category === "Semua"
+                        ? categoryLabel(activeCategory)
                       : categoryLabel(category)}
               </h1>
               <p>
@@ -655,7 +662,7 @@ function App() {
                     <button
                       key={c}
                       className={category === c ? "active" : ""}
-                      onClick={() => setCategory(c)}
+                      onClick={() => { setCategory(c); setActiveCategory("Semua"); }}
                     >
                       {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c)}
                       <ChevronRight size={13} />
@@ -663,23 +670,11 @@ function App() {
                   ))}
               </div>
               <hr />
-              <h3>Belanja untuk</h3>
-              <div className="catalog-departments-filter">
-                {departments.map(({ id: g, label }) => (
-                  <button
-                    key={g}
-                    className={gender === g ? "active" : ""}
-                    onClick={() => setGender(g)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
               <details className="advanced-filters">
-                <summary>Ukuran kasur, warna & harga</summary>
+                <summary>Ukuran, warna & harga</summary>
                 <div className="filter-fields">
                   <label>
-                    Ukuran kasur
+                    Ukuran
                     <select
                       aria-label="Filter ukuran"
                       value={filterSize}
@@ -687,7 +682,7 @@ function App() {
                     >
                       <option value="">Semua ukuran</option>
                       {catalog.facets.sizes.map((s) => (
-                        <option key={s}>{s}</option>
+                        <option key={s} value={s}>{dimensionLabel(s)}</option>
                       ))}
                     </select>
                   </label>
@@ -744,6 +739,7 @@ function App() {
                       setMinPrice("");
                       setMaxPrice("");
                       setCategory("Semua");
+                      setActiveCategory("Semua");
                       setSearch("");
                     }}
                   >
@@ -755,7 +751,7 @@ function App() {
             <div className="catalog-results">
               <div className="catalog-toolbar">
                 <span>
-                  <SlidersHorizontal size={16} /> {departmentLabel(gender)} / {categoryLabel(category)}
+                  <SlidersHorizontal size={16} /> {categoryLabel(category === "Semua" ? activeCategory : category)}
                 </span>
                 <label>
                   Urutkan:{" "}
@@ -774,8 +770,9 @@ function App() {
               <div className="active-filters">
                 {[
                   search && "Cari: " + search,
-                  category !== "Semua" && category,
-                  filterSize && "Ukuran kasur: " + filterSize,
+                  category !== "Semua" && categoryLabel(category),
+                  category === "Semua" && activeCategory !== "Semua" && categoryLabel(activeCategory),
+                  filterSize && "Ukuran: " + dimensionLabel(filterSize),
                   filterColor && "Warna: " + colorLabel(filterColor),
                   minPrice && "Min: " + money(minPrice),
                   maxPrice && "Maks: " + money(maxPrice),
@@ -967,7 +964,7 @@ function App() {
             </div>
             <div className="detail-info">
               <span className="eyebrow">
-                {departmentLabel(detail.gender)} / {categoryLabel(detail.category)}
+                {categoryLabel(detail.category)}
               </span>
               <h1>{detail.name}</h1>
               <div className="rating">
@@ -997,8 +994,8 @@ function App() {
                   />
                 ))}
               </div>
-              <label>
-                Ukuran kasur: {size || "Pilih ukuran"}{" "}
+              <label className="product-size-label">
+                <span>Ukuran seprai</span>
                 <button
                   className="text-link"
                   onClick={() => setInfo("Panduan ukuran")}
@@ -1006,23 +1003,29 @@ function App() {
                   Panduan ukuran
                 </button>
               </label>
+              <p className="product-size-hint">Pilih satu ukuran lengkap: panjang × lebar × tinggi.</p>
               <div className="size-choices">
-                {detail.sizes.map((s) => (
-                  <button
+                {detail.sizes.map((s) => {
+                  const dimensions = parseDimensions(s);
+                  return <button
                     className={size === s ? "selected" : ""}
                     key={s}
-                    disabled={
-                      Boolean(detail.variants) &&
-                      !detail.variants.some(
-                        (v) => v.size === s && v.color === color && v.stock > 0,
-                      )
-                    }
+                    aria-label={`Ukuran ${dimensionLabel(s)}`}
+                    disabled={Boolean(detail.variants) && !detail.variants.some((v) => v.size === s && v.color === color && v.stock > 0)}
                     onClick={() => setSize(s)}
                   >
-                    {s}
-                  </button>
-                ))}
+                    {dimensions ? <span className="size-dimension-values">
+                      <span><small>Panjang</small><b>{dimensions.length}</b></span>
+                      <i>×</i>
+                      <span><small>Lebar</small><b>{dimensions.width}</b></span>
+                      <i>×</i>
+                      <span><small>Tinggi</small><b>{dimensions.height}</b></span>
+                      <small className="size-unit">cm</small>
+                    </span> : <span className="size-regular-value">{s}</span>}
+                  </button>;
+                })}
               </div>
+              {size && <p className="selected-size-summary">Dipilih: <strong>{dimensionLabel(size)}</strong></p>}
               <label>
                 Jumlah{" "}
                 <span>
@@ -1207,7 +1210,7 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Ukuran kasur</th>
+                      <th>Ukuran</th>
                       <th>Lebar</th>
                       <th>Panjang</th>
                     </tr>

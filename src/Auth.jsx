@@ -21,7 +21,7 @@ export default function Auth({
   pendingCart = false,
   nav,
   shop,
-  gender,
+  activeCategory,
   cartCount,
   wishCount,
   onSearch,
@@ -191,7 +191,7 @@ export default function Auth({
           : "Selamat datang kembali";
   return (
     <div className="workspace auth-screen">
-      {!admin && <StoreHeader nav={nav} shop={shop} gender={gender} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
+      {!admin && <StoreHeader nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
       {admin && <div className="auth-brandbar">
         <a className="ws-logo" href="#home">
           <Brand />

@@ -12,14 +12,15 @@ import {
 import { Empty, Notice } from "./Workspace";
 import { api, totals } from "./store";
 import { colorLabel, money } from "./data";
-import { categoryLabel, departmentLabel } from "./catalog";
+import { categoryLabel } from "./catalog";
 import { StoreHeader, StoreFooter } from "./StoreChrome";
+import { dimensionLabel } from "./dimensions.js";
 function Shell({
   user,
   onLogout,
   nav,
   shop,
-  gender,
+  activeCategory,
   cartCount,
   wishCount,
   onSearch,
@@ -33,7 +34,7 @@ function Shell({
       <StoreHeader
         nav={nav}
         shop={shop}
-        gender={gender}
+        activeCategory={activeCategory}
         user={user}
         count={cartCount}
         wishCount={wishCount}
@@ -73,7 +74,7 @@ export function CartPage({
   coupon,
   setCoupon,
   shop,
-  gender,
+  activeCategory,
   wishCount,
   onSearch,
 }) {
@@ -124,7 +125,7 @@ export function CartPage({
       active="cart"
       onSearch={onSearch}
       shop={shop}
-      gender={gender}
+      activeCategory={activeCategory}
       cartCount={cart.reduce((sum, row) => sum + row.quantity, 0)}
       wishCount={wishCount}
       title="Keranjang belanja"
@@ -163,7 +164,7 @@ export function CartPage({
                 <div>
                   <h3>{i.name}</h3>
                   <p>
-                    Ukuran kasur {i.size} ·{" "}
+                    Ukuran {dimensionLabel(i.size)} ·{" "}
                     <i className="color-dot" style={{ background: i.color }} /> {colorLabel(i.color)}
                   </p>
                   <b>{money(i.price)}</b>
@@ -273,7 +274,7 @@ export function WishlistPage({
   setWish,
   openProduct,
   shop,
-  gender,
+  activeCategory,
   cartCount,
   onSearch,
 }) {
@@ -295,7 +296,7 @@ export function WishlistPage({
       active="wishlist"
       onSearch={onSearch}
       shop={shop}
-      gender={gender}
+      activeCategory={activeCategory}
       cartCount={cartCount}
       wishCount={wish.length}
       title="Favorit saya"
@@ -321,7 +322,7 @@ export function WishlistPage({
                 </button>
                 <div>
                   <span className="ws-kicker">
-                    {departmentLabel(p.gender)} / {categoryLabel(p.category)}
+                    {categoryLabel(p.category)}
                   </span>
                   <h3>{p.name}</h3>
                   <b>{money(p.price)}</b>
@@ -366,7 +367,7 @@ export function PaymentPage({
   nav,
   order,
   shop,
-  gender,
+  activeCategory,
   cartCount,
   wishCount,
   onSearch,
@@ -379,7 +380,7 @@ export function PaymentPage({
       nav={nav}
       active="orders"
       shop={shop}
-      gender={gender}
+      activeCategory={activeCategory}
       cartCount={cartCount}
       wishCount={wishCount}
       onSearch={onSearch}

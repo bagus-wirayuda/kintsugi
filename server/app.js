@@ -23,6 +23,7 @@ import {
 } from "./integrations.js";
 import { createPayments, orderRow, validateInvoice } from "./payments.js";
 import { createOtp, passwordSchema } from "./otp.js";
+import { parseDimensions } from "../src/dimensions.js";
 
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 const safeUser = (u) => ({
@@ -47,22 +48,21 @@ const productFields = {
   price: z.number().int().min(1000).max(10000000),
   sku: z.string().regex(/^[A-Za-z0-9-]{2,40}$/),
   category: z.enum([
-    "T-Shirt",
-    "Kemeja & Blus",
-    "Celana",
-    "Luaran",
-    "Sweater & Cardigan",
-    "Rok & Gaun",
-    "Aksesoris",
+    "Sprei Fitted",
+    "Set Sprei",
+    "Sprei Karet",
+    "Sprei Hotel",
+    "Sarung Bantal & Guling",
+    "Sprei Motif",
+    "Pelindung Kasur",
   ]),
-  gender: z.enum(["Wanita", "Pria", "Anak", "Bayi"]),
   image: imageSchema,
   description: z.string().trim().min(10).max(2000),
   oldPrice: z.number().int().min(0).max(10000000),
   isNew: z.boolean(),
 };
 const variantSchema = z.object({
-  size: z.string().regex(/^[a-zA-Z0-9×xX\s-]{1,15}$/),
+  size: z.string().min(1).max(30).regex(/^[a-zA-Z0-9×xX\s-]{1,30}$/),
   color: colorSchema,
   stock: z.number().int().min(0).max(100000),
 });
@@ -443,9 +443,8 @@ export function createApp(pool, options = {}) {
     const q = z
       .object({
         search: z.string().max(100).default(""),
-        gender: z.enum(["Wanita", "Pria", "Anak", "Bayi"]).optional(),
         category: z.string().max(100).default("Semua"),
-        size: z.string().max(10).optional(),
+        size: z.string().max(30).optional(),
         color: colorSchema.optional(),
         min: z.coerce.number().int().min(0).default(0),
         max: z.coerce.number().int().min(0).max(10000000).default(10000000),
@@ -460,10 +459,6 @@ export function createApp(pool, options = {}) {
     if (q.min > q.max) throw fail(400, "Harga minimum melebihi maksimum.");
     const where = ["p.active=TRUE", "p.price BETWEEN ? AND ?"],
       args = [q.min, q.max];
-    if (q.gender) {
-      where.push("p.gender=?");
-      args.push(q.gender);
-    }
     if (q.search) {
       where.push("(p.name LIKE ? OR p.category LIKE ?)");
       args.push("%" + q.search + "%", "%" + q.search + "%");
@@ -691,9 +686,10 @@ export function createApp(pool, options = {}) {
             f.checkoutKey,
           ],
         );
-        for (const i of canonical)
+        for (const i of canonical) {
+          const dimensions = parseDimensions(i.size);
           await c.query(
-            "INSERT INTO order_items(id,order_id,product_id,name,image,size,color,quantity,price) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO order_items(id,order_id,product_id,name,image,size,length_cm,width_cm,height_cm,color,quantity,price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             [
               randomUUID(),
               id,
@@ -701,11 +697,13 @@ export function createApp(pool, options = {}) {
               i.name,
               i.image,
               i.size,
+              ...(dimensions ? [dimensions.length, dimensions.width, dimensions.height] : [0, 0, 0]),
               i.color,
               i.quantity,
               i.price,
             ],
           );
+        }
         // Simpan alamat untuk belanja berikutnya tanpa perlu input ulang
         await c.query(
           "INSERT INTO customer_profiles(user_id,phone,street,city,postal) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone),street=VALUES(street),city=VALUES(city),postal=VALUES(postal)",
@@ -830,7 +828,10 @@ export function createApp(pool, options = {}) {
         ...productFields,
         oldPrice: productFields.oldPrice.default(0),
         isNew: productFields.isNew.default(true),
-        sizes: z.array(variantSchema.shape.size).min(1).max(20),
+        sizes: z.array(variantSchema.shape.size).min(1).max(20).refine(
+          (sizes) => sizes.every((size) => parseDimensions(size) !== null),
+          "Setiap ukuran harus mengisi panjang × lebar × tinggi dalam cm.",
+        ),
         colors: z.array(colorSchema).min(1).max(20),
         stock: variantSchema.shape.stock,
       })
@@ -842,13 +843,12 @@ export function createApp(pool, options = {}) {
       await c.query("START TRANSACTION");
       const id = "lj-" + randomUUID();
       await c.query(
-        "INSERT INTO products(id,sku,name,category,gender,price,old_price,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO products(id,sku,name,category,price,old_price,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?)",
         [
           id,
           f.sku,
           f.name,
           f.category,
-          f.gender,
           f.price,
           f.oldPrice,
           f.image,
@@ -856,12 +856,14 @@ export function createApp(pool, options = {}) {
           f.isNew,
         ],
       );
-      for (const s of new Set(f.sizes))
+      for (const s of new Set(f.sizes)) {
+        const d = parseDimensions(s);
         for (const color of new Set(f.colors))
           await c.query(
-            "INSERT INTO product_variants(product_id,size,color,stock) VALUES(?,?,?,?)",
-            [id, s, color, f.stock],
+            "INSERT INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,stock) VALUES(?,?,?,?,?,?,?)",
+            [id, `${d.length}×${d.width}×${d.height}`, d.length, d.width, d.height, color, f.stock],
           );
+      }
       await c.query("COMMIT");
       res.status(201).json({ id });
     } catch (e) {

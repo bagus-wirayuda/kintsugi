@@ -17,13 +17,11 @@ import {
   HelpCircle,
 } from "lucide-react";
 import Brand from "./Brand";
-import { departments } from "./catalog";
-import { categories } from "./data";
-import { categoryLabel } from "./catalog";
+import { catalogCategories } from "./catalog";
 export function StoreHeader({
   nav,
   shop,
-  gender,
+  activeCategory,
   count = 0,
   wishCount = 0,
   onSearch,
@@ -70,11 +68,11 @@ export function StoreHeader({
           >
             <Brand />
           </button>
-          <nav className="ks-departments" aria-label="Departemen belanja">
-            {departments.map(({ id: g, label }) => (
+          <nav className="ks-departments" aria-label="Kategori produk seprai">
+            {catalogCategories.slice(0, 4).map(({ id: g, label }) => (
               <button
                 key={g}
-                className={gender === g ? "active" : ""}
+                className={activeCategory === g ? "active" : ""}
                 onClick={() => browse(g)}
               >
                 {label.toUpperCase()}
@@ -114,12 +112,12 @@ export function StoreHeader({
           className={"ks-mobile-departments " + (open ? "expanded" : "")}
           aria-label="Kategori di ponsel"
         >
-          {departments.map(({ id: g, label }) => (
+          {catalogCategories.map(({ id: g, label }) => (
             <button key={g} onClick={() => browse(g)}>
               {label}
             </button>
           ))}
-          {open && categories.map((c) => <button key={c} onClick={() => { setOpen(false); shop ? shop(c, gender) : nav('catalog'); }}>{categoryLabel(c)}</button>)}
+          {open && ["Semua", "Produk Baru", "Penawaran Terbatas"].map((c) => <button key={c} onClick={() => { setOpen(false); shop ? shop(c, "Semua") : nav('catalog'); }}>{c === "Semua" ? "Semua koleksi" : c}</button>)}
         </nav>
         {profileOpen && createPortal(<section ref={profilePanel} data-profile-area id="customer-profile-menu" className="ks-profile-menu" aria-label="Menu akun pelanggan">
           <div className="ks-profile-heading"><span className="ks-profile-avatar"><UserRound size={24}/></span><div><strong>{user?.name || 'Selamat datang'}</strong><small>{user ? 'Akun pelanggan Kintsugi' : 'Masuk untuk mengelola belanja Anda'}</small></div><button aria-label="Tutup menu profil" onClick={() => setProfileOpen(false)}><X size={19}/></button></div>

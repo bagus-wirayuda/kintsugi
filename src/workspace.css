@@ -2074,6 +2074,32 @@
   line-height: 1.7;
 }
 
+.ws-dimension-editor { min-width: 0; }
+.ws-dimension-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(90px, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--ws-line, #e3e9e9);
+  border-radius: 10px;
+  background: #fafcfc;
+}
+.ws-dimension-row label { min-width: 0; display: grid; gap: 7px; }
+.ws-dimension-row input { width: 100%; min-width: 0; box-sizing: border-box; }
+.ws-dimension-row .ws-button { white-space: nowrap; }
+@media (max-width: 600px) {
+  .ws-dimension-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+  }
+  .ws-dimension-row label { font-size: 11px; }
+  .ws-dimension-row input { padding: 10px 7px; font-size: 14px; }
+  .ws-dimension-row .ws-button { grid-column: 1 / -1; width: 100%; }
+}
+
 @media (min-width: 1500px) {
   .ws-content {
     padding-left: 50px;

@@ -46,18 +46,18 @@ const colorNames = {
 
 export const colorLabel = (color) => colorNames[color?.toUpperCase()] || color;
 
-const adultSizes = ["100×200", "120×200", "160×200", "180×200", "200×200"];
-const childSizes = ["90×200", "100×200", "120×200"];
-const babySizes = ["60×120", "70×140", "70×160"];
+const adultSizes = ["100×200×30", "120×200×30", "160×200×30", "180×200×30", "200×200×30"];
+const deepPocketSizes = ["100×200×35", "120×200×35", "160×200×35", "180×200×35", "200×200×35"];
+const childSizes = ["90×200×30", "100×200×30", "120×200×30"];
+const babySizes = ["60×120×30", "70×140×30", "70×160×30"];
 const pillowSizes = ["Standar", "King"];
 
 const collections = [
   {
-    gender: "Wanita",
     items: [
       [
         "Sprei Aesthetic Motif Kotak Minimalis",
-        "T-Shirt",
+        "Sprei Fitted",
         149000,
         189000,
         "/images/seprai/sprei-01.jpg",
@@ -67,7 +67,7 @@ const collections = [
       ],
       [
         "Set Sprei Spring Bed Katun Jepang Floral",
-        "Kemeja & Blus",
+        "Set Sprei",
         289000,
         349000,
         "/images/seprai/sprei-02.jpg",
@@ -77,7 +77,7 @@ const collections = [
       ],
       [
         "Sprei Karet Anti Geser Polos Pastel",
-        "Celana",
+        "Sprei Karet",
         139000,
         0,
         "/images/seprai/sprei-03.jpg",
@@ -87,7 +87,7 @@ const collections = [
       ],
       [
         "Sprei Rumbai Romantis Rempel Tingkat",
-        "Luaran",
+        "Sprei Hotel",
         259000,
         319000,
         "/images/seprai/sprei-04.jpg",
@@ -97,7 +97,7 @@ const collections = [
       ],
       [
         "Set Sarung Bantal & Guling Katun Motif",
-        "Sweater & Cardigan",
+        "Sarung Bantal & Guling",
         79000,
         0,
         "/images/seprai/sprei-05.jpg",
@@ -107,7 +107,7 @@ const collections = [
       ],
       [
         "Sprei Botanical Daisy Aesthetic",
-        "Rok & Gaun",
+        "Sprei Motif",
         169000,
         199000,
         "/images/seprai/sprei-06.jpg",
@@ -117,7 +117,7 @@ const collections = [
       ],
       [
         "Pelindung Kasur Waterproof Anti Air & Noda",
-        "Aksesoris",
+        "Pelindung Kasur",
         159000,
         0,
         "/images/seprai/sprei-07.jpg",
@@ -127,7 +127,7 @@ const collections = [
       ],
       [
         "Sprei Tencel Organic Silk Luxury",
-        "T-Shirt",
+        "Sprei Fitted",
         389000,
         469000,
         "/images/seprai/sprei-08.jpg",
@@ -138,11 +138,10 @@ const collections = [
     ],
   },
   {
-    gender: "Pria",
     items: [
       [
         "Sprei Hotel Putih Salur Stripe 300TC",
-        "Luaran",
+        "Sprei Hotel",
         239000,
         299000,
         "/images/seprai/sprei-09.jpg",
@@ -152,17 +151,17 @@ const collections = [
       ],
       [
         "Sprei Fitted Deep Pocket Kasur Tinggi 30cm",
-        "T-Shirt",
+        "Sprei Fitted",
         189000,
         0,
         "/images/seprai/sprei-10.jpg",
         ["#2C3E50", "#34495E", "#F7F1E7"],
-        adultSizes,
+        deepPocketSizes,
         "Sprei fitted bersudut ekstra tinggi 30 hingga 35 cm, dirancang khusus untuk spring bed bertingkat, pillow-top, maupun kasur yang memakai matras topper tebal.",
       ],
       [
         "Set Sprei Villa & Guest House Grey Smoke",
-        "Kemeja & Blus",
+        "Set Sprei",
         219000,
         269000,
         "/images/seprai/sprei-11.jpg",
@@ -172,7 +171,7 @@ const collections = [
       ],
       [
         "Sprei Katun Embos Navy Midnight",
-        "Celana",
+        "Sprei Karet",
         149000,
         0,
         "/images/seprai/sprei-12.jpg",
@@ -182,7 +181,7 @@ const collections = [
       ],
       [
         "Set Sarung Bantal Hotel Pillow Sham 2 pcs",
-        "Sweater & Cardigan",
+        "Sarung Bantal & Guling",
         89000,
         0,
         "/images/seprai/sprei-13.jpg",
@@ -192,7 +191,7 @@ const collections = [
       ],
       [
         "Sprei Minimalis Geometrik Monokrom",
-        "Rok & Gaun",
+        "Sprei Motif",
         179000,
         219000,
         "/images/seprai/sprei-14.jpg",
@@ -202,7 +201,7 @@ const collections = [
       ],
       [
         "Pelindung Kasur Quilted Hotel Matras Topper",
-        "Aksesoris",
+        "Pelindung Kasur",
         279000,
         329000,
         "/images/seprai/sprei-15.jpg",
@@ -211,23 +210,22 @@ const collections = [
         "Pelindung matras berlapis busa dakron quilting empuk berketebalan 2 cm. Menambah kenyamanan kasur yang keras sekaligus melindungi permukaan kasur dari debu.",
       ],
       [
-        "Set Bed Cover & Sprei Hotel Dobby Charcoal",
-        "Kemeja & Blus",
+        "Set Sprei Hotel Dobby Charcoal 3 pcs",
+        "Set Sprei",
         429000,
         519000,
         "/images/seprai/sprei-16.jpg",
         ["#34495E", "#2C3E50", "#F7F1E7"],
         adultSizes,
-        "Paket lengkap tidur berkualitas: 1 selimut bed cover tebal empuk dan 1 sprei katun dobby salur warna arang charcoal lengkap dengan sarung bantal guling.",
+        "Set perlengkapan tidur bernuansa charcoal yang terdiri dari satu sprei fitted katun dobby dan dua sarung bantal dengan motif senada. Dirancang agar tampilan kamar hotel tetap rapi dan nyaman.",
       ],
     ],
   },
   {
-    gender: "Anak",
     items: [
       [
         "Sprei Anak Motif Dino Adventure Ceria",
-        "Rok & Gaun",
+        "Sprei Motif",
         139000,
         169000,
         "/images/seprai/sprei-17.jpg",
@@ -237,7 +235,7 @@ const collections = [
       ],
       [
         "Sprei Anak Motif Awan & Bintang Galaxy",
-        "Rok & Gaun",
+        "Sprei Motif",
         149000,
         0,
         "/images/seprai/sprei-18.jpg",
@@ -247,7 +245,7 @@ const collections = [
       ],
       [
         "Sprei Fitted Cotton Kids Biru Langit",
-        "T-Shirt",
+        "Sprei Fitted",
         129000,
         0,
         "/images/seprai/sprei-19.jpg",
@@ -257,7 +255,7 @@ const collections = [
       ],
       [
         "Set Sprei Anak Playful Animal Safari 3 pcs",
-        "Kemeja & Blus",
+        "Set Sprei",
         169000,
         199000,
         "/images/seprai/sprei-20.jpg",
@@ -267,7 +265,7 @@ const collections = [
       ],
       [
         "Sprei Karet Anak Rainbow Dream Pink",
-        "Celana",
+        "Sprei Karet",
         135000,
         0,
         "/images/seprai/sprei-21.jpg",
@@ -277,7 +275,7 @@ const collections = [
       ],
       [
         "Sarung Bantal & Guling Anak Karakter 2 pcs",
-        "Sweater & Cardigan",
+        "Sarung Bantal & Guling",
         59000,
         0,
         "/images/seprai/sprei-22.jpg",
@@ -287,7 +285,7 @@ const collections = [
       ],
       [
         "Pelindung Kasur Anak Anti Ompol Waterproof",
-        "Aksesoris",
+        "Pelindung Kasur",
         145000,
         175000,
         "/images/seprai/sprei-23.jpg",
@@ -296,23 +294,22 @@ const collections = [
         "Sprei matras protector tahan air untuk kasur anak. Mencegah cairan ompol maupun tumpahan susu meresap ke dalam kasur spring bed anak.",
       ],
       [
-        "Set Bed Cover Anak Mini + Sprei Bear Hug",
-        "Kemeja & Blus",
+        "Set Sprei Anak Bear Hug 3 pcs",
+        "Set Sprei",
         299000,
         359000,
         "/images/seprai/sprei-24.jpg",
         ["#B88C62", "#D4C2B0", "#F4EFE2"],
         childSizes,
-        "Set lengkap selimut bed cover anak empuk dan hangat dipadukan sprei motif boneka beruang menggemaskan.",
+        "Set sprei fitted anak motif beruang yang dilengkapi sarung bantal dan sarung guling. Bahan lembut dan mudah dirawat untuk penggunaan sehari-hari.",
       ],
     ],
   },
   {
-    gender: "Bayi",
     items: [
       [
         "Sprei Box Bayi Cotton Bamboo Ultra Soft",
-        "T-Shirt",
+        "Sprei Fitted",
         119000,
         0,
         "/images/seprai/sprei-25.jpg",
@@ -322,7 +319,7 @@ const collections = [
       ],
       [
         "Set Sprei Kasur Bayi Crib 3 pcs Pastel Cloud",
-        "Kemeja & Blus",
+        "Set Sprei",
         149000,
         179000,
         "/images/seprai/sprei-26.jpg",
@@ -332,7 +329,7 @@ const collections = [
       ],
       [
         "Pelindung Kasur Bayi Waterproof Breathable",
-        "Aksesoris",
+        "Pelindung Kasur",
         99000,
         0,
         "/images/seprai/sprei-27.jpg",
@@ -342,7 +339,7 @@ const collections = [
       ],
       [
         "Sprei Karet Matras Bayi Sage Forest",
-        "Celana",
+        "Sprei Karet",
         109000,
         0,
         "/images/seprai/sprei-28.jpg",
@@ -352,7 +349,7 @@ const collections = [
       ],
       [
         "Sarung Bantal & Guling Bayi Set 3 pcs",
-        "Sweater & Cardigan",
+        "Sarung Bantal & Guling",
         49000,
         0,
         "/images/seprai/sprei-29.jpg",
@@ -362,7 +359,7 @@ const collections = [
       ],
       [
         "Sprei Bayi Motif Moon & Stars Yellow",
-        "Rok & Gaun",
+        "Sprei Motif",
         115000,
         0,
         "/images/seprai/sprei-30.jpg",
@@ -372,7 +369,7 @@ const collections = [
       ],
       [
         "Sprei Matras Bayi Keliling Anti Alergi",
-        "T-Shirt",
+        "Sprei Fitted",
         125000,
         149000,
         "/images/seprai/sprei-31.jpg",
@@ -382,7 +379,7 @@ const collections = [
       ],
       [
         "Set Bedding Bumper & Sprei Baby Nest",
-        "Kemeja & Blus",
+        "Set Sprei",
         239000,
         289000,
         "/images/seprai/sprei-32.jpg",
@@ -394,13 +391,12 @@ const collections = [
   },
 ];
 
-export const products = collections.flatMap(({ gender, items }, groupIndex) =>
+export const products = collections.flatMap(({ items }, groupIndex) =>
   items.map((item, itemIndex) => ({
     id: `lj-${groupIndex + 1}-${itemIndex + 1}`,
     sku: `KTS-SPR-${groupIndex + 1}${String(itemIndex + 1).padStart(2, "0")}`,
     name: item[0],
     category: item[1],
-    gender,
     price: item[2],
     oldPrice: item[3],
     image: item[4],
@@ -416,13 +412,13 @@ export const products = collections.flatMap(({ gender, items }, groupIndex) =>
 
 export const categories = [
   "Semua",
-  "T-Shirt",
-  "Kemeja & Blus",
-  "Celana",
-  "Luaran",
-  "Sweater & Cardigan",
-  "Rok & Gaun",
-  "Aksesoris",
+  "Sprei Fitted",
+  "Set Sprei",
+  "Sprei Karet",
+  "Sprei Hotel",
+  "Sarung Bantal & Guling",
+  "Sprei Motif",
+  "Pelindung Kasur",
 ];
 
 export const campaigns = [

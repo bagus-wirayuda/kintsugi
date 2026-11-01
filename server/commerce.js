@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { paymentMethods } from '../src/payment-methods.js';
+import { parseDimensions } from "../src/dimensions.js";
 export const addressSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.email().max(254),
@@ -13,7 +14,12 @@ export const orderSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1).max(40),
-        size: z.string().min(1).max(15),
+        size: z.string().min(1).max(30).transform((value) => {
+          const dimensions = parseDimensions(value);
+          return dimensions
+            ? `${dimensions.length}×${dimensions.width}×${dimensions.height}`
+            : value;
+        }),
         color: z.string().regex(/^#[a-fA-F0-9]{3,6}$/),
         quantity: z.number().int().min(1).max(99),
       }),

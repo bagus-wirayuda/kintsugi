@@ -1,7 +1,7 @@
 export function policy(title, contact) {
   const policies = {
     "Cerita kami":
-      "Kintsugi menyediakan sprei dan tekstil kamar untuk kebutuhan dewasa, hotel & guest, anak, serta bayi. Temukan pilihan ukuran kasur dan warna yang sesuai dengan ruang istirahat Anda.",
+      "Kintsugi menyediakan sprei dan tekstil kamar untuk kebutuhan dewasa, hotel & guest, anak, serta bayi. Temukan ukuran panjang, lebar, dan tinggi serta warna yang sesuai untuk spring bed Anda.",
     "Kualitas & material":
       "Baca deskripsi produk dan ikuti label perawatan pada barang. Hubungi layanan pelanggan untuk informasi bahan, warna, dan ukuran sebelum memesan.",
     Keberlanjutan:
@@ -11,7 +11,7 @@ export function policy(title, contact) {
       contact +
       ".",
     "Panduan belanja":
-      "Pilih produk dan tentukan warna serta ukuran kasur. Gunakan Tambah Keranjang untuk mengumpulkan pilihan atau Beli Langsung untuk checkout produk tersebut. Anda dapat berbelanja sebagai tamu; verifikasi akun hanya diminta sebelum pembayaran. Pilih metode pembayaran, lalu ikuti petunjuk pembayaran. Keranjang dan favorit tersimpan di browser ini.",
+      "Pilih produk, ukuran (panjang × lebar × tinggi), dan warna. Gunakan Tambah Keranjang untuk mengumpulkan pilihan atau Beli Langsung untuk checkout produk tersebut. Anda dapat berbelanja sebagai tamu; verifikasi akun hanya diminta sebelum pembayaran. Pilih metode pembayaran, lalu ikuti petunjuk pembayaran. Keranjang dan favorit tersimpan di browser ini.",
     Pengiriman:
       "Pengiriman reguler Rp15.000, ekspres Rp35.000, dan pengambilan pesanan gratis. Gratis ongkir mulai subtotal Rp699.000 sebelum diskon. Estimasi reguler 2–4 dan ekspres 1–2 hari kerja. Hubungi layanan pelanggan untuk memastikan jangkauan pengiriman.",
     "Penukaran & pengembalian":

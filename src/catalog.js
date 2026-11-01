@@ -1,22 +1,12 @@
-export const departments = [
-  { id: "Wanita", label: "Dewasa" },
-  { id: "Pria", label: "Hotel & Guest" },
-  { id: "Anak", label: "Anak" },
-  { id: "Bayi", label: "Bayi" },
-];
-
 export const catalogCategories = [
-  { id: "T-Shirt", label: "Sprei Fitted" },
-  { id: "Kemeja & Blus", label: "Set Sprei Spring Bed" },
-  { id: "Celana", label: "Sprei Karet" },
-  { id: "Luaran", label: "Sprei Hotel" },
-  { id: "Sweater & Cardigan", label: "Sarung Bantal & Guling" },
-  { id: "Rok & Gaun", label: "Sprei Anak" },
-  { id: "Aksesoris", label: "Pelindung Kasur" },
+  { id: "Sprei Fitted", label: "Sprei Fitted" },
+  { id: "Set Sprei", label: "Set Sprei Spring Bed" },
+  { id: "Sprei Karet", label: "Sprei Karet" },
+  { id: "Sprei Hotel", label: "Sprei Hotel" },
+  { id: "Sarung Bantal & Guling", label: "Sarung Bantal & Guling" },
+  { id: "Sprei Motif", label: "Sprei Motif" },
+  { id: "Pelindung Kasur", label: "Pelindung Kasur" },
 ];
-
-export const departmentLabel = (id) =>
-  departments.find((item) => item.id === id)?.label || id;
 
 export const categoryLabel = (id) =>
   id === "Semua koleksi" || id === "Semua"

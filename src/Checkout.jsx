@@ -18,6 +18,7 @@ import CheckoutIdentity, {
   clearCheckoutVerification,
 } from "./CheckoutIdentity";
 import { readDraft, saveDraft } from "./checkout-state";
+import { dimensionLabel } from "./dimensions.js";
 const emptyAddress = {
   name: "",
   email: "",
@@ -35,7 +36,7 @@ export default function Checkout({
   onAuthenticated,
   nav,
   shop,
-  gender,
+  activeCategory,
   cartCount,
   wishCount,
   onSearch,
@@ -216,7 +217,7 @@ export default function Checkout({
   }
   return (
     <div className="workspace ws-checkout ks-checkout">
-      <StoreHeader user={user} nav={nav} shop={shop} gender={gender} count={cartCount} wishCount={wishCount} onSearch={onSearch} onLogout={onLogout}/>
+      <StoreHeader user={user} nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch} onLogout={onLogout}/>
       <main className="checkout-content">
         <button className="ws-link" onClick={() => nav("cart")}>
           <ArrowLeft size={16} /> Kembali ke keranjang
@@ -443,7 +444,7 @@ export default function Checkout({
                     <div>
                       <b>{i.name}</b>
                       <small>
-                        Ukuran kasur {i.size} · {colorLabel(i.color)} · {i.quantity} barang
+                        Ukuran {dimensionLabel(i.size)} · {colorLabel(i.color)} · {i.quantity} barang
                       </small>
                       <strong>{money(i.price * i.quantity)}</strong>
                     </div>

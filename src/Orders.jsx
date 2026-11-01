@@ -11,6 +11,7 @@ import { api } from "./store";
 import { colorLabel, money } from "./data";
 import { paymentName } from './payment-methods';
 import { Notice, Status } from "./Workspace";
+import { dimensionLabel } from "./dimensions.js";
 export const paymentLabel = {
   CREATING: "Menyiapkan pembayaran",
   PENDING: "Belum dibayar",
@@ -75,7 +76,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
             <div>
               <b>{i.name}</b>
               <span>
-                Ukuran kasur {i.size} ·{" "}
+                Ukuran {dimensionLabel(i.size)} ·{" "}
                 <i className="color-dot" style={{ background: i.color }} /> {colorLabel(i.color)} ·{" "}
                 {i.quantity} barang
               </span>

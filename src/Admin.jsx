@@ -16,8 +16,9 @@ import {
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import { api } from "./store";
 import { colorLabel, money } from "./data";
-import { catalogCategories, departmentLabel, departments } from "./catalog";
+import { catalogCategories, categoryLabel } from "./catalog";
 import { paymentLabel } from "./Orders";
+import { dimensionLabel, dimensionValue } from "./dimensions.js";
 
 export default function Admin({ user, notify, onLogout }) {
   const tabs = ["overview", "products", "orders", "settings"];
@@ -36,6 +37,7 @@ export default function Admin({ user, notify, onLogout }) {
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("all"),
     [edit, setEdit] = useState(null),
+    [sizeRows, setSizeRows] = useState([{ id: "default", length: "100", width: "200", height: "30" }]),
     [selected, setSelected] = useState(null);
   async function refresh() {
     const [p, o, h] = await Promise.all([
@@ -99,7 +101,6 @@ export default function Admin({ user, notify, onLogout }) {
       sku: f.sku,
       price: Number(f.price),
       oldPrice: Number(f.oldPrice),
-      gender: f.gender,
       category: f.category,
       image: f.image,
       description: f.description,
@@ -116,18 +117,23 @@ export default function Admin({ user, notify, onLogout }) {
         .filter((v) => v.stock !== v.oldStock)
         .map(({ oldStock, ...v }) => v);
       if (changed.length) body.variants = changed;
-    } else
+    } else {
+      const sizes = sizeRows.map((_, index) =>
+        dimensionValue(f[`length_${index}`], f[`width_${index}`], f[`height_${index}`]),
+      );
+      if (sizes.some((size) => !size)) {
+        setError("Isi panjang, lebar, dan tinggi untuk setiap ukuran.");
+        return;
+      }
       Object.assign(body, {
         stock: Number(f.stock),
-        sizes: f.sizes
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean),
+        sizes: [...new Set(sizes)],
         colors: f.colors
           .split(",")
           .map((x) => x.trim())
           .filter(Boolean),
       });
+    }
     if (
       await perform(
         () =>
@@ -169,7 +175,7 @@ export default function Admin({ user, notify, onLogout }) {
       (filter === "all" ||
         (filter === "active" && p.active) ||
         (filter === "archived" && !p.active)) &&
-      [p.name, p.sku, p.gender]
+      [p.name, p.sku, p.category]
         .join(" ")
         .toLowerCase()
         .includes(search.toLowerCase()),
@@ -276,15 +282,16 @@ export default function Admin({ user, notify, onLogout }) {
           {tab === "products" && !edit && (
             <button
               className="ws-button primary"
-              onClick={() =>
+              onClick={() => {
+                setSizeRows([{ id: "default", length: "100", width: "200", height: "30" }]);
                 setEdit({
                   name: "",
                   price: 149000,
                   oldPrice: 0,
                   stock: 30,
                   isNew: true,
-                })
-              }
+                });
+              }}
             >
               <Plus size={17} />
               Tambah produk
@@ -490,7 +497,7 @@ export default function Admin({ user, notify, onLogout }) {
                               <div>
                                 <b>{p.name}</b>
                                 <small>
-                                  {p.sku} · {departmentLabel(p.gender)}
+                                  {p.sku} · {categoryLabel(p.category)}
                                 </small>
                               </div>
                             </div>
@@ -579,18 +586,10 @@ export default function Admin({ user, notify, onLogout }) {
                   />
                 </label>
                 <label>
-                  Departemen
-                  <select name="gender" defaultValue={edit.gender || "Wanita"}>
-                    {departments.map(({ id, label }) => (
-                      <option key={id} value={id}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
                   Kategori
                   <select
                     name="category"
-                    defaultValue={edit.category || "T-Shirt"}
+                    defaultValue={edit.category || "Sprei Fitted"}
                   >
                     {catalogCategories.map(({ id, label }) => (
                         <option key={id} value={id}>{label}</option>
@@ -663,7 +662,7 @@ export default function Admin({ user, notify, onLogout }) {
                       <table className="ws-table">
                         <thead>
                           <tr>
-                            <th>Ukuran kasur</th>
+                            <th>Ukuran</th>
                             <th>Warna</th>
                             <th>Stok tersedia</th>
                           </tr>
@@ -671,7 +670,7 @@ export default function Admin({ user, notify, onLogout }) {
                         <tbody>
                           {edit.variants.map((v, i) => (
                             <tr key={v.size + v.color}>
-                              <td>{v.size}</td>
+                              <td>{dimensionLabel(v.size)}</td>
                               <td>
                                 <i
                                   className="color-dot"
@@ -698,10 +697,21 @@ export default function Admin({ user, notify, onLogout }) {
                   </div>
                 ) : (
                   <>
-                    <label>
-                      Ukuran kasur (pisahkan koma)
-                      <input name="sizes" required defaultValue="100×200,120×200,160×200" />
-                    </label>
+                    <div className="ws-wide ws-dimension-editor">
+                      <div className="ws-panel-heading">
+                        <h2>Ukuran sprei</h2>
+                        <p>Setiap ukuran harus berupa satu rangkaian panjang, lebar, dan tinggi dalam sentimeter.</p>
+                      </div>
+                      {sizeRows.map((row, index) => (
+                        <div className="ws-dimension-row" key={row.id}>
+                          <label>Panjang (cm)<input name={`length_${index}`} type="number" min="1" max="500" defaultValue={row.length} required /></label>
+                          <label>Lebar (cm)<input name={`width_${index}`} type="number" min="1" max="500" defaultValue={row.width} required /></label>
+                          <label>Tinggi (cm)<input name={`height_${index}`} type="number" min="1" max="500" defaultValue={row.height} required /></label>
+                          <button type="button" className="ws-button" disabled={sizeRows.length === 1} onClick={() => setSizeRows((rows) => rows.filter((_, i) => i !== index))}>Hapus</button>
+                        </div>
+                      ))}
+                      <button type="button" className="ws-button" onClick={() => setSizeRows((rows) => [...rows, { id: `${Date.now()}-${rows.length}`, length: "", width: "", height: "" }])}><Plus size={15} /> Tambah ukuran</button>
+                    </div>
                     <label>
                       Warna HEX (pisahkan koma)
                       <input name="colors" required defaultValue="#fff,#333" />
@@ -726,7 +736,10 @@ export default function Admin({ user, notify, onLogout }) {
                   <button
                     type="button"
                     className="ws-button"
-                    onClick={() => setEdit(null)}
+                    onClick={() => {
+                      setEdit(null);
+                      setSizeRows([{ id: "default", length: "100", width: "200", height: "30" }]);
+                    }}
                   >
                     Batal
                   </button>
