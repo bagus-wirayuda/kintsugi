@@ -40,8 +40,7 @@ import "./workspace.css";
 import { policy } from "./policies.js";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import SizeSummary from "./SizeSummary.jsx";
-import Brand from "./Brand.jsx";
-import { StoreHeader } from "./StoreChrome.jsx";
+import { StoreHeader, StoreFooter } from "./StoreChrome.jsx";
 import {
   mergeGuestCart,
   moveGuestCheckout,
@@ -872,77 +871,7 @@ function App() {
           </button>
         </form>
       </section>
-      <footer className="site-footer">
-        <div className="footer-top">
-          <div className="footer-brand">
-            <button className="brand" onClick={() => nav("home")}>
-              <Brand />
-            </button>
-            <p>Everyday, made better.</p>
-            <span>
-              Sprei dan tekstil lembut. Istirahat yang lebih utuh.
-              <br />
-              Untuk semua cerita Anda.
-            </span>
-          </div>
-          {[
-            [
-              "Tentang Kintsugi",
-              "Cerita kami",
-              "Kualitas & material",
-              "Keberlanjutan",
-              "Temukan toko",
-            ],
-            [
-              "Bantuan",
-              "Panduan belanja",
-              "Pengiriman",
-              "Penukaran & pengembalian",
-              "Hubungi kami",
-            ],
-            [
-              "Akun Anda",
-              "Akun saya",
-              "Riwayat pesanan",
-              "Wishlist",
-              "Panel admin",
-            ],
-          ].map(([title, ...links]) => (
-            <div className="footer-column" key={title}>
-              <h4>{title}</h4>
-              {links.map((l) => (
-                <button
-                  key={l}
-                  onClick={() =>
-                    l === "Wishlist"
-                      ? (setCategory("Semua"), setSearch(""), nav("wishlist"))
-                      : ["Akun saya", "Riwayat pesanan"].includes(l)
-                        ? nav(l === 'Riwayat pesanan' ? 'account/orders' : 'account/profile')
-                        : l === "Panel admin"
-                          ? nav("admin")
-                          : setInfo(l)
-                  }
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-        <div className="footer-bottom">
-          <span>© 2026 Kintsugi. Semua hak dilindungi.</span>
-          <div>
-            <button onClick={() => setInfo("Kebijakan privasi")}>
-              Kebijakan privasi
-            </button>
-            <button onClick={() => setInfo("Syarat & ketentuan")}>
-              Syarat & ketentuan
-            </button>
-            <span>Indonesia / IDR</span>
-          </div>
-          <span>KINTSUGI</span>
-        </div>
-      </footer>
+      <StoreFooter nav={nav} onInfo={setInfo} contact={config.contact} />
       {detail && (
         <div className="overlay" onClick={() => setDetail(null)}>
           <section

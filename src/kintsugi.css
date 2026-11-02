@@ -2248,3 +2248,69 @@ img, svg { max-width: 100%; }
   body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 
+/* Store footer: simple, readable information layout on desktop and mobile. */
+.ks-simple-footer {
+  display: block;
+  padding: 34px max(6%, calc((100vw - 1180px) / 2)) 22px;
+  background: #fff;
+  border-top: 1px solid var(--ks-line);
+  color: var(--ks-ink);
+}
+.ks-footer-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+.ks-footer-links button,
+.ks-footer-contact p,
+.ks-footer-contact a {
+  color: var(--ks-ink);
+  font-size: 14px;
+  line-height: 1.65;
+  text-align: left;
+}
+.ks-footer-links button:hover,
+.ks-footer-contact a:hover { color: var(--ks-teal); text-decoration: underline; }
+.ks-footer-contact {
+  max-width: 680px;
+  margin-top: 30px;
+}
+.ks-footer-contact p { margin: 0 0 5px; }
+.ks-footer-contact a { color: var(--ks-teal); font-weight: 600; }
+.ks-footer-contact p:last-child { margin-top: 7px; color: var(--ks-muted); }
+.ks-footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid var(--ks-line);
+}
+.ks-footer-bottom small { color: var(--ks-muted); font-size: 12px; line-height: 1.6; }
+.ks-footer-actions { display: flex; align-items: center; gap: 18px; }
+.ks-footer-actions button,
+.ks-footer-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: var(--ks-ink);
+  background: #f3f7f6;
+}
+.ks-footer-actions button:hover,
+.ks-footer-actions a:hover { color: var(--ks-teal); background: #e8f1ef; }
+@media (max-width: 640px) {
+  .ks-simple-footer { padding: 28px 6% 20px; }
+  .ks-footer-links { gap: 19px; }
+  .ks-footer-links button,
+  .ks-footer-contact p,
+  .ks-footer-contact a { font-size: 15px; }
+  .ks-footer-contact { margin-top: 30px; }
+  .ks-footer-bottom { align-items: flex-start; flex-direction: column; gap: 14px; margin-top: 25px; }
+  .ks-footer-actions { gap: 14px; }
+}
+

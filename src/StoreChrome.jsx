@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   LogOut,
   HelpCircle,
+  Mail,
 } from "lucide-react";
 import Brand from "./Brand";
 import { catalogCategories } from "./catalog";
@@ -143,17 +144,30 @@ export function StoreHeader({
     </>
   );
 }
-export function StoreFooter({ nav }) {
+export function StoreFooter({ nav, onInfo, contact = "wirayuda101101@gmail.com" }) {
+  const info = (title) => onInfo ? onInfo(title) : nav("account/help");
   return (
     <footer className="ks-simple-footer">
-      <Brand />
-      <p>Tekstil lembut untuk ruang istirahat yang lebih utuh.</p>
-      <nav>
-        <button onClick={() => nav("catalog")}>Koleksi</button>
-        <button onClick={() => nav("account/orders")}>Pesanan saya</button>
-        <button onClick={() => nav("account/profile")}>Akun & bantuan</button>
+      <nav className="ks-footer-links" aria-label="Informasi Kintsugi">
+        <button onClick={() => info("Kebijakan privasi")}>Kebijakan Privasi</button>
+        <button onClick={() => info("Pengiriman")}>Informasi Pengiriman</button>
+        <button onClick={() => info("Cerita kami")}>Informasi Kintsugi</button>
+        <button onClick={() => info("Panduan belanja")}>Panduan Belanja</button>
+        <button onClick={() => info("Syarat & ketentuan")}>Syarat & Ketentuan</button>
       </nav>
-      <small>© 2026 Kintsugi · Indonesia / IDR</small>
+      <div className="ks-footer-contact">
+        <p>Hubungi layanan pelanggan Kintsugi:</p>
+        <a href={`mailto:${contact}`}>{contact}</a>
+        <p>Untuk pertanyaan pesanan, sertakan nomor pesanan Anda.</p>
+      </div>
+      <div className="ks-footer-bottom">
+        <small>Hak Cipta © 2026 Kintsugi. Semua hak dilindungi undang-undang.</small>
+        <div className="ks-footer-actions">
+          <button aria-label="Koleksi Kintsugi" onClick={() => nav("catalog")}><ShoppingBag size={19} /></button>
+          <button aria-label="Hubungi Kintsugi" onClick={() => info("Hubungi kami")}><HelpCircle size={19} /></button>
+          <a aria-label="Kirim email ke Kintsugi" href={`mailto:${contact}`}><Mail size={19} /></a>
+        </div>
+      </div>
     </footer>
   );
 }
