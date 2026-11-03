@@ -192,6 +192,12 @@ export async function queueWhatsApp(db, id, phone, message) {
   } catch { }
 }
 
+export function renderWhatsAppTemplate(template, values) {
+  return String(template || "").replace(/\[([a-z_]+)\]/gi, (match, key) =>
+    Object.hasOwn(values, key.toLowerCase()) ? String(values[key.toLowerCase()] ?? "") : match,
+  );
+}
+
 /**
  * Flush pesan WhatsApp dari antrian wa_outbox.
  */

@@ -194,7 +194,7 @@ export default function Auth({
       {!admin && <StoreHeader nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
       {admin && <div className="auth-brandbar">
         <a className="ws-logo" href="#home">
-          <Brand />
+          <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
           <div>
             <small>{admin ? "ADMINISTRATION" : "CUSTOMER ACCOUNT"}</small>
           </div>

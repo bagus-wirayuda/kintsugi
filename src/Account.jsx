@@ -161,6 +161,7 @@ export default function Account({
   );
   return (
     <Workspace
+      config={config}
       user={user}
       items={items}
       active={tab}

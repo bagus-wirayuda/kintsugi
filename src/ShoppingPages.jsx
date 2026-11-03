@@ -17,6 +17,7 @@ import { StoreHeader, StoreFooter } from "./StoreChrome";
 import { dimensionLabel } from "./dimensions.js";
 function Shell({
   user,
+  config,
   onLogout,
   nav,
   shop,
@@ -32,6 +33,7 @@ function Shell({
   return (
     <div className="workspace ks-shopping">
       <StoreHeader
+        config={config}
         nav={nav}
         shop={shop}
         activeCategory={activeCategory}
@@ -61,12 +63,13 @@ function Shell({
         </div>
         {children}
       </main>
-      <StoreFooter nav={nav} />
+      <StoreFooter nav={nav} contact={config?.contact} storeAddress={config?.storeAddress} brand={config?.brand} />
     </div>
   );
 }
 export function CartPage({
   user,
+  config,
   onLogout,
   nav,
   cart,
@@ -81,7 +84,7 @@ export function CartPage({
   const [input, setInput] = useState(coupon),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const total = totals(cart, coupon);
+  const total = totals(cart, coupon, "local", config?.shipping?.localDeliveryFee);
   function quantity(key, value) {
     setCart((c) =>
       c.map((i) =>
@@ -120,6 +123,7 @@ export function CartPage({
   return (
     <Shell
       user={user}
+      config={config}
       onLogout={onLogout}
       nav={nav}
       active="cart"
@@ -165,7 +169,7 @@ export function CartPage({
                   <h3>{i.name}</h3>
                   <p>
                     Ukuran {dimensionLabel(i.size)} ·{" "}
-                    <i className="color-dot" style={{ background: i.color }} /> {colorLabel(i.color)}
+                    {i.variationLabel || "Variasi"}: {colorLabel(i.color)}
                   </p>
                   <b>{money(i.price)}</b>
                   <div className="ws-quantity">
@@ -268,6 +272,7 @@ export function CartPage({
 }
 export function WishlistPage({
   user,
+  config,
   onLogout,
   nav,
   wish,
@@ -291,6 +296,7 @@ export function WishlistPage({
   return (
     <Shell
       user={user}
+      config={config}
       onLogout={onLogout}
       nav={nav}
       active="wishlist"
@@ -322,7 +328,7 @@ export function WishlistPage({
                 </button>
                 <div>
                   <span className="ws-kicker">
-                    {categoryLabel(p.category)}
+                    {categoryLabel(p.category, config?.categories)}
                   </span>
                   <h3>{p.name}</h3>
                   <b>{money(p.price)}</b>
@@ -363,6 +369,7 @@ export function WishlistPage({
 }
 export function PaymentPage({
   user,
+  config,
   onLogout,
   nav,
   order,
@@ -376,6 +383,7 @@ export function PaymentPage({
   return (
     <Shell
       user={user}
+      config={config}
       onLogout={onLogout}
       nav={nav}
       active="orders"

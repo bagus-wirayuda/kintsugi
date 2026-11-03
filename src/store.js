@@ -40,14 +40,16 @@ export async function api(path, options = {}) {
     );
   return data;
 }
-export function totals(cart, coupon = "", shipping = "regular") {
+export function totals(cart, coupon = "", shipping = "regular", localDeliveryFee = 15000) {
   const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
   const discount =
     coupon === "LINY10" ? Math.min(Math.round(subtotal * 0.1), 100000) : 0;
   const delivery =
     shipping === "pickup" || subtotal >= 699000
       ? 0
-      : shipping === "express"
+      : shipping === "local"
+        ? Number(localDeliveryFee) || 0
+        : shipping === "express"
         ? 35000
         : 15000;
   return {

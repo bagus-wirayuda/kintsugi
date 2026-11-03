@@ -77,7 +77,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
               <b>{i.name}</b>
               <span>
                 Ukuran {dimensionLabel(i.size)} ·{" "}
-                <i className="color-dot" style={{ background: i.color }} /> {colorLabel(i.color)} ·{" "}
+                {i.variation_label || "Variasi"}: {colorLabel(i.color)} ·{" "}
                 {i.quantity} barang
               </span>
               <small>{money(i.price)} / barang</small>

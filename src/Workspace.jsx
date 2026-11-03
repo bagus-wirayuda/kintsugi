@@ -3,6 +3,7 @@ import { ArrowLeft, LogOut, Menu, X } from "lucide-react";
 import Brand from "./Brand";
 export default function Workspace({
   user,
+  config,
   admin = false,
   items,
   active,
@@ -18,9 +19,9 @@ export default function Workspace({
     <div className={"workspace " + (admin ? "ws-admin" : "ws-customer")}>
       <aside className={"ws-sidebar " + (open ? "is-open" : "")}>
         <a className="ws-logo" href={admin ? "#admin" : "#account"}>
-          <Brand />
+          <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
           <div>
-            <small>{admin ? "ADMINISTRATION" : "AKUN PELANGGAN"}</small>
+            <small>{admin ? `${config?.brand || "TOKO"} / PENGELOLAAN` : "AKUN PELANGGAN"}</small>
           </div>
         </a>
         <p className="ws-nav-caption">{admin ? "RUANG KERJA" : "MENU AKUN"}</p>
@@ -81,7 +82,7 @@ export default function Workspace({
             </span>
             <div>
               <b>{user?.name}</b>
-              <small>{admin ? "Administrator" : "Pelanggan"}</small>
+              <small>{user?.role === "manager" ? "Pimpinan" : user?.role === "staff" ? "Karyawan" : admin ? "Administrator" : "Pelanggan"}</small>
             </div>
           </div>
         </header>
@@ -89,7 +90,7 @@ export default function Workspace({
           <div className="ws-page-heading">
             <div>
               <p className="ws-kicker">
-                {admin ? "KINTSUGI / OPERASIONAL" : "AKUN SAYA"}
+                {admin ? `${config?.brand || "TOKO"} / OPERASIONAL` : "AKUN SAYA"}
               </p>
               <h1>{title}</h1>
               {subtitle && <p>{subtitle}</p>}
@@ -99,7 +100,7 @@ export default function Workspace({
           {children}
         </main>
         <footer className="ws-footer">
-          © 2026 Kintsugi{" "}
+          © 2026 {config?.brand || "Toko"}{" "}
           <span>{admin ? "Panel administrator" : "Pusat akun pelanggan"}</span>
         </footer>
       </div>

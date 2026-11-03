@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS users (
  id CHAR(36) PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(254) NULL DEFAULT NULL,
  phone VARCHAR(20) NULL DEFAULT NULL,
- password_hash VARCHAR(255) NOT NULL, role ENUM('customer','admin') NOT NULL DEFAULT 'customer',
+ password_hash VARCHAR(255) NOT NULL, role VARCHAR(20) NOT NULL DEFAULT 'customer',
  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
  UNIQUE INDEX idx_phone (phone),
  UNIQUE INDEX idx_email (email)
@@ -14,7 +14,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS products (
  id VARCHAR(40) PRIMARY KEY, sku VARCHAR(40) UNIQUE NOT NULL, name VARCHAR(200) NOT NULL,
  category VARCHAR(100) NOT NULL,
- price INT NOT NULL CHECK(price>=1000), old_price INT NOT NULL DEFAULT 0 CHECK(old_price>=0),
+ price INT NOT NULL CHECK(price>=1000), old_price INT NOT NULL DEFAULT 0 CHECK(old_price>=0), cost_price INT NOT NULL DEFAULT 0 CHECK(cost_price>=0),
+ variation_label VARCHAR(80) NOT NULL DEFAULT 'Warna',
+ motif VARCHAR(100) NOT NULL DEFAULT '',
+ weight_grams INT UNSIGNED NOT NULL DEFAULT 1000,
  image TEXT NOT NULL, description TEXT NOT NULL, rating DECIMAL(2,1) NOT NULL DEFAULT 4.8,
  reviews INT NOT NULL DEFAULT 0, is_new BOOLEAN NOT NULL DEFAULT TRUE,
  active BOOLEAN NOT NULL DEFAULT TRUE, INDEX(category)
@@ -24,17 +27,30 @@ CREATE TABLE IF NOT EXISTS product_variants (
  length_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  width_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  height_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
- color VARCHAR(20) NOT NULL,
+ variation_label VARCHAR(80) NOT NULL DEFAULT 'Variasi',
+ color VARCHAR(100) NOT NULL,
+ image_url TEXT NULL,
  stock INT NOT NULL DEFAULT 30 CHECK(stock>=0), PRIMARY KEY(product_id,size,color),
  FOREIGN KEY(product_id) REFERENCES products(id)
 ) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS store_promotions (
+ id CHAR(36) PRIMARY KEY, product_id VARCHAR(40) NOT NULL,
+ eyebrow VARCHAR(100) NOT NULL DEFAULT '', title VARCHAR(160) NOT NULL,
+ description VARCHAR(600) NOT NULL DEFAULT '', image TEXT NULL,
+ discount_percent TINYINT UNSIGNED NOT NULL CHECK(discount_percent BETWEEN 1 AND 90),
+ active BOOLEAN NOT NULL DEFAULT TRUE, sort_order INT NOT NULL DEFAULT 0,
+ created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
+ INDEX idx_store_promotions_public (active,sort_order,created_at)
+) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS orders (
  id VARCHAR(50) PRIMARY KEY, user_id CHAR(36) NOT NULL, address JSON NOT NULL,
- shipping ENUM('regular','express','pickup') NOT NULL, payment VARCHAR(30) NOT NULL DEFAULT 'xendit',
+ shipping VARCHAR(100) NOT NULL, shipping_name VARCHAR(150) NOT NULL DEFAULT '', payment VARCHAR(60) NOT NULL DEFAULT 'xendit',
  coupon VARCHAR(30) NOT NULL DEFAULT '', subtotal INT NOT NULL CHECK(subtotal>=0),
  discount INT NOT NULL DEFAULT 0 CHECK(discount>=0), delivery INT NOT NULL CHECK(delivery>=0),
  total INT NOT NULL CHECK(total>=0),
  status ENUM('Menunggu pembayaran','Diproses','Dikirim','Selesai','Dibatalkan') NOT NULL DEFAULT 'Menunggu pembayaran',
+ tracking_number VARCHAR(100) NOT NULL DEFAULT '',
  payment_status ENUM('CREATING','PENDING','PAID','FAILED','EXPIRED','CANCELLED') NOT NULL DEFAULT 'CREATING',
  invoice_id VARCHAR(100) UNIQUE, payment_url TEXT, expires_at DATETIME(3), paid_at DATETIME(3),
  stock_released BOOLEAN NOT NULL DEFAULT FALSE, checkout_key VARCHAR(80) NOT NULL,
@@ -48,8 +64,8 @@ CREATE TABLE IF NOT EXISTS order_items (
  length_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  width_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  height_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
- color VARCHAR(20) NOT NULL,
- quantity INT NOT NULL CHECK(quantity BETWEEN 1 AND 99), price INT NOT NULL CHECK(price>=1000),
+ color VARCHAR(100) NOT NULL,
+ quantity INT NOT NULL CHECK(quantity BETWEEN 1 AND 99), price INT NOT NULL CHECK(price>=1000), cost_price INT NOT NULL DEFAULT 0 CHECK(cost_price>=0),
  FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(product_id) REFERENCES products(id)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS payment_events (
@@ -74,6 +90,25 @@ CREATE TABLE IF NOT EXISTS email_outbox (
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
  email VARCHAR(254) PRIMARY KEY, created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS store_settings (
+ setting_key VARCHAR(100) PRIMARY KEY, setting_value JSON NOT NULL,
+ updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS product_categories (
+ id VARCHAR(80) PRIMARY KEY, name VARCHAR(100) NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE,
+ sort_order INT NOT NULL DEFAULT 0, UNIQUE KEY idx_category_name (name)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS store_payment_methods (
+ id VARCHAR(60) PRIMARY KEY, name VARCHAR(100) NOT NULL, group_name VARCHAR(100) NOT NULL DEFAULT '',
+ detail VARCHAR(250) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL DEFAULT TRUE,
+ sort_order INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS store_expenses (
+ id CHAR(36) PRIMARY KEY, expense_date DATE NOT NULL, description VARCHAR(200) NOT NULL,
+ amount INT UNSIGNED NOT NULL, created_by CHAR(36) NOT NULL,
+ created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY(created_by) REFERENCES users(id), INDEX(expense_date)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS auth_challenges (
  id CHAR(36) PRIMARY KEY, phone VARCHAR(20) NULL DEFAULT NULL,

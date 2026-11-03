@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
   Truck,
   ShieldCheck,
   Package,
@@ -18,26 +20,43 @@ const categoryTiles = [
   ["Sprei Motif", assets.kids, "Pilihan motif untuk suasana kamar yang lebih personal."],
   ["Pelindung Kasur", assets.protector, "Lapisan pelindung untuk menjaga kasur."],
 ];
-export default function Home({ shop, products, openProduct }) {
+export default function Home({ shop, products, openProduct, config = {} }) {
+  const promotions = Array.isArray(config.promotions) ? config.promotions : [];
+  const [promoIndex, setPromoIndex] = useState(0);
+  useEffect(() => {
+    setPromoIndex(0);
+    if (promotions.length < 2) return;
+    const timer = setInterval(() => setPromoIndex((index) => (index + 1) % promotions.length), 6500);
+    return () => clearInterval(timer);
+  }, [promotions.length]);
+  const departments = (config.categories?.length ? config.categories : categoryTiles.map(([id]) => ({ id, label: categoryLabel(id, config.categories) }))).filter((item) => item.id !== "Semua");
+  const selectedProducts = Array.isArray(config.essentialsProducts) && config.essentialsProducts.length
+    ? config.essentialsProducts.map((id) => products.find((item) => item.id === id)).filter(Boolean)
+    : products.slice(0, 4);
+  const selectedDepartments = Array.isArray(config.departmentProducts) && config.departmentProducts.length
+    ? config.departmentProducts.map((id) => products.find((item) => item.id === id)).filter(Boolean)
+    : [];
+  const activePromotion = promotions.length ? promotions[promoIndex % promotions.length] : null;
+  const promoProduct = products.find((item) => item.id === (activePromotion?.productId || config.promoProductId));
+  const promoImage = activePromotion?.image || config.promoImage || promoProduct?.image || assets.editorial;
+  const promoPrice = activePromotion?.price ?? (Number(config.promoPrice) || promoProduct?.price || 0);
+  const promoOldPrice = activePromotion?.oldPrice ?? (config.promoOldPrice != null ? Number(config.promoOldPrice) : promoProduct?.oldPrice || 0);
+  const promoKicker = activePromotion?.eyebrow || config.promoKicker || "THE KINTSUGI WAY";
+  const promoTitle = activePromotion?.title || config.promoTitle || "Keindahan ada di setiap cerita.";
+  const promoText = activePromotion?.description || config.promoText || "Pilihan tekstil kamar yang lembut untuk ruang istirahat Anda.";
   return (
     <main className="ks-home">
       <section className="ks-hero">
         <img
-          src={assets.hero}
+          src={config.heroImage || assets.hero}
           alt="Kamar tidur dengan tekstil lembut pilihan Kintsugi"
           fetchPriority="high"
         />
         <div className="ks-hero-shade" />
         <div className="ks-hero-content">
-          <span className="ks-kicker">KINTSUGI / BEDROOM COLLECTION</span>
-          <h1>
-            Beristirahat.
-            <br />
-            Lebih dalam.
-            <br />
-            <em>Setiap malam.</em>
-          </h1>
-          <p>Tekstil kamar yang lembut untuk menjaga setiap momen istirahat.</p>
+          <span className="ks-kicker">{config.heroKicker || "KINTSUGI / BEDROOM COLLECTION"}</span>
+          <h1>{(config.heroTitle || "Beristirahat.\nLebih dalam.\nSetiap malam.").split("\n").map((line, index) => <React.Fragment key={index}>{index > 0 && <br />}{index === 2 ? <em>{line}</em> : line}</React.Fragment>)}</h1>
+          <p>{config.heroText || "Tekstil kamar yang lembut untuk menjaga setiap momen istirahat."}</p>
           <button onClick={() => shop()}>
             JELAJAHI KOLEKSI <ArrowRight size={19} />
           </button>
@@ -48,59 +67,52 @@ export default function Home({ shop, products, openProduct }) {
         <div className="ks-hero-index">
           <span>01</span>
           <i />
-          <span>SLEEP, REFINED.</span>
+          <span>{config.brand || "SLEEP, REFINED."}</span>
         </div>
       </section>
       <nav className="ks-quick-links" aria-label="Pilihan koleksi">
         {[
           "Produk Baru",
           "Penawaran Terbatas",
-          "Sprei Fitted",
-          "Set Sprei",
-          "Sprei Karet",
-          "Sprei Hotel",
+          ...departments.slice(0, 4).map((item) => item.id),
         ].map((c) => (
           <button key={c} onClick={() => shop(c)}>
-            {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c)} <ArrowUpRight size={15} />
+            {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c, config.categories)} <ArrowUpRight size={15} />
           </button>
         ))}
       </nav>
       <section className="ks-section ks-department-section">
         <div className="ks-section-heading">
           <div>
-            <p className="ks-kicker">TEMUKAN PILIHAN ANDA</p>
-            <h2>Untuk setiap ruang. Untuk istirahat yang utuh.</h2>
+            <p className="ks-kicker">{config.departmentKicker || "TEMUKAN PILIHAN ANDA"}</p>
+            <h2>{config.departmentTitle || "Untuk setiap ruang. Untuk istirahat yang utuh."}</h2>
           </div>
           <button onClick={() => shop()}>
             Lihat semua <ArrowRight size={17} />
           </button>
         </div>
         <div className="ks-department-grid ks-product-category-grid">
-          {categoryTiles.map(([category, image, description]) => (
-            <button key={category} onClick={() => shop(category)}>
-              <div>
-                <img src={image} alt={category} loading="lazy" />
-              </div>
-              <h3>
-                {categoryLabel(category).toUpperCase()} <ArrowUpRight size={19} />
-              </h3>
-              <p>{description}</p>
-            </button>
-          ))}
+          {selectedDepartments.length ? selectedDepartments.map((product) => <button key={product.id} onClick={() => openProduct(product)}><div><img src={product.image} alt={product.name} loading="lazy" /></div><h3>{product.name.toUpperCase()} <ArrowUpRight size={19} /></h3><p>{product.motif || product.description}</p></button>) : departments.map((category) => {
+            const product = products.find((item) => item.category === category.id);
+            const legacy = categoryTiles.find(([id]) => id === category.id);
+            const image = product?.image || legacy?.[1] || assets.hero;
+            const description = product?.description || legacy?.[2] || `Jelajahi koleksi ${category.label}.`;
+            return <button key={category.id} onClick={() => shop(category.id)}><div><img src={image} alt={category.label} loading="lazy" /></div><h3>{category.label.toUpperCase()} <ArrowUpRight size={19} /></h3><p>{description}</p></button>;
+          })}
         </div>
       </section>
       <section className="ks-section ks-products-section">
         <div className="ks-section-heading">
           <div>
-            <p className="ks-kicker">SLEEP ESSENTIALS</p>
-            <h2>Pilihan untuk tidur yang lebih baik.</h2>
+            <p className="ks-kicker">{config.essentialsKicker || "SLEEP ESSENTIALS"}</p>
+            <h2>{config.essentialsTitle || "Pilihan untuk tidur yang lebih baik."}</h2>
           </div>
           <button onClick={() => shop()}>
             Jelajahi koleksi <ArrowRight size={17} />
           </button>
         </div>
         <div className="ks-home-products">
-          {products.slice(0, 4).map((p) => (
+          {selectedProducts.map((p) => (
             <article key={p.id}>
               <button
                 className="ks-home-product-image"
@@ -116,7 +128,7 @@ export default function Home({ shop, products, openProduct }) {
                   <span key={c} style={{ background: c }} title={colorLabel(c)} />
                 ))}
               </div>
-              <small>{categoryLabel(p.category).toUpperCase()} · {colorLabel(p.colors[0])}</small>
+              <small>{categoryLabel(p.category, config.categories).toUpperCase()} · {colorLabel(p.colors[0])}</small>
               <SizeSummary sizes={p.sizes} />
               <button
                 className="ks-home-product-name"
@@ -131,30 +143,25 @@ export default function Home({ shop, products, openProduct }) {
           ))}
         </div>
       </section>
-      <section className="ks-story">
+      <section className="ks-story" id="promo">
         <div className="ks-story-photo">
           <img
-            src={assets.editorial}
-            alt="Detail tekstil kamar tidur Kintsugi"
+            src={promoImage}
+            alt={promoProduct?.name || "Koleksi pilihan toko"}
             loading="lazy"
           />
         </div>
         <div className="ks-story-copy">
-          <p className="ks-kicker">THE KINTSUGI WAY</p>
-          <h2>
-            Keindahan ada
-            <br />
-            di setiap cerita.
-          </h2>
+          <p className="ks-kicker">{promoKicker}</p>
+          <h2>{promoTitle}</h2>
           <span className="ks-gold-rule" />
-          <p>
-            Terinspirasi dari seni merangkai kembali, Kintsugi merayakan ruang
-            istirahat yang terasa utuh. Mulai dari tekstil yang menyentuh hari
-            Anda paling awal dan paling akhir.
-          </p>
+          <p>{promoText}</p>
+          {activePromotion && <span className="ks-promo-badge">DISKON {activePromotion.discountPercent}%</span>}
+          {promoProduct && <button className="ks-promo-product" onClick={() => openProduct(promoProduct)}>{promoProduct.name}<strong>{money(promoPrice)}</strong>{promoOldPrice > promoPrice && <del>{money(promoOldPrice)}</del>}</button>}
           <button onClick={() => shop()}>
             TEMUKAN KOLEKSI KAMAR <ArrowRight size={18} />
           </button>
+          {promotions.length > 1 && <div className="ks-promo-controls" aria-label="Navigasi promo"><button aria-label="Promo sebelumnya" onClick={()=>setPromoIndex((index)=>(index-1+promotions.length)%promotions.length)}><ChevronLeft size={18}/></button><span>{promoIndex+1} / {promotions.length}</span><button aria-label="Promo berikutnya" onClick={()=>setPromoIndex((index)=>(index+1)%promotions.length)}><ChevronRight size={18}/></button></div>}
         </div>
       </section>
       <section className="ks-benefits">

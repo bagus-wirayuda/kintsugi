@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { paymentMethods } from '../src/payment-methods.js';
 import { parseDimensions } from "../src/dimensions.js";
 export const addressSchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -7,7 +6,7 @@ export const addressSchema = z.object({
   phone: z.string().regex(/^[0-9+ ()-]{8,20}$/),
   street: z.string().trim().min(10).max(500),
   city: z.string().trim().min(2).max(100),
-  postal: z.string().regex(/^\d{5}$/),
+  postal: z.string().trim().max(5).refine((value) => !value || /^\d{5}$/.test(value), "Kode pos harus 5 digit."),
 });
 export const orderSchema = z.object({
   items: z
@@ -20,19 +19,20 @@ export const orderSchema = z.object({
             ? `${dimensions.length}×${dimensions.width}×${dimensions.height}`
             : value;
         }),
-        color: z.string().regex(/^#[a-fA-F0-9]{3,6}$/),
+        color: z.string().trim().min(1).max(100),
         quantity: z.number().int().min(1).max(99),
       }),
     )
     .min(1)
     .max(50),
   address: addressSchema,
-  shipping: z.enum(["regular", "express", "pickup"]),
-  payment: z.enum(['xendit', ...paymentMethods.map((method) => method.id)]).default("xendit"),
+  shipping: z.string().trim().min(1).max(100),
+  payment: z.string().trim().min(2).max(60).default("xendit"),
+  shippingOption: z.object({ destinationId:z.coerce.number().int().positive().optional(), courier:z.string().trim().max(30).optional(), service:z.string().trim().max(80).optional(), cost:z.number().int().nonnegative().optional(), etd:z.string().max(60).optional() }).optional(),
   checkoutKey: z.string().uuid(),
   coupon: z.enum(["", "LINY10"]).default(""),
 });
-export function calculateTotals(items, coupon, shipping) {
+export function calculateTotals(items, coupon, shipping, deliveryOverride) {
   const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
   if (!Number.isSafeInteger(subtotal) || subtotal > 100000000)
     throw Object.assign(new Error("Total pesanan melebihi batas."), {
@@ -40,12 +40,12 @@ export function calculateTotals(items, coupon, shipping) {
     });
   const discount =
     coupon === "LINY10" ? Math.min(Math.round(subtotal * 0.1), 100000) : 0;
-  const delivery =
+  const delivery = deliveryOverride ?? (
     shipping === "pickup" || subtotal >= 699000
       ? 0
       : shipping === "express"
         ? 35000
-        : 15000;
+        : 15000);
   return {
     subtotal,
     discount,

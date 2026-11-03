@@ -27,7 +27,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { categories, colorLabel, money } from "./data";
-import { categoryLabel } from "./catalog";
+import { categoryLabel, catalogCategories } from "./catalog";
 import { storage, api } from "./store";
 import "./styles.css";
 const Admin = lazy(() => import("./Admin.jsx"));
@@ -89,6 +89,7 @@ function App() {
     [config, setConfig] = useState({
       contact: "wirayuda101101@gmail.com",
       sandbox: true,
+      categories: catalogCategories,
     }),
     [catalog, setCatalog] = useState({
       items: [],
@@ -316,12 +317,12 @@ function App() {
     catalogRetry,
   ]);
   const toggleWish = (id) => {
-    if (user?.role === "admin")
+    if (user && user.role !== "customer")
       return notify("Favorit hanya tersedia untuk akun pelanggan.");
     setWish((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]));
   };
   const add = (event, buyNow = false) => {
-    if (user?.role === "admin")
+    if (user && user.role !== "customer")
       return notify("Akun admin tidak dapat berbelanja.");
     if (!authReady) return notify("Sedang memuat akun. Coba sesaat lagi.");
     if (!size) {
@@ -407,11 +408,11 @@ function App() {
         </div>
         <div className="swatches">
           {p.colors.map((c) => (
-            <span key={c} style={{ background: c }} title={colorLabel(c)} />
+            <span className="ks-variant-chip" key={c} style={/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c) ? { background: c } : undefined} title={colorLabel(c)}>{/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c) ? "" : c}</span>
           ))}
         </div>
         <div className="product-meta">
-          {categoryLabel(p.category).toUpperCase()}
+          {categoryLabel(p.category, config.categories).toUpperCase()}
         </div>
         <SizeSummary sizes={p.sizes} />
         <button className="product-name" onClick={() => openProduct(p)}>
@@ -458,7 +459,7 @@ function App() {
       storage.write("wish:guest", []);
     }
     setUser(u);
-    if (!checkout) nav(u.role === "admin" ? "admin" : "catalog");
+    if (!checkout) nav(u.role === "customer" ? "catalog" : "admin");
   }
   const feedback = toast && (
     <div className="ws-toast" role="status">
@@ -473,10 +474,10 @@ function App() {
         </div>
       </div>
     );
-  if (user?.role === "admin")
+  if (["admin", "manager", "staff"].includes(user?.role))
     return (
       <>
-        <Admin user={user} notify={notify} onLogout={logout} />
+        <Admin user={user} notify={notify} onLogout={logout} config={config} />
         {feedback}
       </>
     );
@@ -514,6 +515,7 @@ function App() {
     );
   const accountProps = {
     user,
+    config,
     onLogout: logout,
     nav,
     shop,
@@ -610,6 +612,7 @@ function App() {
       className={view === "home" ? "modern-storefront" : "catalog-storefront"}
     >
       <StoreHeader
+        config={config}
         nav={nav}
         shop={shop}
         activeCategory={activeCategory}
@@ -620,16 +623,16 @@ function App() {
         onSearch={() => setSearchOpen(true)}
       />
       {view === "home" && (
-        <Home shop={shop} products={products} openProduct={openProduct} />
+        <Home shop={shop} products={products} openProduct={openProduct} config={config} />
       )}
       {(view === "catalog" || view === "wishlist") && (
         <main className="catalog page">
           <div className="breadcrumb">
             <button onClick={() => nav("home")}>Beranda</button>
             <ChevronRight size={12} />
-            {view === "wishlist" ? "Wishlist" : categoryLabel(category === "Semua" ? activeCategory : category)}
+            {view === "wishlist" ? "Wishlist" : categoryLabel(category === "Semua" ? activeCategory : category, config.categories)}
             <ChevronRight size={12} />
-            {categoryLabel(category)}
+            {categoryLabel(category, config.categories)}
           </div>
           <div className="catalog-title">
             <div>
@@ -642,8 +645,8 @@ function App() {
                     : category === "Semua" && activeCategory === "Semua"
                       ? "Koleksi Seprai"
                       : category === "Semua"
-                        ? categoryLabel(activeCategory)
-                      : categoryLabel(category)}
+                        ? categoryLabel(activeCategory, config.categories)
+                      : categoryLabel(category, config.categories)}
               </h1>
               <p>
                 {view === "wishlist"
@@ -663,7 +666,7 @@ function App() {
                       className={category === c ? "active" : ""}
                       onClick={() => { setCategory(c); setActiveCategory("Semua"); }}
                     >
-                      {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c)}
+                      {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c, config.categories)}
                       <ChevronRight size={13} />
                     </button>
                   ))}
@@ -686,13 +689,13 @@ function App() {
                     </select>
                   </label>
                   <label>
-                    Warna
+                    Variasi
                     <select
-                      aria-label="Filter warna"
+                      aria-label="Filter variasi"
                       value={filterColor}
                       onChange={(e) => setFilterColor(e.target.value)}
                     >
-                      <option value="">Semua warna</option>
+                      <option value="">Semua variasi</option>
                       {catalog.facets.colors.map((c) => (
                         <option key={c} value={c}>
                           {colorLabel(c)}
@@ -750,7 +753,7 @@ function App() {
             <div className="catalog-results">
               <div className="catalog-toolbar">
                 <span>
-                  <SlidersHorizontal size={16} /> {categoryLabel(category === "Semua" ? activeCategory : category)}
+                  <SlidersHorizontal size={16} /> {categoryLabel(category === "Semua" ? activeCategory : category, config.categories)}
                 </span>
                 <label>
                   Urutkan:{" "}
@@ -769,10 +772,10 @@ function App() {
               <div className="active-filters">
                 {[
                   search && "Cari: " + search,
-                  category !== "Semua" && categoryLabel(category),
-                  category === "Semua" && activeCategory !== "Semua" && categoryLabel(activeCategory),
+                  category !== "Semua" && categoryLabel(category, config.categories),
+                  category === "Semua" && activeCategory !== "Semua" && categoryLabel(activeCategory, config.categories),
                   filterSize && "Ukuran: " + dimensionLabel(filterSize),
-                  filterColor && "Warna: " + colorLabel(filterColor),
+                  filterColor && "Variasi: " + colorLabel(filterColor),
                   minPrice && "Min: " + money(minPrice),
                   maxPrice && "Maks: " + money(maxPrice),
                 ]
@@ -850,7 +853,7 @@ function App() {
                 method: "POST",
                 body: { email: form.querySelector("input").value },
               });
-              notify("Email tersimpan untuk kabar koleksi Kintsugi.");
+              notify(`Email tersimpan untuk kabar koleksi ${config.brand || "toko"}.`);
               form.reset();
             } catch (e) {
               notify(e.message);
@@ -871,7 +874,7 @@ function App() {
           </button>
         </form>
       </section>
-      <StoreFooter nav={nav} onInfo={setInfo} contact={config.contact} />
+      <StoreFooter nav={nav} onInfo={setInfo} contact={config.contact} storeAddress={config.storeAddress} brand={config.brand} />
       {detail && (
         <div className="overlay" onClick={() => setDetail(null)}>
           <section
@@ -893,7 +896,7 @@ function App() {
             </div>
             <div className="detail-info">
               <span className="eyebrow">
-                {categoryLabel(detail.category)}
+                {categoryLabel(detail.category, config.categories)}
               </span>
               <h1>{detail.name}</h1>
               <div className="rating">
@@ -906,25 +909,27 @@ function App() {
               </div>
               <p>{detail.description}</p>
               <label>
-                Warna{" "}
+                {detail.variationLabel || "Variasi"}{" "}
                 <span>
                   {colorLabel(color)} · {detail.colors.indexOf(color) + 1} / {detail.colors.length}
                 </span>
               </label>
               <div className="color-choices">
                 {detail.colors.map((c) => (
+                  (() => { const variant=detail.variants?.find((item)=>item.color===c&&item.image_url); const isHex=/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c); return (
                   <button
                     key={c}
-                    aria-label={`Warna ${colorLabel(c)}`}
+                    aria-label={`${detail.variationLabel || "Variasi"} ${colorLabel(c)}`}
                     title={colorLabel(c)}
-                    className={color === c ? "selected" : ""}
-                    style={{ background: c }}
-                    onClick={() => setColor(c)}
-                  />
+                    className={"ks-variant-choice " + (color === c ? "selected" : "")}
+                    style={isHex ? { background: c } : undefined}
+                    onClick={() => { setColor(c); if(variant?.image_url) setDetail((current)=>({...current,image:variant.image_url})); }}
+                  >{variant?.image_url && <img src={variant.image_url} alt=""/>}{!isHex && !variant?.image_url && c}</button>
+                  ); })()
                 ))}
               </div>
               <label className="product-size-label">
-                <span>Ukuran seprai</span>
+                <span>Ukuran</span>
                 <button
                   className="text-link"
                   onClick={() => setInfo("Panduan ukuran")}
@@ -932,7 +937,7 @@ function App() {
                   Panduan ukuran
                 </button>
               </label>
-              <p className="product-size-hint">Pilih satu ukuran lengkap: panjang × lebar × tinggi.</p>
+              <p className="product-size-hint">{detail.sizes.some((value)=>parseDimensions(value))?"Pilih satu ukuran lengkap: panjang × lebar × tinggi.":"Pilih ukuran atau opsi produk yang tersedia."}</p>
               <div className="size-choices">
                 {detail.sizes.map((s) => {
                   const dimensions = parseDimensions(s);
@@ -1099,7 +1104,7 @@ function App() {
             </div>
             {categories.map((c) => (
               <button key={c} onClick={() => shop(c)}>
-                {categoryLabel(c)}
+                {categoryLabel(c, config.categories)}
                 <ArrowRight size={16} />
               </button>
             ))}

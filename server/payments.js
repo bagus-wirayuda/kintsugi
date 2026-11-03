@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { fail, queueWhatsApp } from "./integrations.js";
+import { fail, queueWhatsApp, renderWhatsAppTemplate } from "./integrations.js";
 
 export const orderRow = (o) => ({
   ...o,
@@ -34,6 +34,23 @@ export async function releaseStock(c, order) {
   await c.query("UPDATE orders SET stock_released=TRUE WHERE id=?", [order.id]);
 }
 export function createPayments(pool, gateway) {
+  async function notification(db, key, values) {
+    const [row, brandRow] = await Promise.all([
+      db.query("SELECT setting_value FROM store_settings WHERE setting_key='waTemplates'"),
+      db.query("SELECT setting_value FROM store_settings WHERE setting_key='brand'"),
+    ]);
+    const configValue = row.rows[0]?.setting_value;
+    const config = configValue;
+    const brandValue=brandRow.rows[0]?.setting_value;
+    const brand=brandValue;
+    const defaults = {
+      purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] berhasil. Total: [total].",
+      processing: "Pesanan [nomor_pesanan] sedang kami proses. Terima kasih telah berbelanja di [toko].",
+      shipped: "Pesanan [nomor_pesanan] dikirim. Resi: [nomor_resi]. Kurir: [kurir].",
+      delivered: "Pesanan [nomor_pesanan] telah sampai. Terima kasih telah berbelanja di [toko].",
+    };
+    return renderWhatsAppTemplate(config?.[key] || defaults[key], {...values,toko:values.toko||brand||"Kintsugi"});
+  }
   async function ensure(id) {
     const c = await pool.connect();
     let result;
@@ -136,15 +153,14 @@ export function createPayments(pool, gateway) {
           );
           const address = orderRow(o).address;
           // Kirim notifikasi pembayaran diterima via WhatsApp
+          const values={nama:address.name,nomor_pesanan:o.id,total:`Rp${Number(o.total).toLocaleString("id-ID")}`,toko:"Kintsugi",nomor_resi:o.tracking_number||"",kurir:o.shipping_name||""};
           await queueWhatsApp(
             c,
-            "paid/" + o.id,
+            "purchased/" + o.id,
             address.phone,
-            `*Kintsugi - Pembayaran Diterima*\n\n` +
-              `Halo ${address.name}, pembayaran untuk pesanan ${o.id} telah diterima.\n` +
-              `Pesanan Anda sedang diproses.\n\n` +
-              `Terima kasih telah berbelanja di Kintsugi!`,
+            await notification(c,"purchased",values),
           );
+          await queueWhatsApp(c,"processing/"+o.id,address.phone,await notification(c,"processing",values));
         }
       } else if (["EXPIRED", "FAILED"].includes(invoice.status)) {
         if (o.payment_status === "PAID")

@@ -56,10 +56,13 @@ export default function Checkout({
     address.name &&
       address.phone &&
       address.street &&
-      address.city &&
-      address.postal,
+      address.city,
   );
-  const [shipping, setShipping] = useState(initial?.shipping || "regular");
+  const [shipping, setShipping] = useState(["local","pickup","rajaongkir"].includes(initial?.shipping) ? initial.shipping : "local");
+  const [destinationId, setDestinationId] = useState(initial?.destinationId || null);
+  const [destinationOptions, setDestinationOptions] = useState([]);
+  const [shippingRates, setShippingRates] = useState([]);
+  const [shippingOption, setShippingOption] = useState(initial?.shippingOption || null);
   const [payment, setPayment] = useState(initial?.payment || '');
   const methods = config.paymentMethods || [];
   const [identity, setIdentity] = useState(Boolean(initial?.identity && !user));
@@ -69,8 +72,8 @@ export default function Checkout({
   const [error, setError] = useState("");
   const [quoteError, setQuoteError] = useState("");
   useEffect(() => {
-    saveDraft(storage, owner, { address, shipping, identity, payment });
-  }, [owner, address, shipping, identity, payment]);
+    saveDraft(storage, owner, { address, shipping, identity, payment, destinationId, shippingOption });
+  }, [owner, address, shipping, identity, payment, destinationId, shippingOption]);
   useEffect(() => {
     if (!user) return;
     let alive = true;
@@ -91,6 +94,19 @@ export default function Checkout({
       alive = false;
     };
   }, [user?.id]);
+  useEffect(() => {
+    if (!config.shipping?.rajaOngkir || shipping !== "rajaongkir" || destinationId || address.city.trim().length < 3) { setDestinationOptions([]); return; }
+    const timer=setTimeout(()=>api("/shipping/destinations?search="+encodeURIComponent(address.city.trim())).then(setDestinationOptions).catch(()=>setDestinationOptions([])),350);
+    return ()=>clearTimeout(timer);
+  },[address.city,destinationId,config.shipping?.rajaOngkir,shipping]);
+  useEffect(() => {
+    if (shipping !== "rajaongkir" || !destinationId || !cart.length) { setShippingRates([]); return; }
+    let alive=true;
+    api("/shipping/rates",{method:"POST",body:{destinationId,items:cart.map(({id,quantity})=>({id,quantity}))}})
+      .then((rates)=>{if(alive){setShippingRates(rates);setShippingOption((selected)=>selected&&rates.some((rate)=>rate.courier===selected.courier&&rate.service===selected.service)?selected:rates[0]||null);}})
+      .catch((e)=>{if(alive){setShippingRates([]);setShippingOption(null);setQuoteError(e.message);}});
+    return ()=>{alive=false;};
+  },[shipping,destinationId,cart]);
   useEffect(() => {
     if (!cart.length) {
       setQuote(null);
@@ -113,6 +129,7 @@ export default function Checkout({
         })),
         coupon,
         shipping,
+        shippingOption,
       },
     })
       .then(setQuote)
@@ -123,7 +140,7 @@ export default function Checkout({
         if (!c.signal.aborted) setChecking(false);
       });
     return () => c.abort();
-  }, [cart, coupon, shipping]);
+  }, [cart, coupon, shipping, shippingOption]);
   async function pay(buyer) {
     setBusy(true);
     setError("");
@@ -136,6 +153,7 @@ export default function Checkout({
       })),
       address: { ...address },
       shipping,
+      shippingOption,
       coupon,
       payment,
     };
@@ -174,8 +192,7 @@ export default function Checkout({
       !address.name ||
       !address.phone ||
       !address.street ||
-      !address.city ||
-      !address.postal
+      !address.city
     ) {
       setEditingAddress(true);
       return setError("Lengkapi alamat pengiriman terlebih dahulu.");
@@ -196,7 +213,7 @@ export default function Checkout({
     await onAuthenticated(buyer);
     await pay(buyer);
   }
-  const total = quote || totals(cart, coupon, shipping);
+  const total = quote || totals(cart, coupon, shipping, config.shipping?.localDeliveryFee);
   function field(name, label, props = {}) {
     const Element = name === "street" ? "textarea" : "input";
     return (
@@ -217,7 +234,7 @@ export default function Checkout({
   }
   return (
     <div className="workspace ws-checkout ks-checkout">
-      <StoreHeader user={user} nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch} onLogout={onLogout}/>
+      <StoreHeader config={config} user={user} nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch} onLogout={onLogout}/>
       <main className="checkout-content">
         <button className="ws-link" onClick={() => nav("cart")}>
           <ArrowLeft size={16} /> Kembali ke keranjang
@@ -324,6 +341,7 @@ export default function Checkout({
                             maxLength: 100,
                             autoComplete: "address-level2",
                             placeholder: "Kota / kabupaten",
+                            onChange: (event) => { setAddress((current)=>({...current,city:event.target.value})); setDestinationId(null); setShippingOption(null); setIdentity(false); },
                           })}
                           {field("street", "Alamat lengkap", {
                             minLength: 10,
@@ -335,10 +353,12 @@ export default function Checkout({
                             inputMode: "numeric",
                             pattern: "[0-9]{5}",
                             maxLength: 5,
+                            required: false,
                             autoComplete: "postal-code",
-                            placeholder: "5 digit kode pos",
+                            placeholder: "5 digit (opsional)",
                           })}
                         </div>
+                        {shipping==="rajaongkir" && destinationOptions.length>0 && <div className="ws-wide ks-destination-options"><b>Pilih kecamatan tujuan</b>{destinationOptions.map((option)=><button type="button" key={option.id} onClick={()=>{setDestinationId(option.id);setAddress((current)=>({...current,city:option.label}));setDestinationOptions([]);setShippingOption(null);}}>{option.label}{option.province?`, ${option.province}`:""}</button>)}</div>}
                         {hasSavedAddress && editingAddress && (
                           <button
                             type="button"
@@ -360,26 +380,7 @@ export default function Checkout({
                       <p>Pilih layanan sesuai kebutuhan Anda.</p>
                     </div>
                     <div className="checkout-shipping">
-                      {[
-                        [
-                          "regular",
-                          "Reguler",
-                          "Estimasi 2–4 hari kerja",
-                          15000,
-                        ],
-                        [
-                          "express",
-                          "Ekspres",
-                          "Estimasi 1–2 hari kerja",
-                          35000,
-                        ],
-                        [
-                          "pickup",
-                          "Ambil pesanan",
-                          "Lokasi dikoordinasikan dengan pengelola",
-                          0,
-                        ],
-                      ].map(([value, title, detail, price]) => (
+                      {[["local","Kurir lokal", "Untuk area dekat · ongkir ditentukan toko", Number(config.shipping?.localDeliveryFee)||0],["pickup","Ambil pesanan","Lokasi dikoordinasikan dengan toko",0],...(config.shipping?.rajaOngkir?[["rajaongkir","Kurir antarkota","Pilih tujuan dan layanan kurir resmi",null]]:[])].map(([value, title, detail, price]) => (
                         <label
                           className={shipping === value ? "selected" : ""}
                           key={value}
@@ -394,13 +395,10 @@ export default function Checkout({
                             <b>{title}</b>
                             <small>{detail}</small>
                           </div>
-                          <strong>
-                            {total.subtotal >= 699000 || price === 0
-                              ? "Gratis"
-                              : money(price)}
-                          </strong>
+                          <strong>{price===null?(shippingOption?money(shippingOption.cost):"Pilih tarif"):price===0?"Gratis":money(price)}</strong>
                         </label>
                       ))}
+                      {shipping==="rajaongkir" && <div className="ks-raja-rates">{!destinationId?<small>Masukkan kota, lalu pilih kecamatan tujuan dari saran.</small>:!shippingRates.length?<small>Memuat tarif kurir…</small>:shippingRates.map((rate)=><label key={`${rate.courier}-${rate.service}`} className={shippingOption?.courier===rate.courier&&shippingOption?.service===rate.service?"selected":""}><input type="radio" name="rajaRate" checked={shippingOption?.courier===rate.courier&&shippingOption?.service===rate.service} onChange={()=>setShippingOption(rate)}/><span><b>{rate.courierName} · {rate.service}</b><small>Estimasi {rate.etd||"lihat kurir"}</small></span><strong>{money(rate.cost)}</strong></label>)}</div>}
                     </div>
                   </section>
                   <section className="ws-panel ws-form-panel">
@@ -444,7 +442,7 @@ export default function Checkout({
                     <div>
                       <b>{i.name}</b>
                       <small>
-                        Ukuran {dimensionLabel(i.size)} · {colorLabel(i.color)} · {i.quantity} barang
+                        Ukuran {dimensionLabel(i.size)} · {i.variationLabel || "Variasi"}: {colorLabel(i.color)} · {i.quantity} barang
                       </small>
                       <strong>{money(i.price * i.quantity)}</strong>
                     </div>

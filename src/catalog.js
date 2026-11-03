@@ -8,7 +8,7 @@ export const catalogCategories = [
   { id: "Pelindung Kasur", label: "Pelindung Kasur" },
 ];
 
-export const categoryLabel = (id) =>
+export const categoryLabel = (id, categories = catalogCategories) =>
   id === "Semua koleksi" || id === "Semua"
     ? "Semua koleksi"
-    : catalogCategories.find((item) => item.id === id)?.label || id;
+    : categories.find((item) => item.id === id)?.label || id;

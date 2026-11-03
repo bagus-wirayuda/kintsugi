@@ -18,7 +18,6 @@ import {
   Mail,
 } from "lucide-react";
 import Brand from "./Brand";
-import { catalogCategories } from "./catalog";
 export function StoreHeader({
   nav,
   shop,
@@ -28,12 +27,14 @@ export function StoreHeader({
   onSearch,
   user,
   onLogout,
+  config,
 }) {
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileTrigger = useRef(null);
   const profilePanel = useRef(null);
   const active = location.hash.split('/')[0].slice(1);
+  const departments = config?.categories?.length ? config.categories : [];
   useEffect(() => {
     const close = (e) => {
       if (e.key === 'Escape') { setProfileOpen(false); setOpen(false); profileTrigger.current?.focus(); }
@@ -45,6 +46,10 @@ export function StoreHeader({
   }, []);
   useEffect(() => { if (profileOpen) profilePanel.current?.querySelector('button')?.focus(); }, [profileOpen]);
   const go = (route) => { setProfileOpen(false); setOpen(false); nav(route); };
+  const goPromo = () => {
+    if (active !== "home") nav("home");
+    setTimeout(() => document.getElementById("promo")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  };
   const browse = (g) => {
     setOpen(false);
     shop ? shop("Semua", g) : nav("catalog");
@@ -52,13 +57,11 @@ export function StoreHeader({
   return (
     <>
       <div className="ks-announcement">
-        <span>Ruang tidur yang tenang, dimulai dari tekstil yang baik.</span>
+        <span>{config?.announcementText || "Ruang tidur yang tenang, dimulai dari tekstil yang baik."}</span>
         <span>
           Gratis ongkir mulai Rp699.000 <ArrowRight size={13} />
         </span>
-        <a href={user ? "#account/orders" : "mailto:wirayuda101101@gmail.com"}>
-          {user ? "Pesanan saya" : "Bantuan belanja"}
-        </a>
+        <button className="ks-announcement-promo" onClick={goPromo}>Lihat promo</button>
       </div>
       <header className="ks-header">
         <div className="ks-header-inner">
@@ -67,10 +70,10 @@ export function StoreHeader({
             onClick={() => nav(user ? "catalog" : "home")}
             aria-label="Kintsugi beranda"
           >
-            <Brand />
+            <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
           </button>
           <nav className="ks-departments" aria-label="Kategori produk seprai">
-            {catalogCategories.slice(0, 4).map(({ id: g, label }) => (
+            {departments.slice(0, 4).map(({ id: g, label }) => (
               <button
                 key={g}
                 className={activeCategory === g ? "active" : ""}
@@ -113,7 +116,7 @@ export function StoreHeader({
           className={"ks-mobile-departments " + (open ? "expanded" : "")}
           aria-label="Kategori di ponsel"
         >
-          {catalogCategories.map(({ id: g, label }) => (
+          {departments.map(({ id: g, label }) => (
             <button key={g} onClick={() => browse(g)}>
               {label}
             </button>
@@ -144,7 +147,7 @@ export function StoreHeader({
     </>
   );
 }
-export function StoreFooter({ nav, onInfo, contact = "wirayuda101101@gmail.com" }) {
+export function StoreFooter({ nav, onInfo, contact = "", storeAddress = "", brand = "Kintsugi" }) {
   const info = (title) => onInfo ? onInfo(title) : nav("account/help");
   return (
     <footer className="ks-simple-footer">
@@ -156,16 +159,17 @@ export function StoreFooter({ nav, onInfo, contact = "wirayuda101101@gmail.com" 
         <button onClick={() => info("Syarat & ketentuan")}>Syarat & Ketentuan</button>
       </nav>
       <div className="ks-footer-contact">
-        <p>Hubungi layanan pelanggan Kintsugi:</p>
-        <a href={`mailto:${contact}`}>{contact}</a>
+        <p>Hubungi layanan pelanggan {brand}:</p>
+        {contact && <a href={`mailto:${contact}`}>{contact}</a>}
+        {storeAddress && <p>Alamat toko: {storeAddress}</p>}
         <p>Untuk pertanyaan pesanan, sertakan nomor pesanan Anda.</p>
       </div>
       <div className="ks-footer-bottom">
-        <small>Hak Cipta © 2026 Kintsugi. Semua hak dilindungi undang-undang.</small>
+        <small>Hak Cipta © 2026 {brand}. Semua hak dilindungi undang-undang.</small>
         <div className="ks-footer-actions">
-          <button aria-label="Koleksi Kintsugi" onClick={() => nav("catalog")}><ShoppingBag size={19} /></button>
-          <button aria-label="Hubungi Kintsugi" onClick={() => info("Hubungi kami")}><HelpCircle size={19} /></button>
-          <a aria-label="Kirim email ke Kintsugi" href={`mailto:${contact}`}><Mail size={19} /></a>
+          <button aria-label={`Koleksi ${brand}`} onClick={() => nav("catalog")}><ShoppingBag size={19} /></button>
+          <button aria-label={`Hubungi ${brand}`} onClick={() => info("Hubungi kami")}><HelpCircle size={19} /></button>
+          {contact && <a aria-label={`Kirim email ke ${brand}`} href={`mailto:${contact}`}><Mail size={19} /></a>}
         </div>
       </div>
     </footer>

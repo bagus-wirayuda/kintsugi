@@ -6,6 +6,8 @@ import { pool, databaseConfig } from "./db.js";
 import { products } from "../src/data.js";
 import { normalizePhone } from "./integrations.js";
 import { parseDimensions } from "../src/dimensions.js";
+import { catalogCategories } from "../src/catalog.js";
+import { paymentMethods } from "../src/payment-methods.js";
 
 const dimensionSize = (value) => {
   const d = parseDimensions(value);
@@ -13,26 +15,29 @@ const dimensionSize = (value) => {
   return { size: `${d.length}×${d.width}×${d.height}`, ...d };
 };
 
+function seedProductDetails(product) {
+  const name = product.name.toLowerCase();
+  const motif = name.includes("dino") ? "Dinosaurus" : name.includes("bintang") || name.includes("moon") || name.includes("cloud") ? "Langit & bintang" : name.includes("animal") || name.includes("safari") || name.includes("bear") ? "Karakter" : name.includes("floral") || name.includes("botanical") || name.includes("daisy") ? "Floral" : name.includes("kotak") || name.includes("gingham") ? "Kotak" : name.includes("geometrik") ? "Geometrik" : name.includes("stripe") || name.includes("dobby") ? "Stripe" : name.includes("rumbai") || name.includes("rempel") ? "Rumbai" : name.includes("quilted") ? "Quilted" : name.includes("embos") ? "Embos" : name.includes("waterproof") || name.includes("anti air") ? "Waterproof" : name.includes("motif") ? "Motif dekoratif" : "Polos";
+  const weightGrams = product.category === "Sarung Bantal & Guling" ? 450 : product.category === "Pelindung Kasur" ? 1100 : product.category === "Set Sprei" ? 1700 : name.includes("bayi") || name.includes("baby") ? 700 : 1000;
+  return { costPrice: Math.round(product.price * 0.58 / 1000) * 1000, motif, weightGrams };
+}
+
+function stableDemoStock(productId, size, color) {
+  const seed = `${productId}|${size}|${color}`;
+  const hash = [...seed].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7);
+  return 8 + (hash % 32);
+}
+
 async function syncSepraiCatalog(target) {
   const client = await target.connect();
   try {
     await client.query("START TRANSACTION");
     for (const p of products) {
+      const details = seedProductDetails(p);
       await client.query(
-        `INSERT INTO products(id,sku,name,category,price,old_price,image,description,rating,reviews,is_new,active)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,1)
-         ON DUPLICATE KEY UPDATE
-           sku=VALUES(sku),
-           name=VALUES(name),
-           category=VALUES(category),
-           price=VALUES(price),
-           old_price=VALUES(old_price),
-           image=VALUES(image),
-           description=VALUES(description),
-           rating=VALUES(rating),
-           reviews=VALUES(reviews),
-           is_new=VALUES(is_new),
-           active=1`,
+        `INSERT INTO products(id,sku,name,category,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,rating,reviews,is_new,active)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+         ON DUPLICATE KEY UPDATE id=VALUES(id)`,
         [
           p.id,
           p.sku,
@@ -40,6 +45,10 @@ async function syncSepraiCatalog(target) {
           p.category,
           p.price,
           p.oldPrice,
+          details.costPrice,
+          "Warna",
+          details.motif,
+          details.weightGrams,
           p.image,
           p.description,
           p.rating,
@@ -52,7 +61,7 @@ async function syncSepraiCatalog(target) {
         for (const color of p.colors) {
           await client.query(
             "INSERT IGNORE INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,stock) VALUES(?,?,?,?,?,?,?)",
-            [p.id, d.size, d.length, d.width, d.height, color, p.stock],
+            [p.id, d.size, d.length, d.width, d.height, color, stableDemoStock(p.id, d.size, color)],
           );
         }
       }
@@ -76,6 +85,83 @@ export async function initialize(target = pool, seed = true) {
 
   await target.query(
     "CREATE TABLE IF NOT EXISTS app_migrations (id VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+  );
+  const extensibleStoreMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_extensible_store_roles_catalog"],
+  )).rows[0];
+  if (!extensibleStoreMigration) {
+    const ensureColumn = async (table, name, sql) => {
+      const columns = (await target.query(`SHOW COLUMNS FROM ${table}`)).rows;
+      if (!columns.some((column) => column.Field === name))
+        await target.query(`ALTER TABLE ${table} ADD COLUMN ${sql}`);
+    };
+    await target.query("ALTER TABLE users MODIFY role VARCHAR(20) NOT NULL DEFAULT 'customer'");
+    await ensureColumn("products", "cost_price", "cost_price INT NOT NULL DEFAULT 0");
+    await ensureColumn("products", "variation_label", "variation_label VARCHAR(80) NOT NULL DEFAULT 'Warna'");
+    await ensureColumn("products", "motif", "motif VARCHAR(100) NOT NULL DEFAULT ''");
+    await ensureColumn("products", "weight_grams", "weight_grams INT UNSIGNED NOT NULL DEFAULT 1000");
+    await ensureColumn("product_variants", "image_url", "image_url TEXT NULL");
+    await target.query("ALTER TABLE product_variants MODIFY color VARCHAR(100) NOT NULL");
+    await ensureColumn("orders", "shipping_name", "shipping_name VARCHAR(150) NOT NULL DEFAULT ''");
+    await ensureColumn("orders", "tracking_number", "tracking_number VARCHAR(100) NOT NULL DEFAULT ''");
+    await target.query("ALTER TABLE orders MODIFY shipping VARCHAR(100) NOT NULL");
+    await target.query("ALTER TABLE orders MODIFY payment VARCHAR(60) NOT NULL DEFAULT 'xendit'");
+    await target.query("ALTER TABLE order_items MODIFY color VARCHAR(100) NOT NULL");
+    await ensureColumn("order_items", "cost_price", "cost_price INT NOT NULL DEFAULT 0");
+    await ensureColumn("order_items", "variation_label", "variation_label VARCHAR(80) NOT NULL DEFAULT 'Variasi'");
+    for (const category of catalogCategories) {
+      await target.query(
+        "INSERT IGNORE INTO product_categories(id,name,sort_order) VALUES(?,?,?)",
+        [category.id, category.label, catalogCategories.indexOf(category)],
+      );
+    }
+    for (const [index, method] of paymentMethods.entries()) {
+      await target.query(
+        "INSERT IGNORE INTO store_payment_methods(id,name,group_name,detail,enabled,sort_order) VALUES(?,?,?,?,TRUE,?)",
+        [method.id, method.name, method.group, method.detail, index],
+      );
+    }
+    const defaults = {
+      brand: "Kintsugi",
+      announcementText: "Ruang tidur yang tenang, dimulai dari tekstil yang baik.",
+      contactEmail: process.env.STORE_CONTACT_EMAIL || "wirayuda101101@gmail.com",
+      storeAddress: "",
+      logo: "/brand/kintsugi-logo-transparent-v2.png",
+      heroImage: "/images/seprai/sprei-01.jpg",
+      heroKicker: "KINTSUGI / BEDROOM COLLECTION",
+      heroTitle: "Beristirahat. Lebih dalam. Setiap malam.",
+      heroText: "Tekstil kamar yang lembut untuk menjaga setiap momen istirahat.",
+      departmentKicker: "TEMUKAN PILIHAN ANDA",
+      departmentTitle: "Untuk setiap ruang. Untuk istirahat yang utuh.",
+      essentialsKicker: "SLEEP ESSENTIALS",
+      essentialsTitle: "Pilihan untuk tidur yang lebih baik.",
+      essentialsProducts: [],
+      departmentProducts: [],
+      promoKicker: "THE KINTSUGI WAY",
+      promoTitle: "Keindahan ada di setiap cerita.",
+      promoText: "Pilihan tekstil kamar yang lembut untuk ruang istirahat Anda.",
+      promoImage: "/images/seprai/sprei-16.jpg",
+      promoProductId: "",
+      promoPrice: 0,
+      promoOldPrice: 0,
+      localDeliveryFee: 15000,
+      packageWeightGrams: 1000,
+      rajaOriginId: "",
+      waTemplates: {
+        purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] berhasil dan sedang kami proses. Total: [total].",
+        shipped: "Halo [nama], pesanan [nomor_pesanan] telah dikirim. Nomor resi: [nomor_resi]. Kurir: [kurir].",
+        delivered: "Halo [nama], pesanan [nomor_pesanan] telah sampai. Terima kasih telah berbelanja di [toko].",
+        processing: "Halo [nama], pesanan [nomor_pesanan] sedang kami siapkan. Terima kasih telah berbelanja di [toko].",
+      },
+    };
+    for (const [key, value] of Object.entries(defaults))
+      await target.query("INSERT IGNORE INTO store_settings(setting_key,setting_value) VALUES(?,?)", [key, JSON.stringify(value)]);
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_extensible_store_roles_catalog"]);
+  }
+  await target.query(
+    "INSERT IGNORE INTO store_settings(setting_key,setting_value) VALUES(?,?)",
+    ["announcementText", JSON.stringify("Ruang tidur yang tenang, dimulai dari tekstil yang baik.")],
   );
   const dimensionMigration = (await target.query(
     "SELECT id FROM app_migrations WHERE id=?",
