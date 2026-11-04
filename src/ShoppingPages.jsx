@@ -8,6 +8,8 @@ import {
   ArrowRight,
   ArrowUpRight,
   CheckCircle2,
+  Tag,
+  ShieldCheck,
 } from "lucide-react";
 import { Empty, Notice } from "./Workspace";
 import { api, totals } from "./store";
@@ -67,25 +69,26 @@ function Shell({
     </div>
   );
 }
-export function CartPage({
-  user,
-  config,
-  onLogout,
-  nav,
-  cart,
+export function CartView({
+  cart = [],
   setCart,
-  coupon,
+  coupon = "",
   setCoupon,
-  shop,
-  activeCategory,
-  wishCount,
-  onSearch,
+  config,
+  nav,
 }) {
-  const [input, setInput] = useState(coupon),
+  const [input, setInput] = useState(coupon || ""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setInput(coupon || "");
+  }, [coupon]);
+
   const total = totals(cart, coupon, "local", config?.shipping?.localDeliveryFee);
+
   function quantity(key, value) {
+    if (!setCart) return;
     setCart((c) =>
       c.map((i) =>
         i.key === key
@@ -94,6 +97,7 @@ export function CartPage({
       ),
     );
   }
+
   async function apply(e) {
     e.preventDefault();
     setBusy(true);
@@ -113,13 +117,233 @@ export function CartPage({
           shipping: "regular",
         },
       });
-      setCoupon(code);
+      if (setCoupon) setCoupon(code);
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
   }
+
+  if (!cart.length) {
+    return (
+      <div className="ks-cart-empty-panel">
+        <div className="ks-cart-empty-content">
+          <div className="ks-cart-empty-icon">
+            <ShoppingBag size={44} />
+          </div>
+          <h2>Keranjang belanja masih kosong</h2>
+          <p>
+            Pilih produk dan varian yang sesuai dari katalog kami untuk mulai berbelanja.
+          </p>
+          <button
+            type="button"
+            className="btn black ks-cart-empty-btn"
+            onClick={() => nav("catalog")}
+          >
+            <span>Jelajahi Katalog Produk</span>
+            <ArrowRight size={17} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ks-cart-page-layout ws-cart-layout">
+      <section className="ks-cart-main">
+        <div className="ks-cart-header">
+          <h2>Produk Pilihan Anda</h2>
+          <span className="ks-cart-count-badge">
+            {cart.reduce((n, i) => n + i.quantity, 0)} barang
+          </span>
+        </div>
+        <div className="ks-cart-items-list">
+          {cart.map((i) => (
+            <article className="ks-cart-card" key={i.key}>
+              <div className="ks-cart-img-wrap">
+                <img src={i.image} alt={i.name} loading="lazy" />
+              </div>
+              <div className="ks-cart-detail">
+                <div className="ks-cart-meta-top">
+                  <h3 className="ks-cart-name">{i.name}</h3>
+                  <div className="ks-cart-specs">
+                    {i.size && (
+                      <span className="ks-cart-badge">
+                        Ukuran: <strong>{dimensionLabel(i.size)}</strong>
+                      </span>
+                    )}
+                    {i.color && (
+                      <span className="ks-cart-badge">
+                        {i.variationLabel || "Warna"}: <strong>{colorLabel(i.color)}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <div className="ks-cart-unit-price">
+                    {money(i.price)} <span className="ks-unit-suffix">/ barang</span>
+                  </div>
+                </div>
+
+                <div className="ks-cart-controls-row">
+                  <div className="ks-cart-stepper" aria-label={`Jumlah pesanan ${i.name}`}>
+                    <button
+                      type="button"
+                      className="ks-stepper-btn"
+                      aria-label={"Kurangi " + i.name}
+                      disabled={i.quantity <= 1}
+                      onClick={() => quantity(i.key, i.quantity - 1)}
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span className="ks-stepper-val">{i.quantity}</span>
+                    <button
+                      type="button"
+                      className="ks-stepper-btn"
+                      aria-label={"Tambah " + i.name}
+                      disabled={i.quantity >= Math.min(99, i.stock)}
+                      onClick={() => quantity(i.key, i.quantity + 1)}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+
+                  <div className="ks-cart-price-action-group">
+                    <div className="ks-cart-item-pricing">
+                      <span className="ks-cart-total-label">Subtotal</span>
+                      <strong className="ks-cart-total-val">{money(i.price * i.quantity)}</strong>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="ks-cart-remove-btn"
+                      aria-label={"Hapus " + i.name + " dari keranjang"}
+                      onClick={() =>
+                        setCart && setCart((c) => c.filter((x) => x.key !== i.key))
+                      }
+                    >
+                      <Trash2 size={14} />
+                      <span>Hapus</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <aside className="ks-cart-summary checkout-summary">
+        <div className="ks-summary-card">
+          <h2 className="ks-summary-title">Ringkasan Belanja</h2>
+
+          <div className="ks-voucher-section">
+            <form className="ks-voucher-form" onSubmit={apply}>
+              <label htmlFor="cart-voucher-input" className="ks-voucher-label">
+                <Tag size={14} />
+                <span>Punya kode voucher?</span>
+              </label>
+              <div className="ks-voucher-input-group">
+                <input
+                  id="cart-voucher-input"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Masukkan kode voucher"
+                  disabled={busy}
+                />
+                <button
+                  type="submit"
+                  className="ks-voucher-submit-btn"
+                  disabled={busy || !input.trim()}
+                >
+                  {busy ? "Memeriksa…" : "Gunakan"}
+                </button>
+              </div>
+            </form>
+
+            {coupon && (
+              <div className="ks-voucher-active">
+                <div className="ks-voucher-active-info">
+                  <CheckCircle2 size={15} />
+                  <span>Voucher <strong>{coupon}</strong> aktif</span>
+                </div>
+                <button
+                  type="button"
+                  className="ks-voucher-remove-btn"
+                  aria-label="Hapus voucher"
+                  onClick={() => {
+                    if (setCoupon) setCoupon("");
+                    setInput("");
+                  }}
+                >
+                  Hapus ×
+                </button>
+              </div>
+            )}
+
+            {error && (
+              <div className="ks-voucher-error" role="alert">
+                {error}
+              </div>
+            )}
+          </div>
+
+          <div className="ks-summary-rows">
+            <div className="ks-summary-row">
+              <span>Total Harga ({cart.reduce((n, i) => n + i.quantity, 0)} barang)</span>
+              <span>{money(total.subtotal)}</span>
+            </div>
+
+            {total.discount > 0 && (
+              <div className="ks-summary-row ks-summary-discount">
+                <span>Diskon Voucher</span>
+                <span>−{money(total.discount)}</span>
+              </div>
+            )}
+
+            <div className="ks-summary-row">
+              <span>Estimasi Ongkir</span>
+              <span>{total.delivery > 0 ? money(total.delivery) : "Dihitung saat checkout"}</span>
+            </div>
+
+            <div className="ks-summary-divider" />
+
+            <div className="ks-summary-row ks-summary-total">
+              <span>Total Pembayaran</span>
+              <strong className="ks-summary-total-price">{money(total.total)}</strong>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn black ks-checkout-btn"
+            onClick={() => nav("checkout")}
+          >
+            <span>Lanjut ke Checkout</span>
+            <ArrowRight size={17} />
+          </button>
+
+          <div className="ks-checkout-security">
+            <ShieldCheck size={16} />
+            <span>Transaksi aman, stok & ongkir diperiksa ulang saat checkout.</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export function CartPage(props) {
+  const {
+    user,
+    config,
+    onLogout,
+    nav,
+    cart = [],
+    shop,
+    activeCategory,
+    wishCount,
+    onSearch,
+  } = props;
   return (
     <Shell
       user={user}
@@ -135,179 +359,37 @@ export function CartPage({
       title="Keranjang belanja"
       subtitle="Periksa barang pilihan Anda sebelum checkout."
     >
-      {!cart.length ? (
-        <div className="ws-panel">
-          <Empty
-            icon={ShoppingBag}
-            title="Keranjang masih kosong"
-            action={
-              <button
-                className="ws-button primary"
-                onClick={() => nav("catalog")}
-              >
-                Jelajahi katalog
-                <ArrowRight size={16} />
-              </button>
-            }
-          >
-            Pilih produk dan varian yang sesuai untuk mulai berbelanja.
-          </Empty>
-        </div>
-      ) : (
-        <div className="ws-cart-layout">
-          <section className="ws-panel ws-cart-list">
-            <div className="ws-panel-heading">
-              <h2>Produk pilihan Anda</h2>
-              <p>
-                {cart.reduce((n, i) => n + i.quantity, 0)} barang di keranjang
-              </p>
-            </div>
-            {cart.map((i) => (
-              <article className="ws-cart-item" key={i.key}>
-                <img src={i.image} alt={i.name} />
-                <div>
-                  <h3>{i.name}</h3>
-                  <p>
-                    Ukuran {dimensionLabel(i.size)} ·{" "}
-                    {i.variationLabel || "Variasi"}: {colorLabel(i.color)}
-                  </p>
-                  <b>{money(i.price)}</b>
-                  <div className="ws-quantity">
-                    <button
-                      aria-label={"Kurangi " + i.name}
-                      disabled={i.quantity <= 1}
-                      onClick={() => quantity(i.key, i.quantity - 1)}
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <span>{i.quantity}</span>
-                    <button
-                      aria-label={"Tambah " + i.name}
-                      disabled={i.quantity >= Math.min(99, i.stock)}
-                      onClick={() => quantity(i.key, i.quantity + 1)}
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
-                <div className="ws-cart-item-end">
-                  <strong>{money(i.price * i.quantity)}</strong>
-                  <button
-                    className="ws-link danger"
-                    onClick={() =>
-                      setCart((c) => c.filter((x) => x.key !== i.key))
-                    }
-                  >
-                    <Trash2 size={15} />
-                    Hapus
-                  </button>
-                </div>
-              </article>
-            ))}
-          </section>
-          <aside className="ws-panel checkout-summary">
-            <h2>Ringkasan belanja</h2>
-            <form className="ws-coupon" onSubmit={apply}>
-              <label>
-                Kode voucher
-                <div>
-                  <input
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="Masukkan kode"
-                  />
-                  <button className="ws-button" disabled={busy}>
-                    Gunakan
-                  </button>
-                </div>
-              </label>
-            </form>
-            {coupon && (
-              <button
-                className="ws-status success"
-                onClick={() => {
-                  setCoupon("");
-                  setInput("");
-                }}
-              >
-                Voucher {coupon} aktif · Hapus ×
-              </button>
-            )}
-            <Notice>{error}</Notice>
-            <dl className="checkout-totals">
-              <div>
-                <dt>Subtotal</dt>
-                <dd>{money(total.subtotal)}</dd>
-              </div>
-              {total.discount > 0 && (
-                <div className="discount">
-                  <dt>Diskon</dt>
-                  <dd>−{money(total.discount)}</dd>
-                </div>
-              )}
-              <div>
-                <dt>Estimasi ongkir reguler</dt>
-                <dd>{money(total.delivery)}</dd>
-              </div>
-              <div className="total">
-                <dt>Estimasi total</dt>
-                <dd>{money(total.total)}</dd>
-              </div>
-            </dl>
-            <button
-              className="ws-button primary"
-              onClick={() => nav("checkout")}
-            >
-              Lanjut ke checkout
-              <ArrowRight size={17} />
-            </button>
-            <p className="checkout-safe">
-              Harga, stok, dan ongkir diperiksa kembali saat checkout.
-            </p>
-          </aside>
-        </div>
-      )}
+      <CartView {...props} />
     </Shell>
   );
 }
-export function WishlistPage({
-  user,
-  config,
-  onLogout,
-  nav,
-  wish,
+
+export function WishlistView({
+  wish = [],
   setWish,
   openProduct,
-  shop,
-  activeCategory,
-  cartCount,
-  onSearch,
+  nav,
+  config,
 }) {
   const [rows, setRows] = useState([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
+
   useEffect(() => {
     setLoading(true);
+    if (!wish?.length) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     api("/products?ids=" + encodeURIComponent(wish.join(",")) + "&pageSize=48")
-      .then((d) => setRows(d.items))
+      .then((d) => setRows(d.items || []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [wish]);
+
   return (
-    <Shell
-      user={user}
-      config={config}
-      onLogout={onLogout}
-      nav={nav}
-      active="wishlist"
-      onSearch={onSearch}
-      shop={shop}
-      activeCategory={activeCategory}
-      cartCount={cartCount}
-      wishCount={wish.length}
-      title="Favorit saya"
-      subtitle="Produk pilihan yang ingin Anda temukan kembali."
-    >
+    <>
       <Notice>{error}</Notice>
       {loading ? (
         <div className="ws-loading">Memuat favorit…</div>
@@ -322,7 +404,7 @@ export function WishlistPage({
                 <button
                   className="ws-favorite-image"
                   aria-label={"Lihat " + p.name}
-                  onClick={() => openProduct(p)}
+                  onClick={() => openProduct && openProduct(p)}
                 >
                   <img src={p.image} alt={p.name} />
                 </button>
@@ -332,11 +414,14 @@ export function WishlistPage({
                   </span>
                   <h3>{p.name}</h3>
                   <b>{money(p.price)}</b>
-                  <div className="ks-product-actions"><button onClick={() => openProduct(p, 'cart')}>+ Keranjang</button><button onClick={() => openProduct(p, 'buy')}>Beli langsung</button></div>
+                  <div className="ks-product-actions">
+                    <button onClick={() => openProduct && openProduct(p, 'cart')}>+ Keranjang</button>
+                    <button onClick={() => openProduct && openProduct(p, 'buy')}>Beli langsung</button>
+                  </div>
                   <button
                     className="ws-link secondary-link"
                     onClick={() =>
-                      setWish((w) => w.filter((id) => id !== p.id))
+                      setWish && setWish((w) => w.filter((id) => id !== p.id))
                     }
                   >
                     Hapus dari favorit
@@ -364,6 +449,38 @@ export function WishlistPage({
           </Empty>
         </div>
       )}
+    </>
+  );
+}
+
+export function WishlistPage(props) {
+  const {
+    user,
+    config,
+    onLogout,
+    nav,
+    wish = [],
+    shop,
+    activeCategory,
+    cartCount,
+    onSearch,
+  } = props;
+  return (
+    <Shell
+      user={user}
+      config={config}
+      onLogout={onLogout}
+      nav={nav}
+      active="wishlist"
+      onSearch={onSearch}
+      shop={shop}
+      activeCategory={activeCategory}
+      cartCount={cartCount}
+      wishCount={wish.length}
+      title="Favorit saya"
+      subtitle="Produk pilihan yang ingin Anda temukan kembali."
+    >
+      <WishlistView {...props} />
     </Shell>
   );
 }

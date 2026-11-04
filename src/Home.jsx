@@ -7,43 +7,141 @@ import {
   Truck,
   ShieldCheck,
   Package,
+  Minus,
+  Plus,
+  ShoppingBag,
 } from "lucide-react";
 import { assets, colorLabel, money } from "./data";
-import { categoryLabel } from "./catalog";
+import { categoryLabel, getMainCategories, mainCategories } from "./catalog";
+import { dimensionLabel, parseDimensions } from "./dimensions.js";
+import { api } from "./store";
 import SizeSummary from "./SizeSummary.jsx";
-const categoryTiles = [
-  ["Sprei Fitted", assets.fitted, "Sprei berkaret yang membungkus spring bed dengan rapi."],
-  ["Set Sprei", assets.sheets, "Paket sprei dan sarung bantal yang serasi."],
-  ["Sprei Karet", assets.stripe, "Pilihan sprei praktis untuk pemakaian harian."],
-  ["Sprei Hotel", assets.hotel, "Tampilan rapi dan nyaman untuk kamar inap."],
-  ["Sarung Bantal & Guling", assets.pillow, "Pelengkap tempat tidur dengan warna senada."],
-  ["Sprei Motif", assets.kids, "Pilihan motif untuk suasana kamar yang lebih personal."],
-  ["Pelindung Kasur", assets.protector, "Lapisan pelindung untuk menjaga kasur."],
-];
-export default function Home({ shop, products, openProduct, config = {} }) {
-  const promotions = Array.isArray(config.promotions) ? config.promotions : [];
-  const [promoIndex, setPromoIndex] = useState(0);
-  useEffect(() => {
-    setPromoIndex(0);
-    if (promotions.length < 2) return;
-    const timer = setInterval(() => setPromoIndex((index) => (index + 1) % promotions.length), 6500);
-    return () => clearInterval(timer);
-  }, [promotions.length]);
-  const departments = (config.categories?.length ? config.categories : categoryTiles.map(([id]) => ({ id, label: categoryLabel(id, config.categories) }))).filter((item) => item.id !== "Semua");
-  const selectedProducts = Array.isArray(config.essentialsProducts) && config.essentialsProducts.length
-    ? config.essentialsProducts.map((id) => products.find((item) => item.id === id)).filter(Boolean)
-    : products.slice(0, 4);
-  const selectedDepartments = Array.isArray(config.departmentProducts) && config.departmentProducts.length
-    ? config.departmentProducts.map((id) => products.find((item) => item.id === id)).filter(Boolean)
+import VariantSummary from "./VariantSummary.jsx";
+
+export default function Home({ shop, products = [], openProduct, config = {}, onAddToCart, onBuyDirect }) {
+  const mainNavItems = getMainCategories(config.categories || mainCategories);
+
+  // Resolusi section produk beranda (dinamis dan full custom)
+  const homeSections = Array.isArray(config.homeSections)
+    ? config.homeSections
     : [];
-  const activePromotion = promotions.length ? promotions[promoIndex % promotions.length] : null;
-  const promoProduct = products.find((item) => item.id === (activePromotion?.productId || config.promoProductId));
-  const promoImage = activePromotion?.image || config.promoImage || promoProduct?.image || assets.editorial;
-  const promoPrice = activePromotion?.price ?? (Number(config.promoPrice) || promoProduct?.price || 0);
-  const promoOldPrice = activePromotion?.oldPrice ?? (config.promoOldPrice != null ? Number(config.promoOldPrice) : promoProduct?.oldPrice || 0);
-  const promoKicker = activePromotion?.eyebrow || config.promoKicker || "THE KINTSUGI WAY";
-  const promoTitle = activePromotion?.title || config.promoTitle || "Keindahan ada di setiap cerita.";
-  const promoText = activePromotion?.description || config.promoText || "Pilihan tekstil kamar yang lembut untuk ruang istirahat Anda.";
+
+  const [extraProducts, setExtraProducts] = useState({});
+
+  useEffect(() => {
+    const promoProductIds = (config.promotions || [])
+      .map((p) => p.productId)
+      .concat(config.promoProductId ? [config.promoProductId] : [])
+      .filter((id) => id && !products.some((item) => item.id === id && item.variants) && !extraProducts[id]);
+
+    if (promoProductIds.length === 0) return;
+
+    promoProductIds.forEach((id) => {
+      api("/products/" + encodeURIComponent(id))
+        .then((fullProd) => {
+          if (fullProd && fullProd.id) {
+            setExtraProducts((prev) => ({ ...prev, [id]: fullProd }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [config.promotions, config.promoProductId, products, extraProducts]);
+
+  // Resolusi multi-promo dinamis dari database (config.promotions) atau fallback legacy
+  const promoSlides = React.useMemo(() => {
+    if (Array.isArray(config.promotions) && config.promotions.length > 0) {
+      return config.promotions.map((p) => {
+        const prod = products.find((item) => item.id === p.productId) || extraProducts[p.productId];
+        const basePrice = Number(p.basePrice || prod?.price || 0);
+        const salePrice = Number(p.price || (prod ? Math.round(basePrice * (100 - Number(p.discountPercent || 0)) / 100) : 0));
+        const oldPrice = Number(p.oldPrice || basePrice);
+        const customImage = p.image && p.image !== prod?.image ? p.image : null;
+        return {
+          id: p.id,
+          productId: p.productId,
+          product: prod,
+          eyebrow: p.eyebrow || "SOROTAN PROMO",
+          title: p.title || prod?.name || "Penawaran Istimewa",
+          description: p.description || "Pilihan istimewa untuk kenyamanan istirahat Anda.",
+          customImage,
+          image: customImage || prod?.image || assets.editorial,
+          price: salePrice,
+          oldPrice: oldPrice > salePrice ? oldPrice : 0,
+          discountPercent: p.discountPercent || (oldPrice > salePrice && basePrice > 0 ? Math.round((1 - salePrice / basePrice) * 100) : 0),
+        };
+      });
+    }
+    if (config.promoTitle || config.promoProductId) {
+      const prod = products.find((item) => item.id === config.promoProductId) || extraProducts[config.promoProductId];
+      const basePrice = Number(config.promoOldPrice) || Number(prod?.price || 0);
+      const salePrice = Number(config.promoPrice) || (basePrice > 0 ? basePrice : 0);
+      const customImage = config.promoImage && config.promoImage !== prod?.image ? config.promoImage : null;
+      return [{
+        id: "legacy-promo",
+        productId: config.promoProductId,
+        product: prod,
+        eyebrow: config.promoKicker || "THE KINTSUGI WAY",
+        title: config.promoTitle || "Keindahan ada di setiap cerita.",
+        description: config.promoText || "Pilihan tekstil kamar yang lembut untuk ruang istirahat Anda.",
+        customImage,
+        image: customImage || prod?.image || assets.editorial,
+        price: salePrice,
+        oldPrice: basePrice > salePrice ? basePrice : 0,
+        discountPercent: basePrice > salePrice ? Math.round((1 - salePrice / basePrice) * 100) : 0,
+      }];
+    }
+    return [];
+  }, [config.promotions, config.promoTitle, config.promoProductId, config.promoKicker, config.promoText, config.promoImage, config.promoPrice, config.promoOldPrice, products, extraProducts]);
+
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const touchStartX = React.useRef(0);
+  const touchStartY = React.useRef(0);
+
+  // Auto-play interval jika promo lebih dari 1
+  useEffect(() => {
+    if (promoSlides.length <= 1 || isPaused) return;
+    const interval = setInterval(() => {
+      setActiveSlide((curr) => (curr + 1) % promoSlides.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [promoSlides.length, isPaused]);
+
+  // Jeda sementara saat pengguna berinteraksi (klik tombol / swipe)
+  const pauseTemporarily = () => {
+    setIsPaused(true);
+    if (window._promoPauseTimer) clearTimeout(window._promoPauseTimer);
+    window._promoPauseTimer = setTimeout(() => setIsPaused(false), 5500);
+  };
+
+  const handlePrev = () => {
+    pauseTemporarily();
+    setActiveSlide((curr) => (curr - 1 + promoSlides.length) % promoSlides.length);
+  };
+
+  const handleNext = () => {
+    pauseTemporarily();
+    setActiveSlide((curr) => (curr + 1) % promoSlides.length);
+  };
+
+  const handleTouchStart = (e) => {
+    setIsPaused(true);
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e) => {
+    const diffX = e.changedTouches[0].clientX - touchStartX.current;
+    const diffY = e.changedTouches[0].clientY - touchStartY.current;
+    if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY)) {
+      if (diffX < 0) {
+        setActiveSlide((curr) => (curr + 1) % promoSlides.length);
+      } else {
+        setActiveSlide((curr) => (curr - 1 + promoSlides.length) % promoSlides.length);
+      }
+    }
+    pauseTemporarily();
+  };
   return (
     <main className="ks-home">
       <section className="ks-hero">
@@ -55,9 +153,17 @@ export default function Home({ shop, products, openProduct, config = {} }) {
         <div className="ks-hero-shade" />
         <div className="ks-hero-content">
           <span className="ks-kicker">{config.heroKicker || "KINTSUGI / BEDROOM COLLECTION"}</span>
-          <h1>{(config.heroTitle || "Beristirahat.\nLebih dalam.\nSetiap malam.").split("\n").map((line, index) => <React.Fragment key={index}>{index > 0 && <br />}{index === 2 ? <em>{line}</em> : line}</React.Fragment>)}</h1>
+          <h1>
+            {(config.heroTitle || "Beristirahat.\nLebih dalam.\nSetiap malam.")
+              .split("\n")
+              .map((line, index) => (
+                <span key={index} className="ks-hero-line">
+                  {index === 2 ? <em>{line}</em> : line}
+                </span>
+              ))}
+          </h1>
           <p>{config.heroText || "Tekstil kamar yang lembut untuk menjaga setiap momen istirahat."}</p>
-          <button onClick={() => shop()}>
+          <button type="button" onClick={() => shop("Semua", "Semua")}>
             JELAJAHI KOLEKSI <ArrowRight size={19} />
           </button>
           <span className="ks-hero-caption">
@@ -70,100 +176,149 @@ export default function Home({ shop, products, openProduct, config = {} }) {
           <span>{config.brand || "SLEEP, REFINED."}</span>
         </div>
       </section>
-      <nav className="ks-quick-links" aria-label="Pilihan koleksi">
-        {[
-          "Produk Baru",
-          "Penawaran Terbatas",
-          ...departments.slice(0, 4).map((item) => item.id),
-        ].map((c) => (
-          <button key={c} onClick={() => shop(c)}>
-            {c === "Produk Baru" || c === "Penawaran Terbatas" ? c : categoryLabel(c, config.categories)} <ArrowUpRight size={15} />
+      <nav className="ks-quick-links" aria-label="Menu kategori utama di ponsel">
+        {mainNavItems.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => shop(m.id, "Semua")}
+          >
+            {m.label || m.name || m.id} <ArrowUpRight size={14} />
           </button>
         ))}
       </nav>
-      <section className="ks-section ks-department-section">
-        <div className="ks-section-heading">
-          <div>
-            <p className="ks-kicker">{config.departmentKicker || "TEMUKAN PILIHAN ANDA"}</p>
-            <h2>{config.departmentTitle || "Untuk setiap ruang. Untuk istirahat yang utuh."}</h2>
-          </div>
-          <button onClick={() => shop()}>
-            Lihat semua <ArrowRight size={17} />
-          </button>
-        </div>
-        <div className="ks-department-grid ks-product-category-grid">
-          {selectedDepartments.length ? selectedDepartments.map((product) => <button key={product.id} onClick={() => openProduct(product)}><div><img src={product.image} alt={product.name} loading="lazy" /></div><h3>{product.name.toUpperCase()} <ArrowUpRight size={19} /></h3><p>{product.motif || product.description}</p></button>) : departments.map((category) => {
-            const product = products.find((item) => item.category === category.id);
-            const legacy = categoryTiles.find(([id]) => id === category.id);
-            const image = product?.image || legacy?.[1] || assets.hero;
-            const description = product?.description || legacy?.[2] || `Jelajahi koleksi ${category.label}.`;
-            return <button key={category.id} onClick={() => shop(category.id)}><div><img src={image} alt={category.label} loading="lazy" /></div><h3>{category.label.toUpperCase()} <ArrowUpRight size={19} /></h3><p>{description}</p></button>;
-          })}
-        </div>
-      </section>
-      <section className="ks-section ks-products-section">
-        <div className="ks-section-heading">
-          <div>
-            <p className="ks-kicker">{config.essentialsKicker || "SLEEP ESSENTIALS"}</p>
-            <h2>{config.essentialsTitle || "Pilihan untuk tidur yang lebih baik."}</h2>
-          </div>
-          <button onClick={() => shop()}>
-            Jelajahi koleksi <ArrowRight size={17} />
-          </button>
-        </div>
-        <div className="ks-home-products">
-          {selectedProducts.map((p) => (
-            <article key={p.id}>
-              <button
-                className="ks-home-product-image"
-                onClick={() => openProduct(p)}
-              >
-                <img src={p.image} alt={p.name} loading="lazy" />
-                <span>
-                  {p.oldPrice ? "PENAWARAN TERBATAS" : "PILIHAN KINTSUGI"}
-                </span>
+
+      {/* Dynamic Product Sections (SLEEP ESSENTIALS concept) */}
+      {homeSections.map((section, sIdx) => {
+        const rawIds = Array.isArray(section.productIds) ? section.productIds : [];
+        const sectionProducts = rawIds
+          .map((id) => products.find((item) => item.id === id))
+          .filter(Boolean);
+
+        if (sectionProducts.length === 0) return null;
+
+        return (
+          <section key={section.id || sIdx} className="ks-section ks-products-section">
+            <div className="ks-section-heading">
+              <div>
+                {section.kicker && <p className="ks-kicker">{section.kicker}</p>}
+                <h2>{section.title || "Pilihan Koleksi"}</h2>
+              </div>
+              <button type="button" onClick={() => shop("Semua", "Semua")}>
+                Jelajahi koleksi <ArrowRight size={17} />
               </button>
-              <div className="swatches">
-                {p.colors.map((c) => (
-                  <span key={c} style={{ background: c }} title={colorLabel(c)} />
+            </div>
+            <div className="ks-home-products">
+              {sectionProducts.map((p) => (
+                <article key={p.id}>
+                  <button
+                    type="button"
+                    className="ks-home-product-image"
+                    onClick={() => openProduct(p)}
+                  >
+                    <img src={p.image} alt={p.name} loading="lazy" />
+                    <span>
+                      {p.oldPrice ? "PENAWARAN TERBATAS" : "PILIHAN KOLEKSI"}
+                    </span>
+                  </button>
+                  <VariantSummary
+                    colors={p.colors}
+                    variationLabel={p.variationLabel || "Warna"}
+                  />
+                  <small>{categoryLabel(p.category, config.categories).toUpperCase()}</small>
+                  <SizeSummary sizes={p.sizes} />
+                  <button
+                    type="button"
+                    className="ks-home-product-name"
+                    onClick={() => openProduct(p)}
+                  >
+                    {p.name}
+                  </button>
+                  <strong>{money(p.price)}</strong>
+                  {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
+                  <div className="ks-product-actions">
+                    <button type="button" onClick={() => openProduct(p, 'cart')}>+ Keranjang</button>
+                    <button type="button" onClick={() => openProduct(p, 'buy')}>Beli langsung</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {promoSlides.length > 0 && (
+        <section
+          className="ks-story-slider"
+          id="promo"
+          aria-label="Sorotan Promo dan Cerita Pilihan"
+          onMouseEnter={() => setIsPaused(true)}
+          onMouseLeave={() => setIsPaused(false)}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="ks-story-viewport">
+            <div
+              className="ks-story-track"
+              style={{
+                transform: promoSlides.length > 1 ? `translateX(-${activeSlide * 100}%)` : "none",
+                transition: promoSlides.length > 1 ? "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+              }}
+            >
+              {promoSlides.map((slide, idx) => (
+                <PromoSlideItem
+                  key={slide.id || idx}
+                  slide={slide}
+                  isActive={idx === activeSlide}
+                  onBuyDirect={onBuyDirect}
+                  onAddToCart={onAddToCart}
+                />
+              ))}
+            </div>
+          </div>
+
+          {promoSlides.length > 1 && (
+            <div className="ks-story-controls" aria-label="Navigasi Slider Promo">
+              <button
+                type="button"
+                className="ks-story-arrow prev"
+                aria-label="Promo sebelumnya"
+                onClick={handlePrev}
+              >
+                <ChevronLeft size={20} />
+              </button>
+
+              <div className="ks-story-dots">
+                {promoSlides.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={"ks-story-dot " + (idx === activeSlide ? "active" : "")}
+                    aria-label={`Lihat promo ke-${idx + 1}`}
+                    onClick={() => {
+                      pauseTemporarily();
+                      setActiveSlide(idx);
+                    }}
+                  />
                 ))}
               </div>
-              <small>{categoryLabel(p.category, config.categories).toUpperCase()} · {colorLabel(p.colors[0])}</small>
-              <SizeSummary sizes={p.sizes} />
+
+              <span className="ks-story-counter">
+                <b>{String(activeSlide + 1).padStart(2, "0")}</b> / {String(promoSlides.length).padStart(2, "0")}
+              </span>
+
               <button
-                className="ks-home-product-name"
-                onClick={() => openProduct(p)}
+                type="button"
+                className="ks-story-arrow next"
+                aria-label="Promo berikutnya"
+                onClick={handleNext}
               >
-                {p.name}
+                <ChevronRight size={20} />
               </button>
-              <strong>{money(p.price)}</strong>
-              {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
-              <div className="ks-product-actions"><button onClick={() => openProduct(p, 'cart')}>+ Keranjang</button><button onClick={() => openProduct(p, 'buy')}>Beli langsung</button></div>
-            </article>
-          ))}
-        </div>
-      </section>
-      <section className="ks-story" id="promo">
-        <div className="ks-story-photo">
-          <img
-            src={promoImage}
-            alt={promoProduct?.name || "Koleksi pilihan toko"}
-            loading="lazy"
-          />
-        </div>
-        <div className="ks-story-copy">
-          <p className="ks-kicker">{promoKicker}</p>
-          <h2>{promoTitle}</h2>
-          <span className="ks-gold-rule" />
-          <p>{promoText}</p>
-          {activePromotion && <span className="ks-promo-badge">DISKON {activePromotion.discountPercent}%</span>}
-          {promoProduct && <button className="ks-promo-product" onClick={() => openProduct(promoProduct)}>{promoProduct.name}<strong>{money(promoPrice)}</strong>{promoOldPrice > promoPrice && <del>{money(promoOldPrice)}</del>}</button>}
-          <button onClick={() => shop()}>
-            TEMUKAN KOLEKSI KAMAR <ArrowRight size={18} />
-          </button>
-          {promotions.length > 1 && <div className="ks-promo-controls" aria-label="Navigasi promo"><button aria-label="Promo sebelumnya" onClick={()=>setPromoIndex((index)=>(index-1+promotions.length)%promotions.length)}><ChevronLeft size={18}/></button><span>{promoIndex+1} / {promotions.length}</span><button aria-label="Promo berikutnya" onClick={()=>setPromoIndex((index)=>(index+1)%promotions.length)}><ChevronRight size={18}/></button></div>}
-        </div>
-      </section>
+            </div>
+          )}
+        </section>
+      )}
       <section className="ks-benefits">
         {[
           [Truck, "Dikirim ke pintu Anda", "Gratis ongkir mulai Rp699.000"],
@@ -184,5 +339,247 @@ export default function Home({ shop, products, openProduct, config = {} }) {
         ))}
       </section>
     </main>
+  );
+}
+
+function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
+  const product = slide.product;
+  const [selectedColor, setSelectedColor] = useState("");
+  const [selectedSize, setSelectedSize] = useState("");
+  const [quantity, setQuantity] = useState(1);
+
+  useEffect(() => {
+    if (product) {
+      if (product.colors?.length && !selectedColor) {
+        setSelectedColor(product.colors[0]);
+      }
+      if (product.sizes?.length && !selectedSize) {
+        setSelectedSize(product.sizes[0]);
+      }
+    }
+  }, [product]);
+
+  // Compute selected variant and stock
+  const currentVariant = product?.variants?.find(
+    (v) => (v.color === selectedColor || !v.color) && (v.size === selectedSize || !v.size)
+  );
+
+  const currentStock = currentVariant
+    ? currentVariant.stock
+    : (product?.stock ?? 0);
+
+  // If quantity > stock, adjust
+  useEffect(() => {
+    if (currentStock > 0 && quantity > currentStock) {
+      setQuantity(Math.max(1, currentStock));
+    }
+  }, [currentStock]);
+
+  const displayImage = slide.customImage
+    ? slide.customImage
+    : (currentVariant?.image_url || slide.image || product?.image || "/images/seprai/sprei-01.jpg");
+
+  const basePrice = slide.oldPrice > slide.price ? slide.oldPrice : (product?.price || 0);
+  const salePrice = slide.price;
+  const discountPercent = slide.discountPercent || (basePrice > salePrice && basePrice > 0 ? Math.round((1 - salePrice / basePrice) * 100) : 0);
+
+  return (
+    <div
+      className={"ks-story-slide " + (isActive ? "active" : "")}
+      aria-hidden={!isActive}
+    >
+      {/* Area Kiri: Gambar Utama Produk / Foto Promo */}
+      <div className="ks-story-photo">
+        <img
+          src={displayImage}
+          alt={product?.name || slide.title}
+          loading="lazy"
+        />
+        {discountPercent > 0 && (
+          <span className="ks-promo-badge">
+            HEMAT {discountPercent}%
+          </span>
+        )}
+      </div>
+
+      {/* Area Kanan: Informasi Promo & Panel Pembelian Langsung */}
+      <div className="ks-story-copy">
+        <p className="ks-kicker">{slide.eyebrow || "SOROTAN PROMO"}</p>
+        <h2>{slide.title}</h2>
+        <span className="ks-gold-rule" />
+        <p className="ks-promo-slide-desc">{slide.description}</p>
+
+        {/* Tampilan Harga Asli & Promo */}
+        <div className="ks-promo-price-block">
+          <span className="ks-promo-main-price">{money(salePrice)}</span>
+          {basePrice > salePrice && (
+            <del className="ks-promo-strike-price">{money(basePrice)}</del>
+          )}
+          {discountPercent > 0 && (
+            <span className="ks-promo-discount-tag">HEMAT {discountPercent}%</span>
+          )}
+        </div>
+
+        {/* Panel Pembelian Langsung Terintegrasi */}
+        <div className="ks-promo-purchase-panel">
+          {/* Pilihan Warna / Variasi */}
+          {product?.colors?.length > 0 && (
+            <div className="ks-promo-field-group">
+              <div className="ks-promo-field-header">
+                <span>{product.variationLabel || "Pilihan Variasi"}:</span>
+                <strong>{colorLabel(selectedColor)}</strong>
+              </div>
+              <div className="ks-promo-choices-wrap">
+                {product.colors.map((c) => {
+                  const v = product.variants?.find((item) => item.color === c && item.image_url);
+                  const isHex = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c);
+                  const isSel = selectedColor === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`ks-promo-variant-btn ${isSel ? "selected" : ""} ${isHex ? "is-hex" : "is-text"}`}
+                      style={isHex ? { background: c } : undefined}
+                      title={colorLabel(c)}
+                      onClick={() => setSelectedColor(c)}
+                      aria-label={colorLabel(c)}
+                    >
+                      {v?.image_url && (
+                        <img src={v.image_url} alt="" className="ks-promo-variant-thumb" />
+                      )}
+                      {!isHex && <span>{c}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Pilihan Ukuran */}
+          {product?.sizes?.length > 0 && (
+            <div className="ks-promo-field-group">
+              <div className="ks-promo-field-header">
+                <span>Ukuran:</span>
+                <strong>{dimensionLabel(selectedSize)}</strong>
+              </div>
+              <div className="ks-promo-choices-wrap">
+                {product.sizes.map((s) => {
+                  const dims = parseDimensions(s);
+                  const isSel = selectedSize === s;
+                  const isAvail = !product.variants || product.variants.some((v) => v.size === s && (v.color === selectedColor || !selectedColor) && v.stock > 0);
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={!isAvail}
+                      className={`ks-promo-size-btn ${isSel ? "selected" : ""} ${!isAvail ? "disabled" : ""}`}
+                      onClick={() => setSelectedSize(s)}
+                      title={!isAvail ? "Stok habis untuk ukuran ini" : `Pilih ukuran ${s}`}
+                    >
+                      {dims ? (
+                        <span className="ks-promo-dim-vals">
+                          <b>{dims.length}</b>×<b>{dims.width}</b>×<b>{dims.height}</b>
+                          <small>cm</small>
+                        </span>
+                      ) : (
+                        <span>{s}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Jumlah & Stok */}
+          <div className="ks-promo-qty-stock-row">
+            <div className="ks-promo-qty-group">
+              <span className="ks-promo-qty-label">Jumlah:</span>
+              <div className="ks-promo-stepper">
+                <button
+                  type="button"
+                  disabled={quantity <= 1 || currentStock < 1}
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  aria-label="Kurangi jumlah"
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="ks-promo-qty-num">{quantity}</span>
+                <button
+                  type="button"
+                  disabled={quantity >= Math.min(99, currentStock) || currentStock < 1}
+                  onClick={() => setQuantity(Math.min(99, currentStock, quantity + 1))}
+                  aria-label="Tambah jumlah"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="ks-promo-stock-box">
+              {currentStock > 0 ? (
+                <span className="ks-promo-stock-pill in-stock">
+                  <ShieldCheck size={14} />
+                  <span>Tersedia {currentStock} pcs</span>
+                </span>
+              ) : (
+                <span className="ks-promo-stock-pill out-of-stock">
+                  Stok Habis
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Dua Tombol Aksi Pembelian */}
+          <div className="ks-promo-btn-actions">
+            <button
+              type="button"
+              className="ks-promo-buy-btn"
+              disabled={!product || currentStock < 1}
+              onClick={() => {
+                if (!product) return;
+                const key = `${product.id}:${selectedSize}:${selectedColor}`;
+                onBuyDirect?.({
+                  ...product,
+                  price: salePrice,
+                  oldPrice: basePrice > salePrice ? basePrice : 0,
+                  stock: currentStock,
+                  key,
+                  size: selectedSize,
+                  color: selectedColor,
+                  quantity,
+                });
+              }}
+            >
+              <span>Beli Langsung</span>
+              <ArrowRight size={17} />
+            </button>
+
+            <button
+              type="button"
+              className="ks-promo-cart-btn"
+              disabled={!product || currentStock < 1}
+              onClick={(e) => {
+                if (!product) return;
+                const key = `${product.id}:${selectedSize}:${selectedColor}`;
+                onAddToCart?.({
+                  ...product,
+                  price: salePrice,
+                  oldPrice: basePrice > salePrice ? basePrice : 0,
+                  stock: currentStock,
+                  key,
+                  size: selectedSize,
+                  color: selectedColor,
+                  quantity,
+                }, e.currentTarget);
+              }}
+            >
+              <ShoppingBag size={17} />
+              <span>Tambah Keranjang</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

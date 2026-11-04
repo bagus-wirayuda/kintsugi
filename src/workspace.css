@@ -98,6 +98,34 @@
   line-height: 1.6;
 }
 
+.ws-rupiah-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.ws-rupiah-field .ws-rupiah-input {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+
+.ws-rupiah-field.has-prefix .ws-rupiah-prefix {
+  position: absolute;
+  left: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ws-muted, #64748b);
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+.ws-rupiah-field.has-prefix .ws-rupiah-input {
+  padding-left: 38px !important;
+}
+
 .workspace form {
   min-width: 0;
 }
@@ -2827,4 +2855,576 @@
     font-size: 11px;
     padding: 13px 17px;
   }
+}
+
+
+/* ========================================================
+   Admin Hierarchical Categories & Variant Presets
+   ======================================================== */
+.ws-categories-management {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ws-parent-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--ws-border);
+  margin-bottom: 16px;
+}
+
+.ws-cat-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #e3edf6;
+  color: #1a5276;
+}
+
+.ws-subcat-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f0f4f4;
+  color: var(--ws-accent-dark);
+}
+
+.ws-variant-presets-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  background: #f6f8fb;
+  border-radius: 6px;
+  border: 1px dashed var(--ws-border);
+}
+
+.ws-chip-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--ws-border);
+  background: #fff;
+  color: var(--ws-accent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-chip-btn:hover {
+  background: var(--ws-accent);
+  color: #fff;
+  border-color: var(--ws-accent);
+}
+
+
+/* ========================================================
+   Admin Store Settings Submenu Navigation
+   ======================================================== */
+.ws-settings-subnav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+  background: #fff;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--ws-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ws-settings-subnav::-webkit-scrollbar {
+  display: none;
+}
+
+.ws-settings-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ws-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-settings-tab:hover {
+  color: var(--ws-text);
+  background: #f4f6fa;
+}
+
+.ws-settings-tab.active {
+  background: #eef5f4;
+  color: var(--ws-accent);
+  border-color: #cde0dd;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(32, 103, 95, 0.08);
+}
+
+.ws-settings-tab svg {
+  flex-shrink: 0;
+}
+
+
+/* ==========================================================================
+   Manajemen Paket Variasi Produk (Admin)
+   ========================================================================== */
+
+.ws-size-mode-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 16px;
+  background: #f7faf9;
+  border: 1.5px solid #dce8e6;
+  border-radius: 8px;
+}
+
+.ws-size-mode-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ws-heading, #133a40);
+  letter-spacing: 0.02em;
+}
+
+.ws-size-mode-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ws-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 6px;
+  border: 1.5px solid #c8d9d7;
+  background: #ffffff;
+  color: #3d585c;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-mode-tab:hover {
+  border-color: var(--ks-teal, #075b6e);
+  color: var(--ks-teal, #075b6e);
+}
+
+.ws-mode-tab.active {
+  background: var(--ks-teal, #075b6e);
+  border-color: var(--ks-teal, #075b6e);
+  color: #ffffff;
+}
+
+/* Paket Variasi Card */
+.ws-variant-packages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.ws-variant-package-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background: #ffffff;
+  border: 1.5px solid #dbe6e4;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(7, 63, 80, 0.04);
+  transition: border-color 0.15s ease;
+}
+
+.ws-variant-package-card:hover {
+  border-color: #b7cecb;
+}
+
+.ws-variant-package-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #edf2f1;
+}
+
+.ws-variant-package-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ks-teal, #075b6e);
+  background: #eef7f6;
+  padding: 5px 12px;
+  border-radius: 6px;
+}
+
+.ws-variant-package-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.ws-dimension-3col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  grid-column: span 2;
+}
+
+@media (max-width: 900px) {
+  .ws-dimension-3col {
+    grid-column: span 1;
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.ws-variant-image-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-variant-image-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-variant-thumb-preview {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #dce8e6;
+  flex-shrink: 0;
+}
+
+/* Tombol Hapus Variasi Merah (Requirement 7) */
+.ws-button-danger {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: #fff1f0 !important;
+  color: #cf1322 !important;
+  border: 1.5px solid #ffa39e !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 7px 14px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.ws-button-danger:hover:not(:disabled) {
+  background: #cf1322 !important;
+  color: #ffffff !important;
+  border-color: #cf1322 !important;
+}
+
+.ws-button-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: #f5c6cb !important;
+  background: #fafafa !important;
+  color: #bfbfbf !important;
+}
+
+/* ==========================================================================
+   Storefront Dynamic Sections Management (Admin)
+   ========================================================================== */
+.ws-storefront-module {
+  margin-bottom: 24px;
+}
+
+.ws-storefront-sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 16px 0;
+}
+
+.ws-section-card {
+  background: #ffffff;
+  border: 1.5px solid #dbe6e4;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 1px 4px rgba(7, 63, 80, 0.04);
+  transition: border-color 0.15s ease;
+}
+
+.ws-section-card:hover {
+  border-color: #b7cecb;
+}
+
+.ws-section-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #edf2f1;
+}
+
+.ws-section-card-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-section-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ks-teal, #075b6e);
+  background: #eef7f6;
+  padding: 4px 10px;
+  border-radius: 6px;
+  letter-spacing: 0.03em;
+}
+
+.ws-section-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-btn-icon-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1.5px solid #dce8e6;
+  background: #ffffff;
+  color: #4b666a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-btn-icon-sm:hover:not(:disabled) {
+  background: #eef7f6;
+  color: var(--ks-teal, #075b6e);
+  border-color: var(--ks-teal, #075b6e);
+}
+
+.ws-btn-icon-sm:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ws-btn-icon-danger-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1.5px solid #ffa39e;
+  background: #fff1f0;
+  color: #cf1322;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-btn-icon-danger-sm:hover {
+  background: #cf1322;
+  color: #ffffff;
+}
+
+/* Product Picker Component */
+.ws-prod-picker-box {
+  background: #fbfdfc;
+  border: 1px solid #e1ebe9;
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 14px;
+}
+
+.ws-prod-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.ws-prod-picker-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ws-heading, #133a40);
+}
+
+.ws-prod-picker-search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.ws-prod-picker-search input {
+  width: 100%;
+  padding-left: 32px !important;
+  font-size: 13px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid #d5e2e0;
+}
+
+.ws-prod-picker-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8fa5a8;
+  pointer-events: none;
+}
+
+.ws-prod-selected-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #e4edeb;
+  border-radius: 6px;
+  min-height: 38px;
+  align-items: center;
+}
+
+.ws-prod-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eef7f6;
+  border: 1px solid #cce3e0;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--ks-teal, #075b6e);
+}
+
+.ws-prod-chip-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.ws-prod-chip-remove {
+  background: transparent;
+  border: none;
+  color: #8fa5a8;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.ws-prod-chip-remove:hover {
+  color: #cf1322;
+}
+
+.ws-prod-grid-scroll {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.ws-prod-select-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1.5px solid #e2ebe9;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.ws-prod-select-card:hover {
+  border-color: var(--ks-teal, #075b6e);
+  background: #f7faf9;
+}
+
+.ws-prod-select-card.selected {
+  border-color: var(--ks-teal, #075b6e);
+  background: #eef7f6;
+}
+
+.ws-prod-select-thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #dce8e6;
+  flex-shrink: 0;
+}
+
+.ws-prod-select-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.ws-prod-select-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a3c42;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-prod-select-meta {
+  font-size: 11px;
+  color: #6a8286;
+}
+
+.ws-section-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #edf2f1;
+  flex-wrap: wrap;
 }

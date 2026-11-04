@@ -14,6 +14,7 @@ import {
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import OrderCard from "./Orders";
 import { api } from "./store";
+import { CartView, WishlistView } from "./ShoppingPages";
 export default function Account({
   user,
   onUser,
@@ -23,12 +24,24 @@ export default function Account({
   wishCount,
   cartCount,
   config,
+  cart = [],
+  setCart,
+  coupon = "",
+  setCoupon,
+  wish = [],
+  setWish,
+  openProduct,
+  initialTab,
 }) {
-  const tabs = ["overview", "orders", "profile", "security"];
-  const tabFromHash = () =>
-    tabs.includes(location.hash.split("/")[1])
-      ? location.hash.split("/")[1]
-      : "overview";
+  const tabs = ["overview", "orders", "profile", "security", "wishlist", "cart"];
+  const tabFromHash = () => {
+    const hash = location.hash.replace(/^#/, "");
+    const sub = hash.split("/")[1];
+    if (tabs.includes(sub)) return sub;
+    const top = hash.split("/")[0];
+    if (tabs.includes(top)) return top;
+    return initialTab || "overview";
+  };
   const [tab, setTab] = useState(tabFromHash),
     [orders, setOrders] = useState([]),
     [loading, setLoading] = useState(true),
@@ -37,11 +50,17 @@ export default function Account({
     [message, setMessage] = useState(""),
     [filter, setFilter] = useState("all"),
     [profile, setProfile] = useState(null);
-  function select(t) {
+  function select(t, replace = false) {
+    const targetHash = "#account/" + t;
+    if (location.hash === targetHash && tab === t) return;
     setTab(t);
     setError("");
     setMessage("");
-    history.replaceState(null, "", "#account/" + t);
+    if (replace) {
+      history.replaceState(null, "", targetHash);
+    } else {
+      history.pushState(null, "", targetHash);
+    }
   }
   async function refresh() {
     const data = await api("/orders");
@@ -49,10 +68,24 @@ export default function Account({
     return data;
   }
   useEffect(() => {
+    const current = tabFromHash();
+    const hash = location.hash.replace(/^#/, "");
+    const parts = hash.split("/");
+    if (parts[0] === "account" && (!parts[1] || !tabs.includes(parts[1]))) {
+      history.replaceState(null, "", "#account/" + current);
+    } else if (parts[0] === "wishlist") {
+      history.replaceState(null, "", "#account/wishlist");
+    } else if (parts[0] === "cart") {
+      history.replaceState(null, "", "#account/cart");
+    }
     const change = () => setTab(tabFromHash());
     window.addEventListener("hashchange", change);
-    return () => window.removeEventListener("hashchange", change);
-  }, []);
+    window.addEventListener("popstate", change);
+    return () => {
+      window.removeEventListener("hashchange", change);
+      window.removeEventListener("popstate", change);
+    };
+  }, [initialTab]);
   useEffect(() => {
     let alive = true;
     async function load() {
@@ -135,6 +168,16 @@ export default function Account({
     orders: "Pesanan saya",
     profile: "Profil & alamat",
     security: "Keamanan akun",
+    wishlist: "Favorit saya",
+    cart: "Keranjang belanja",
+  };
+  const subtitles = {
+    overview: "Kelola informasi dan aktivitas belanja Anda dengan mudah.",
+    orders: "Pantau status pengiriman dan riwayat transaksi Anda.",
+    profile: "Kelola identitas dan alamat pengiriman Anda.",
+    security: "Kelola kata sandi dan pengaturan keamanan akun Anda.",
+    wishlist: "Produk pilihan yang ingin Anda temukan kembali.",
+    cart: "Periksa barang pilihan Anda sebelum checkout.",
   };
   const items = [
     { id: "overview", label: "Ringkasan", icon: LayoutDashboard },
@@ -149,8 +192,7 @@ export default function Account({
     { id: "wishlist", label: "Favorit saya", icon: Heart, count: wishCount },
     { id: "cart", label: "Keranjang", icon: ShoppingBag, count: cartCount },
   ];
-  const selectMenu = (t) =>
-    t === "wishlist" ? nav("wishlist") : t === "cart" ? nav("cart") : select(t);
+  const selectMenu = (t) => select(t);
   const shown = orders.filter(
     (o) =>
       filter === "all" ||
@@ -167,8 +209,8 @@ export default function Account({
       active={tab}
       onSelect={selectMenu}
       onLogout={onLogout}
-      title={titles[tab]}
-      subtitle="Kelola informasi dan aktivitas belanja Anda dengan mudah."
+      title={titles[tab] || titles.overview}
+      subtitle={subtitles[tab] || subtitles.overview}
       actions={
         tab === "orders" ? (
           <button
@@ -177,6 +219,10 @@ export default function Account({
           >
             <RefreshCw size={16} />
             Muat ulang
+          </button>
+        ) : tab === "cart" || tab === "wishlist" ? (
+          <button className="ws-button light" onClick={() => nav("catalog")}>
+            Lanjut belanja <ArrowRight size={16} />
           </button>
         ) : null
       }
@@ -310,7 +356,7 @@ export default function Account({
                 </button>
                 <button
                   className="ws-panel ws-shortcut"
-                  onClick={() => nav("wishlist")}
+                  onClick={() => select("wishlist")}
                 >
                   <Heart size={24} />
                   <div>
@@ -496,6 +542,25 @@ export default function Account({
                 </p>
               </section>
             </div>
+          )}
+          {tab === "wishlist" && (
+            <WishlistView
+              wish={wish}
+              setWish={setWish}
+              openProduct={openProduct}
+              nav={nav}
+              config={config}
+            />
+          )}
+          {tab === "cart" && (
+            <CartView
+              cart={cart}
+              setCart={setCart}
+              coupon={coupon}
+              setCoupon={setCoupon}
+              config={config}
+              nav={nav}
+            />
           )}
         </>
       )}

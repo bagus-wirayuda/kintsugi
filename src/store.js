@@ -1,3 +1,5 @@
+import { parseRupiah } from "./rupiah.js";
+
 const read = (key, fallback) => {
   try {
     return JSON.parse(localStorage.getItem("lj:" + key)) ?? fallback;
@@ -41,14 +43,14 @@ export async function api(path, options = {}) {
   return data;
 }
 export function totals(cart, coupon = "", shipping = "regular", localDeliveryFee = 15000) {
-  const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+  const subtotal = cart.reduce((s, i) => s + (parseRupiah(i.price) * (Number(i.quantity) || 1)), 0);
   const discount =
     coupon === "LINY10" ? Math.min(Math.round(subtotal * 0.1), 100000) : 0;
   const delivery =
     shipping === "pickup" || subtotal >= 699000
       ? 0
       : shipping === "local"
-        ? Number(localDeliveryFee) || 0
+        ? (parseRupiah(localDeliveryFee) || 0)
         : shipping === "express"
         ? 35000
         : 15000;

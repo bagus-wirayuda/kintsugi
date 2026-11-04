@@ -18,7 +18,16 @@ export default function Workspace({
   return (
     <div className={"workspace " + (admin ? "ws-admin" : "ws-customer")}>
       <aside className={"ws-sidebar " + (open ? "is-open" : "")}>
-        <a className="ws-logo" href={admin ? "#admin" : "#account"}>
+        <a
+          className="ws-logo"
+          href={admin ? (user?.role === "staff" ? "#admin/orders" : "#admin/overview") : "#account/overview"}
+          onClick={(e) => {
+            if (onSelect) {
+              e.preventDefault();
+              onSelect(admin ? (user?.role === "staff" ? "orders" : "overview") : "overview");
+            }
+          }}
+        >
           <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
           <div>
             <small>{admin ? `${config?.brand || "TOKO"} / PENGELOLAAN` : "AKUN PELANGGAN"}</small>
@@ -43,7 +52,11 @@ export default function Workspace({
           ))}
         </nav>
         <div className="ws-sidebar-bottom">
-          {!admin && (
+          {admin ? (
+            <a href="#home">
+              <ArrowLeft size={18} /> Lihat tampilan toko
+            </a>
+          ) : (
             <a href="#catalog">
               <ArrowLeft size={18} /> Kembali ke katalog
             </a>

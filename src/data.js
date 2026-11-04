@@ -1,9 +1,6 @@
-export const money = (n) =>
-  new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(n);
+import { formatRupiah, parseRupiah, formatRupiahInput, money } from "./rupiah.js";
+
+export { formatRupiah, parseRupiah, formatRupiahInput, money };
 
 export const photo = (id, w = 900) =>
   `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=85`;

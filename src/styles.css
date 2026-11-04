@@ -607,15 +607,19 @@ header {
 
 .swatches {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 5px;
-  margin: 13px 0 11px;
+  margin: 10px 0 8px;
 }
 
-.swatches span {
-  width: 12px;
-  height: 12px;
+.swatches span:not(.ks-variant-chip):not(.ks-variant-more) {
+  width: 14px;
+  height: 14px;
   border: 1px solid #d7d6d1;
   border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .product-meta {
@@ -1430,12 +1434,15 @@ textarea {
 
 .product-dialog {
   width: 950px;
+  max-width: 95vw;
   max-height: 90vh;
   background: #fff;
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .close {
@@ -1468,6 +1475,9 @@ textarea {
 
 .detail-info {
   padding: 45px 35px 25px;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .detail-info h1 {
@@ -1515,12 +1525,13 @@ textarea {
 
 .color-choices {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
 }
 
 .color-choices button {
-  height: 25px;
-  width: 25px;
+  height: auto;
+  width: auto;
   border: 1px solid #d5d9cd;
   outline-offset: 3px;
 }
@@ -1531,15 +1542,18 @@ textarea {
 
 .size-choices {
   display: flex;
-  gap: 8px;
+  gap: 8px 10px;
   flex-wrap: wrap;
 }
 
 .size-choices button {
   border: 1px solid #d9ddcf;
-  width: 41px;
-  height: 36px;
-  font-size: 11px;
+  width: auto;
+  min-width: 44px;
+  height: auto;
+  min-height: 36px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .size-choices .selected {
@@ -2410,12 +2424,13 @@ td select {
   }
 
   .swatches {
-    margin: 10px 0;
+    margin: 8px 0 6px;
+    gap: 4px;
   }
 
-  .swatches span {
-    width: 10px;
-    height: 10px;
+  .swatches span:not(.ks-variant-chip):not(.ks-variant-more) {
+    width: 12px;
+    height: 12px;
   }
 
   .editorial {

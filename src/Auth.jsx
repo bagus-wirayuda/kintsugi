@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Phone,
+  ShoppingBag,
 } from "lucide-react";
 import { api } from "./store";
 import { Notice } from "./Workspace";
@@ -151,9 +152,10 @@ export default function Auth({
           await api("/auth/login", {
             method: "POST",
             body: {
-              ...(f.phone.includes("@")
+              identifier: (f.phone || "").trim(),
+              ...(f.phone && f.phone.includes("@")
                 ? { email: f.phone.trim() }
-                : { phone: f.phone }),
+                : { phone: (f.phone || "").trim() }),
               password: f.password,
             },
           }),
@@ -191,7 +193,7 @@ export default function Auth({
           : "Selamat datang kembali";
   return (
     <div className="workspace auth-screen">
-      {!admin && <StoreHeader nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
+      {!admin && <StoreHeader config={config} nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
       {admin && <div className="auth-brandbar">
         <a className="ws-logo" href="#home">
           <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
@@ -300,6 +302,37 @@ export default function Auth({
           )}
           <Notice>{error}</Notice>
           <Notice type="success">{message}</Notice>
+          {mode === "login" && !challenge && (
+            <div className="auth-quick-login">
+              <span className="auth-quick-title">Login Cepat Akun Demo:</span>
+              <div className="auth-quick-btns">
+                <button
+                  type="button"
+                  className="auth-preset-chip"
+                  onClick={() => {
+                    const phoneInput = document.querySelector('input[name="phone"]');
+                    const passInput = document.querySelector('input[name="password"]');
+                    if (phoneInput) phoneInput.value = "admin@linyjaya.test";
+                    if (passInput) passInput.value = "AdminLinyJaya2026!";
+                  }}
+                >
+                  <ShieldCheck size={14} /> Admin Demo
+                </button>
+                <button
+                  type="button"
+                  className="auth-preset-chip"
+                  onClick={() => {
+                    const phoneInput = document.querySelector('input[name="phone"]');
+                    const passInput = document.querySelector('input[name="password"]');
+                    if (phoneInput) phoneInput.value = "pelanggan@linyjaya.test";
+                    if (passInput) passInput.value = "BelanjaLiny2026!";
+                  }}
+                >
+                  <ShoppingBag size={14} /> Pelanggan Demo
+                </button>
+              </div>
+            </div>
+          )}
           <form onSubmit={submit} key={mode + Boolean(challenge) + method}>
             {challenge ? (
               <>

@@ -33,7 +33,7 @@ export const orderSchema = z.object({
   coupon: z.enum(["", "LINY10"]).default(""),
 });
 export function calculateTotals(items, coupon, shipping, deliveryOverride) {
-  const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const subtotal = items.reduce((s, i) => s + (Number(String(i.price).replace(/\D/g, "")) || 0) * (Number(i.quantity) || 1), 0);
   if (!Number.isSafeInteger(subtotal) || subtotal > 100000000)
     throw Object.assign(new Error("Total pesanan melebihi batas."), {
       status: 400,

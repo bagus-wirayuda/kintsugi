@@ -47,16 +47,24 @@ const imageSchema = z
     "Gunakan gambar /images/... atau URL HTTPS yang valid.",
   );
 const colorSchema = z.string().trim().min(1).max(100);
+const parseMoneyInt = (v, fallback = 0) => {
+  if (v == null || v === "") return fallback;
+  if (typeof v === "number") return isNaN(v) ? fallback : Math.round(v);
+  const clean = String(v).replace(/\D/g, "");
+  return clean ? parseInt(clean, 10) : fallback;
+};
+
 const productFields = {
   name: z.string().trim().min(2).max(200),
-  price: z.number().int().min(1000).max(10000000),
+  price: z.preprocess((v) => parseMoneyInt(v, v), z.number().int().min(1000).max(10000000)),
   sku: z.string().regex(/^[A-Za-z0-9-]{2,40}$/),
   category: z.string().trim().min(1).max(100),
+  subcategory: z.string().trim().max(100).default(""),
   image: imageSchema,
   motif: z.string().trim().max(100).default(""),
   description: z.string().trim().min(10).max(2000),
-  oldPrice: z.number().int().min(0).max(10000000),
-  costPrice: z.number().int().min(0).max(10000000).default(0),
+  oldPrice: z.preprocess((v) => parseMoneyInt(v, 0), z.number().int().min(0).max(10000000).default(0)),
+  costPrice: z.preprocess((v) => parseMoneyInt(v, 0), z.number().int().min(0).max(10000000).default(0)),
   weightGrams: z.number().int().min(1).max(500000).default(1000),
   variationLabel: z.string().trim().min(1).max(80).default("Warna"),
   isNew: z.boolean(),
@@ -251,21 +259,28 @@ export function createApp(pool, options = {}) {
   }
   async function readPublicPromotions() {
     const rows = (await pool.query(
-      "SELECT sp.*,sp.product_id AS productId,sp.discount_percent AS discountPercent,p.name AS productName,p.image AS productImage,p.price AS basePrice FROM store_promotions sp JOIN products p ON p.id=sp.product_id WHERE sp.active=TRUE AND p.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC",
+      "SELECT sp.*,sp.product_id AS productId,sp.discount_percent AS discountPercent,sp.promo_price AS promoPrice,p.name AS productName,p.image AS productImage,p.price AS basePrice FROM store_promotions sp JOIN products p ON p.id=sp.product_id WHERE sp.active=TRUE AND p.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC",
     )).rows;
-    return rows.map((row) => ({
-      id: row.id,
-      productId: row.productId,
-      eyebrow: row.eyebrow,
-      title: row.title,
-      description: row.description,
-      image: row.image || row.productImage,
-      productName: row.productName,
-      basePrice: Number(row.basePrice),
-      price: promotionPrice(row.basePrice, row.discountPercent),
-      oldPrice: Number(row.basePrice),
-      discountPercent: Number(row.discountPercent),
-    }));
+    return rows.map((row) => {
+      const basePrice = Number(row.basePrice);
+      const salePrice = row.promoPrice != null && Number(row.promoPrice) > 0
+        ? Number(row.promoPrice)
+        : promotionPrice(basePrice, row.discountPercent);
+      const discountPercent = row.discountPercent || (basePrice > 0 ? Math.max(1, Math.min(90, Math.round((1 - salePrice / basePrice) * 100))) : 0);
+      return {
+        id: row.id,
+        productId: row.productId,
+        eyebrow: row.eyebrow,
+        title: row.title,
+        description: row.description,
+        image: row.image || row.productImage,
+        productName: row.productName,
+        basePrice,
+        price: salePrice,
+        oldPrice: basePrice,
+        discountPercent,
+      };
+    });
   }
   async function rajaFetch(pathname, init = {}) {
     if (!env.RAJAONGKIR_API_KEY) throw fail(503,"Layanan ongkir RajaOngkir belum dikonfigurasi.");
@@ -320,7 +335,7 @@ export function createApp(pool, options = {}) {
   app.get("/api/config", async (req, res) => {
     const [settings, categories, methods, promotions] = await Promise.all([
       readStoreSettings(),
-      pool.query("SELECT id,name,active,sort_order FROM product_categories WHERE active=TRUE ORDER BY sort_order,name"),
+      pool.query("SELECT id,name,parent_id,active,sort_order FROM product_categories WHERE active=TRUE ORDER BY sort_order,name"),
       pool.query("SELECT id,name,group_name AS `group`,detail FROM store_payment_methods WHERE enabled=TRUE ORDER BY sort_order,name"),
       readPublicPromotions(),
     ]);
@@ -333,7 +348,7 @@ export function createApp(pool, options = {}) {
       contactPhone: env.STORE_CONTACT_PHONE || "",
       payments: gateway.configured,
       paymentMethods: methods.rows,
-      categories: categories.rows.map(({ id, name }) => ({ id, label: name })),
+      categories: categories.rows.map(({ id, name, parent_id }) => ({ id, label: name, name, parentId: parent_id, parent_id })),
       promotions,
       shipping: { rajaOngkir: Boolean(env.RAJAONGKIR_API_KEY && (settings.rajaOriginId || env.RAJAONGKIR_ORIGIN_ID)), localDeliveryFee: settings.localDeliveryFee || 0 },
       sandbox: gateway.sandbox,
@@ -344,27 +359,47 @@ export function createApp(pool, options = {}) {
   app.get("/api/admin/settings", auth, admin, async (req, res) => {
     const [settings, categories, methods, promotions] = await Promise.all([
       readStoreSettings(),
-      pool.query("SELECT * FROM product_categories ORDER BY sort_order,name"),
+      pool.query("SELECT id,name,parent_id,active,sort_order FROM product_categories ORDER BY sort_order,name"),
       pool.query("SELECT id,name,group_name AS `group`,detail,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name"),
       pool.query("SELECT sp.*,p.name AS product_name,p.price AS product_price,p.image AS product_image FROM store_promotions sp JOIN products p ON p.id=sp.product_id ORDER BY sp.sort_order,sp.created_at DESC"),
     ]);
-    res.json({ settings, categories: categories.rows, paymentMethods: methods.rows, promotions: promotions.rows });
+    res.json({
+      settings,
+      categories: categories.rows.map((c) => ({ ...c, parentId: c.parent_id })),
+      paymentMethods: methods.rows,
+      promotions: promotions.rows,
+    });
   });
   app.patch("/api/admin/settings", auth, admin, async (req, res) => {
     const f = z.object({
       settings: z.record(z.string(), z.unknown()).optional(),
-      categories: z.array(z.object({ id: z.string().trim().min(1).max(80), name: z.string().trim().min(1).max(100), active: z.boolean(), sortOrder: z.number().int().min(0).max(10000) })).max(100).optional(),
+      categories: z.array(z.object({
+        id: z.string().trim().min(1).max(80),
+        name: z.string().trim().min(1).max(100),
+        parentId: z.string().trim().max(80).nullable().optional(),
+        parent_id: z.string().trim().max(80).nullable().optional(),
+        active: z.boolean(),
+        sortOrder: z.number().int().min(0).max(10000).optional(),
+      })).max(100).optional(),
       paymentMethods: z.array(z.object({ id: z.string().trim().min(2).max(60), enabled: z.boolean(), sortOrder: z.number().int().min(0).max(10000) })).max(40).optional(),
     }).strict().parse(req.body);
     if (f.settings) {
-      const allowed = new Set(["brand","announcementText","contactEmail","storeAddress","logo","heroImage","heroKicker","heroTitle","heroText","departmentKicker","departmentTitle","departmentProducts","essentialsKicker","essentialsTitle","essentialsProducts","promoKicker","promoTitle","promoText","promoImage","promoProductId","promoPrice","promoOldPrice","localDeliveryFee","packageWeightGrams","rajaOriginId","waTemplates"]);
+      const allowed = new Set(["brand","announcementText","contactEmail","storeAddress","logo","heroImage","heroKicker","heroTitle","heroText","homeSections","departmentKicker","departmentTitle","departmentProducts","essentialsKicker","essentialsTitle","essentialsProducts","promoKicker","promoTitle","promoText","promoImage","promoProductId","promoPrice","promoOldPrice","localDeliveryFee","packageWeightGrams","rajaOriginId","waTemplates"]);
       for (const [key, value] of Object.entries(f.settings)) {
         if (!allowed.has(key)) throw fail(400, "Pengaturan tidak dikenal.");
         if (key === "waTemplates") {
           const templates = z.object({ purchased: z.string().max(2000), processing: z.string().max(2000), shipped: z.string().max(2000), delivered: z.string().max(2000) }).strict().parse(value);
           await pool.query("INSERT INTO store_settings(setting_key,setting_value) VALUES(?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)", [key, JSON.stringify(templates)]);
+        } else if (key === "homeSections") {
+          const sections = z.array(z.object({
+            id: z.string().trim().min(1).max(80),
+            kicker: z.string().trim().max(160).optional().default(""),
+            title: z.string().trim().max(255).optional().default(""),
+            productIds: z.array(z.string().trim().max(40)).max(100).optional().default([]),
+          })).max(50).parse(value);
+          await pool.query("INSERT INTO store_settings(setting_key,setting_value) VALUES(?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)", [key, JSON.stringify(sections)]);
         } else if (["promoPrice","promoOldPrice","localDeliveryFee","packageWeightGrams"].includes(key)) {
-          const number = z.number().int().min(0).max(100000000).parse(value);
+          const number = z.preprocess((v) => parseMoneyInt(v, v), z.number().int().min(0).max(100000000)).parse(value);
           await pool.query("INSERT INTO store_settings(setting_key,setting_value) VALUES(?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)", [key, JSON.stringify(number)]);
         } else if (["essentialsProducts","departmentProducts"].includes(key)) {
           const ids = z.array(z.string().max(40)).max(24).parse(value);
@@ -379,13 +414,124 @@ export function createApp(pool, options = {}) {
     if (f.categories) {
       const ids = f.categories.map((item) => item.id);
       if (new Set(ids).size !== ids.length) throw fail(400,"Kategori duplikat.");
-      await pool.query("DELETE FROM product_categories");
-      for (const [index, item] of f.categories.entries()) await pool.query("INSERT INTO product_categories(id,name,active,sort_order) VALUES(?,?,?,?)",[item.id,item.name,item.active,item.sortOrder ?? index]);
+      for (const [index, item] of f.categories.entries()) {
+        const parent = item.parentId || item.parent_id || null;
+        await pool.query(
+          `INSERT INTO product_categories(id,name,parent_id,active,sort_order)
+           VALUES(?,?,?,?,?)
+           ON DUPLICATE KEY UPDATE name=VALUES(name), parent_id=VALUES(parent_id), active=VALUES(active), sort_order=VALUES(sort_order)`,
+          [item.id, item.name, parent, item.active, item.sortOrder ?? index]
+        );
+      }
+      // Delete removed categories that are NOT currently referenced by products
+      if (ids.length) {
+        await pool.query(
+          "DELETE FROM product_categories WHERE id NOT IN (?) AND id NOT IN (SELECT DISTINCT category FROM products) AND id NOT IN (SELECT DISTINCT subcategory FROM products)",
+          [ids]
+        );
+      }
     }
     if (f.paymentMethods) {
       const ids = f.paymentMethods.map((item) => item.id);
       if (new Set(ids).size !== ids.length) throw fail(400,"Metode pembayaran duplikat.");
       for (const method of f.paymentMethods) await pool.query("UPDATE store_payment_methods SET enabled=?,sort_order=? WHERE id=?",[method.enabled,method.sortOrder,method.id]);
+    }
+    res.json({ ok: true });
+  });
+
+  app.get("/api/categories", async (req, res) => {
+    const rows = (await pool.query(
+      "SELECT id,name,parent_id,active,sort_order FROM product_categories WHERE active=TRUE ORDER BY sort_order,name"
+    )).rows;
+    res.json(rows.map(({ id, name, parent_id, active, sort_order }) => ({
+      id,
+      label: name,
+      name,
+      parentId: parent_id,
+      parent_id,
+      active: Boolean(active),
+      sortOrder: sort_order,
+    })));
+  });
+
+  const categorySchema = z.object({
+    id: z.string().trim().max(80).optional(),
+    name: z.string().trim().min(1).max(100),
+    parentId: z.string().trim().max(80).nullable().optional(),
+    active: z.boolean().default(true),
+    sortOrder: z.number().int().min(0).max(10000).optional(),
+  }).strict();
+
+  app.post("/api/admin/categories", auth, admin, async (req, res) => {
+    const f = categorySchema.parse(req.body);
+    let parentId = f.parentId || null;
+    if (parentId) {
+      const parent = (await pool.query("SELECT id FROM product_categories WHERE id=?", [parentId])).rows[0];
+      if (!parent) throw fail(400, "Kategori utama induk tidak ditemukan.");
+    }
+    let id = f.id;
+    if (!id) {
+      const slug = f.name
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      id = parentId ? `${parentId}-${slug}` : slug;
+    }
+    const existing = (await pool.query("SELECT id FROM product_categories WHERE id=?", [id])).rows[0];
+    if (existing) {
+      throw fail(409, `Kategori dengan ID "${id}" sudah ada. Gunakan nama lain.`);
+    }
+    const nextSort = f.sortOrder ?? Number((await pool.query("SELECT COALESCE(MAX(sort_order)+1,0) AS n FROM product_categories")).rows[0].n);
+    await pool.query(
+      "INSERT INTO product_categories(id,name,parent_id,active,sort_order) VALUES(?,?,?,?,?)",
+      [id, f.name, parentId, f.active, nextSort]
+    );
+    res.status(201).json({ id, name: f.name, parentId, active: f.active, sortOrder: nextSort });
+  });
+
+  app.patch("/api/admin/categories/:id", auth, admin, async (req, res) => {
+    const f = categorySchema.partial().strict().refine((v) => Object.keys(v).length > 0).parse(req.body);
+    const old = (await pool.query("SELECT * FROM product_categories WHERE id=?", [req.params.id])).rows[0];
+    if (!old) throw fail(404, "Kategori tidak ditemukan.");
+    let parentId = f.parentId !== undefined ? (f.parentId || null) : old.parent_id;
+    if (parentId && parentId === req.params.id) {
+      throw fail(400, "Kategori tidak dapat menjadi induk bagi dirinya sendiri.");
+    }
+    if (parentId) {
+      const parent = (await pool.query("SELECT id FROM product_categories WHERE id=?", [parentId])).rows[0];
+      if (!parent) throw fail(400, "Kategori utama induk tidak ditemukan.");
+    }
+    const name = f.name ?? old.name;
+    const active = f.active !== undefined ? f.active : Boolean(old.active);
+    const sortOrder = f.sortOrder !== undefined ? f.sortOrder : old.sort_order;
+    await pool.query(
+      "UPDATE product_categories SET name=?,parent_id=?,active=?,sort_order=? WHERE id=?",
+      [name, parentId, active, sortOrder, req.params.id]
+    );
+    res.json({ ok: true });
+  });
+
+  app.delete("/api/admin/categories/:id", auth, admin, async (req, res) => {
+    const cat = (await pool.query("SELECT * FROM product_categories WHERE id=?", [req.params.id])).rows[0];
+    if (!cat) throw fail(404, "Kategori tidak ditemukan.");
+    const childrenCount = Number((await pool.query("SELECT COUNT(*) AS n FROM product_categories WHERE parent_id=?", [req.params.id])).rows[0].n);
+    if (childrenCount > 0) {
+      throw fail(400, `Kategori utama "${cat.name}" masih memiliki ${childrenCount} subkategori. Pindahkan atau hapus subkategori di dalamnya terlebih dahulu.`);
+    }
+    const inUseCount = Number((await pool.query("SELECT COUNT(*) AS n FROM products WHERE category=? OR subcategory=?", [req.params.id, req.params.id])).rows[0].n);
+    if (inUseCount > 0) {
+      throw fail(400, `Kategori "${cat.name}" tidak dapat dihapus karena masih digunakan oleh ${inUseCount} produk di katalog.`);
+    }
+    await pool.query("DELETE FROM product_categories WHERE id=?", [req.params.id]);
+    res.json({ ok: true });
+  });
+
+  app.put("/api/admin/categories/reorder", auth, admin, async (req, res) => {
+    const f = z.object({ ids: z.array(z.string().min(1)).min(1) }).parse(req.body);
+    for (let i = 0; i < f.ids.length; i++) {
+      await pool.query("UPDATE product_categories SET sort_order=? WHERE id=?", [i, f.ids[i]]);
     }
     res.json({ ok: true });
   });
@@ -395,7 +541,8 @@ export function createApp(pool, options = {}) {
     title: z.string().trim().min(2).max(160),
     description: z.string().trim().max(600).default(""),
     image: z.string().trim().max(1000).default(""),
-    discountPercent: z.number().int().min(1).max(90),
+    discountPercent: z.number().int().min(1).max(90).optional(),
+    promoPrice: z.preprocess((v) => (v == null || v === "" ? null : parseMoneyInt(v, v)), z.number().int().min(0).nullable().optional()),
     active: z.boolean().default(true),
     sortOrder: z.number().int().min(0).max(10000).optional(),
   }).strict();
@@ -406,11 +553,28 @@ export function createApp(pool, options = {}) {
   app.post("/api/admin/promotions", auth, admin, async (req,res) => {
     const f=promotionFields.parse(req.body);
     validatePromotionImage(f.image);
-    if (!(await pool.query("SELECT id FROM products WHERE id=? AND active=TRUE",[f.productId])).rows.length) throw fail(400,"Pilih produk yang masih tampil.");
-    if (f.active && (await pool.query("SELECT id FROM store_promotions WHERE product_id=? AND active=TRUE",[f.productId])).rows.length) throw fail(409,"Produk ini sudah memiliki promo aktif. Hentikan promo tersebut sebelum membuat promo baru.");
+    const prodRow = (await pool.query("SELECT id, price FROM products WHERE id=? AND active=TRUE",[f.productId])).rows[0];
+    if (!prodRow) throw fail(400,"Pilih produk yang masih tampil.");
+    if (f.active && (await pool.query("SELECT id FROM store_promotions WHERE product_id=? AND active=TRUE",[f.productId])).rows.length) {
+      throw fail(409,"Produk ini sudah memiliki promo aktif. Hentikan promo tersebut sebelum membuat promo baru.");
+    }
+    const basePrice = Number(prodRow.price);
+    let promoPrice = f.promoPrice != null && Number(f.promoPrice) > 0 ? Number(f.promoPrice) : null;
+    let discountPercent = f.discountPercent;
+    if (promoPrice && !discountPercent && basePrice > 0) {
+      discountPercent = Math.max(1, Math.min(90, Math.round((1 - promoPrice / basePrice) * 100)));
+    } else if (discountPercent && !promoPrice && basePrice > 0) {
+      promoPrice = promotionPrice(basePrice, discountPercent);
+    } else if (!discountPercent && !promoPrice) {
+      discountPercent = 10;
+      promoPrice = promotionPrice(basePrice, 10);
+    }
     const id=randomUUID();
     const sortOrder=f.sortOrder ?? Number((await pool.query("SELECT COALESCE(MAX(sort_order)+1,0) AS n FROM store_promotions")).rows[0].n);
-    await pool.query("INSERT INTO store_promotions(id,product_id,eyebrow,title,description,image,discount_percent,active,sort_order) VALUES(?,?,?,?,?,?,?,?,?)",[id,f.productId,f.eyebrow,f.title,f.description,f.image||null,f.discountPercent,f.active,sortOrder]);
+    await pool.query(
+      "INSERT INTO store_promotions(id,product_id,eyebrow,title,description,image,discount_percent,promo_price,active,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      [id,f.productId,f.eyebrow,f.title,f.description,f.image||null,discountPercent,promoPrice,f.active,sortOrder]
+    );
     res.status(201).json({id});
   });
   app.patch("/api/admin/promotions/:id", auth, admin, async (req,res) => {
@@ -419,10 +583,46 @@ export function createApp(pool, options = {}) {
     if(!old) throw fail(404,"Promo tidak ditemukan.");
     const productId=f.productId||old.product_id, active=f.active??Boolean(old.active);
     if(f.image!==undefined) validatePromotionImage(f.image);
-    if(f.productId && !(await pool.query("SELECT id FROM products WHERE id=? AND active=TRUE",[productId])).rows.length) throw fail(400,"Pilih produk yang masih tampil.");
-    if(active && (productId!==old.product_id||!old.active) && (await pool.query("SELECT id FROM store_promotions WHERE product_id=? AND active=TRUE AND id<>?",[productId,req.params.id])).rows.length) throw fail(409,"Produk ini sudah memiliki promo aktif.");
-    const fields={product_id:productId,eyebrow:f.eyebrow??old.eyebrow,title:f.title??old.title,description:f.description??old.description,image:f.image!==undefined?(f.image||null):old.image,discount_percent:f.discountPercent??old.discount_percent,active,sort_order:f.sortOrder??old.sort_order};
-    await pool.query("UPDATE store_promotions SET product_id=?,eyebrow=?,title=?,description=?,image=?,discount_percent=?,active=?,sort_order=? WHERE id=?",[fields.product_id,fields.eyebrow,fields.title,fields.description,fields.image,fields.discount_percent,fields.active,fields.sort_order,req.params.id]);
+    const prodRow = (await pool.query("SELECT id, price FROM products WHERE id=? AND active=TRUE",[productId])).rows[0];
+    if(f.productId && !prodRow) throw fail(400,"Pilih produk yang masih tampil.");
+    if(active && (productId!==old.product_id||!old.active) && (await pool.query("SELECT id FROM store_promotions WHERE product_id=? AND active=TRUE AND id<>?",[productId,req.params.id])).rows.length) {
+      throw fail(409,"Produk ini sudah memiliki promo aktif.");
+    }
+    const basePrice = Number(prodRow?.price || (await pool.query("SELECT price FROM products WHERE id=?", [productId])).rows[0]?.price || 0);
+    let promoPrice = f.promoPrice !== undefined ? (f.promoPrice != null && Number(f.promoPrice) > 0 ? Number(f.promoPrice) : null) : old.promo_price;
+    let discountPercent = f.discountPercent !== undefined ? f.discountPercent : old.discount_percent;
+    if (f.promoPrice !== undefined && f.discountPercent === undefined && promoPrice && basePrice > 0) {
+      discountPercent = Math.max(1, Math.min(90, Math.round((1 - promoPrice / basePrice) * 100)));
+    } else if (f.discountPercent !== undefined && f.promoPrice === undefined && discountPercent && basePrice > 0) {
+      promoPrice = promotionPrice(basePrice, discountPercent);
+    }
+    const fields={
+      product_id:productId,
+      eyebrow:f.eyebrow??old.eyebrow,
+      title:f.title??old.title,
+      description:f.description??old.description,
+      image:f.image!==undefined?(f.image||null):old.image,
+      discount_percent:discountPercent,
+      promo_price:promoPrice,
+      active,
+      sort_order:f.sortOrder??old.sort_order
+    };
+    await pool.query(
+      "UPDATE store_promotions SET product_id=?,eyebrow=?,title=?,description=?,image=?,discount_percent=?,promo_price=?,active=?,sort_order=? WHERE id=?",
+      [fields.product_id,fields.eyebrow,fields.title,fields.description,fields.image,fields.discount_percent,fields.promo_price,fields.active,fields.sort_order,req.params.id]
+    );
+    res.json({ok:true});
+  });
+  app.delete("/api/admin/promotions/:id", auth, admin, async (req,res) => {
+    const result = await pool.query("DELETE FROM store_promotions WHERE id=?", [req.params.id]);
+    if (result.rows.affectedRows === 0) throw fail(404, "Promo tidak ditemukan.");
+    res.json({ok:true});
+  });
+  app.put("/api/admin/promotions/reorder", auth, admin, async (req,res) => {
+    const f = z.object({ ids: z.array(z.string().min(1)).min(1) }).parse(req.body);
+    for (let i = 0; i < f.ids.length; i++) {
+      await pool.query("UPDATE store_promotions SET sort_order=? WHERE id=?", [i, f.ids[i]]);
+    }
     res.json({ok:true});
   });
   app.post("/api/admin/payment-methods", auth, admin, async (req,res) => {
@@ -493,24 +693,26 @@ export function createApp(pool, options = {}) {
   app.post("/api/auth/login", authLimit, async (req, res) => {
     const f = z
       .object({
-        phone: z.string().min(1).max(20).optional(),
-        email: z.email().max(254).optional(),
+        phone: z.string().min(1).max(254).optional(),
+        email: z.string().min(1).max(254).optional(),
+        identifier: z.string().min(1).max(254).optional(),
         password: z.string().min(1).max(72),
       })
-      .refine((o) => o.phone || o.email, "Masukkan nomor WhatsApp atau email.")
+      .refine((o) => o.phone || o.email || o.identifier, "Masukkan nomor WhatsApp atau email.")
       .parse(req.body);
-    let u;
-    if (f.phone) {
-      const phone = normalizePhone(f.phone);
-      u = (await pool.query("SELECT * FROM users WHERE phone=?", [phone]))
-        .rows[0];
-    } else {
-      u = (
-        await pool.query("SELECT * FROM users WHERE email=?", [
-          f.email.toLowerCase(),
-        ])
-      ).rows[0];
-    }
+
+    const raw = (f.identifier || f.email || f.phone || "").trim();
+    const normalized = normalizePhone(raw);
+    const lower = raw.toLowerCase();
+
+    // Query flexible: match email or normalized phone or exact phone
+    const u = (
+      await pool.query(
+        "SELECT * FROM users WHERE email=? OR phone=? OR phone=? OR phone=? LIMIT 1",
+        [lower, raw, normalized, normalized.replace(/^62/, "0")]
+      )
+    ).rows[0];
+
     if (!u || !(await bcrypt.compare(f.password, u.password_hash)))
       throw fail(401, "Nomor WhatsApp/email atau kata sandi tidak cocok.");
     res.json(await session(req, res, u));
@@ -649,8 +851,11 @@ export function createApp(pool, options = {}) {
       if (promotion) {
         product.basePrice = Number(p.price);
         product.oldPrice = Number(p.price);
-        product.price = promotionPrice(p.price, promotion.discount_percent);
-        product.promotion = { id: promotion.id, title: promotion.title, discountPercent: Number(promotion.discount_percent) };
+        const salePrice = promotion.promo_price != null && Number(promotion.promo_price) > 0
+          ? Number(promotion.promo_price)
+          : promotionPrice(p.price, promotion.discount_percent);
+        product.price = salePrice;
+        product.promotion = { id: promotion.id, title: promotion.title, discountPercent: Number(promotion.discount_percent), promoPrice: salePrice };
       }
       return product;
     });
@@ -660,10 +865,11 @@ export function createApp(pool, options = {}) {
       .object({
         search: z.string().max(100).default(""),
         category: z.string().max(100).default("Semua"),
+        subcategory: z.string().max(100).optional(),
         size: z.string().max(30).optional(),
         color: colorSchema.optional(),
-        min: z.coerce.number().int().min(0).default(0),
-        max: z.coerce.number().int().min(0).max(10000000).default(10000000),
+        min: z.preprocess((v) => parseMoneyInt(v, 0), z.coerce.number().int().min(0).default(0)),
+        max: z.preprocess((v) => (v == null || v === "" ? 10000000 : parseMoneyInt(v, 10000000)), z.coerce.number().int().min(0).max(10000000).default(10000000)),
         sort: z
           .enum(["recommended", "low", "high", "rating"])
           .default("recommended"),
@@ -676,15 +882,19 @@ export function createApp(pool, options = {}) {
     const where = ["p.active=TRUE", "p.price BETWEEN ? AND ?"],
       args = [q.min, q.max];
     if (q.search) {
-      where.push("(p.name LIKE ? OR p.category LIKE ?)");
-      args.push("%" + q.search + "%", "%" + q.search + "%");
+      where.push("(p.name LIKE ? OR p.category LIKE ? OR p.subcategory LIKE ?)");
+      args.push("%" + q.search + "%", "%" + q.search + "%", "%" + q.search + "%");
     }
     if (q.category === "Produk Baru") where.push("p.is_new=TRUE");
     else if (q.category === "Penawaran Terbatas")
       where.push("(p.old_price>p.price OR EXISTS(SELECT 1 FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE))");
-    else if (q.category !== "Semua") {
-      where.push("p.category=?");
-      args.push(q.category);
+    else if (q.category && q.category !== "Semua") {
+      where.push("(p.category=? OR p.subcategory=? OR p.category IN (SELECT id FROM product_categories WHERE parent_id=? OR id=?) OR p.subcategory IN (SELECT id FROM product_categories WHERE parent_id=? OR id=?))");
+      args.push(q.category, q.category, q.category, q.category, q.category, q.category);
+    }
+    if (q.subcategory && q.subcategory !== "Semua") {
+      where.push("(p.subcategory=? OR p.category=? OR p.subcategory IN (SELECT id FROM product_categories WHERE name=? OR id=?) OR p.subcategory IN (SELECT name FROM product_categories WHERE name=? OR id=?))");
+      args.push(q.subcategory, q.subcategory, q.subcategory, q.subcategory, q.subcategory, q.subcategory);
     }
     if (q.ids !== undefined) {
       where.push("p.id IN (?)");
@@ -743,6 +953,44 @@ export function createApp(pool, options = {}) {
         colors: [...new Set(facets.map((v) => v.color))],
       },
     });
+  });
+  app.get("/api/products/cross-categories", async (req, res) => {
+    try {
+      const search = String(req.query.search || "").trim().slice(0, 100);
+      const currentCategory = String(req.query.currentCategory || "");
+      const currentSubcategory = String(req.query.subcategory || "");
+      if (!search) return res.json({ matches: [] });
+
+      const sArg = "%" + search + "%";
+      const rows = (
+        await pool.query(
+          `SELECT p.category, COUNT(DISTINCT p.id) as count
+           FROM products p
+           WHERE p.active=TRUE
+             AND (p.name LIKE ? OR p.category LIKE ? OR p.subcategory LIKE ?)
+           GROUP BY p.category`,
+          [sArg, sArg, sArg],
+        )
+      ).rows;
+
+      const matches = rows
+        .filter((r) => {
+          if (!r.category) return false;
+          if (currentSubcategory === "Semua" || !currentSubcategory) {
+            return r.category !== currentCategory;
+          }
+          return true;
+        })
+        .map((r) => ({
+          category: r.category,
+          count: Number(r.count),
+          isCurrentCategoryAll: r.category === currentCategory,
+        }));
+
+      res.json({ matches });
+    } catch (e) {
+      res.json({ matches: [] });
+    }
   });
   app.get("/api/products/:id", async (req, res) => {
     const rows = (
@@ -843,7 +1091,11 @@ export function createApp(pool, options = {}) {
           ...i,
           name: p.name,
           image: p.image,
-          price: promotionMap.has(p.id) ? promotionPrice(p.price,promotionMap.get(p.id).discount_percent) : p.price,
+          price: promotionMap.has(p.id)
+            ? (promotionMap.get(p.id).promo_price && Number(promotionMap.get(p.id).promo_price) > 0
+                ? Number(promotionMap.get(p.id).promo_price)
+                : promotionPrice(p.price, promotionMap.get(p.id).discount_percent))
+            : p.price,
           oldPrice: promotionMap.has(p.id) ? p.price : p.old_price,
           stock: p.stock,
         });
@@ -883,19 +1135,22 @@ export function createApp(pool, options = {}) {
         for (const i of items) {
           const p = (
             await c.query(
-              "SELECT p.id,p.name,p.image,p.price,p.cost_price,p.variation_label,v.stock,(SELECT sp.discount_percent FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS discount_percent FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE FOR UPDATE",
+              "SELECT p.id,p.name,p.image,p.price,p.cost_price,p.variation_label,v.stock,(SELECT sp.discount_percent FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS discount_percent,(SELECT sp.promo_price FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS promo_price FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE FOR UPDATE",
               [i.id, i.size, i.color],
             )
           ).rows[0];
           if (!p) throw fail(400, "Varian produk tidak ditemukan.");
           if (p.stock < i.quantity)
             throw fail(409, "Stok " + p.name + " tidak mencukupi.");
+          const itemPrice = p.promo_price && Number(p.promo_price) > 0
+            ? Number(p.promo_price)
+            : (p.discount_percent ? promotionPrice(p.price, p.discount_percent) : p.price);
           canonical.push({
             ...i,
             name: p.name,
             image: p.image,
-            price: p.discount_percent ? promotionPrice(p.price,p.discount_percent) : p.price,
-            oldPrice: p.discount_percent ? p.price : 0,
+            price: itemPrice,
+            oldPrice: (p.promo_price || p.discount_percent) ? p.price : 0,
             costPrice: p.cost_price,
             variationLabel: p.variation_label,
           });
@@ -1066,19 +1321,30 @@ export function createApp(pool, options = {}) {
       .parse(req.body);
     if (f.oldPrice && f.oldPrice <= f.price)
       throw fail(400, "Harga sebelum diskon harus melebihi harga jual.");
-    if (!(await pool.query("SELECT id FROM product_categories WHERE id=? AND active=TRUE", [f.category])).rows.length)
-      throw fail(400,"Pilih kategori aktif dari pengaturan toko.");
+    const mainCat = (await pool.query("SELECT id, name FROM product_categories WHERE (id=? OR name=?) AND parent_id IS NULL AND active=TRUE", [f.category, f.category])).rows[0];
+    if (!mainCat)
+      throw fail(400, "Pilih kategori utama yang valid dan aktif dari pengaturan toko.");
+    if (!f.subcategory || !f.subcategory.trim()) {
+      throw fail(400, "Subkategori wajib dipilih.");
+    }
+    const subCat = (await pool.query("SELECT id, name FROM product_categories WHERE (id=? OR name=?) AND parent_id=? AND active=TRUE", [f.subcategory, f.subcategory, mainCat.id])).rows[0];
+    if (!subCat) {
+      throw fail(400, `Subkategori "${f.subcategory}" tidak valid untuk kategori utama "${mainCat.name}".`);
+    }
+    const categoryId = mainCat.id;
+    const subcategoryId = subCat.id;
     const c = await pool.connect();
     try {
       await c.query("START TRANSACTION");
       const id = "lj-" + randomUUID();
       await c.query(
-        "INSERT INTO products(id,sku,name,category,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO products(id,sku,name,category,subcategory,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
           id,
           f.sku,
           f.name,
-          f.category,
+          categoryId,
+          subcategoryId,
           f.price,
           f.oldPrice,
           f.costPrice,
@@ -1121,8 +1387,18 @@ export function createApp(pool, options = {}) {
       .strict()
       .refine((o) => Object.keys(o).length > 0)
       .parse(req.body);
-    if (f.category && !(await pool.query("SELECT id FROM product_categories WHERE id=? AND active=TRUE", [f.category])).rows.length)
-      throw fail(400,"Pilih kategori aktif dari pengaturan toko.");
+    if (f.category || f.subcategory !== undefined) {
+      const current = (await pool.query("SELECT category, subcategory FROM products WHERE id=?", [req.params.id])).rows[0];
+      const targetCat = f.category || current?.category;
+      const targetSub = f.subcategory !== undefined ? f.subcategory : current?.subcategory;
+      const mainCat = (await pool.query("SELECT id, name FROM product_categories WHERE (id=? OR name=?) AND parent_id IS NULL AND active=TRUE", [targetCat, targetCat])).rows[0];
+      if (!mainCat) throw fail(400, "Pilih kategori utama yang valid dan aktif.");
+      if (!targetSub || !targetSub.trim()) throw fail(400, "Subkategori wajib dipilih.");
+      const subCat = (await pool.query("SELECT id, name FROM product_categories WHERE (id=? OR name=?) AND parent_id=? AND active=TRUE", [targetSub, targetSub, mainCat.id])).rows[0];
+      if (!subCat) throw fail(400, `Subkategori "${targetSub}" tidak valid untuk kategori utama "${mainCat.name}".`);
+      f.category = mainCat.id;
+      f.subcategory = subCat.id;
+    }
     const c = await pool.connect();
     try {
       await c.query("START TRANSACTION");
@@ -1138,7 +1414,7 @@ export function createApp(pool, options = {}) {
         throw fail(400, "Harga sebelum diskon harus melebihi harga jual.");
       const map = { ...f };
       delete map.variants;
-      const names = { oldPrice: "old_price", costPrice: "cost_price", weightGrams:"weight_grams", variationLabel: "variation_label", isNew: "is_new" };
+      const names = { oldPrice: "old_price", costPrice: "cost_price", weightGrams:"weight_grams", variationLabel: "variation_label", isNew: "is_new", subcategory: "subcategory" };
       if (Object.keys(map).length)
         await c.query(
           "UPDATE products SET " +
@@ -1152,21 +1428,21 @@ export function createApp(pool, options = {}) {
         const keys = f.variants.map((v) => v.size + ":" + v.color);
         if (new Set(keys).size !== keys.length)
           throw fail(400, "Varian duplikat.");
+        const existing = (await c.query("SELECT size, color FROM product_variants WHERE product_id=?", [req.params.id])).rows;
+        for (const ex of existing) {
+          if (!keys.includes(ex.size + ":" + ex.color)) {
+            await c.query("DELETE FROM product_variants WHERE product_id=? AND size=? AND color=?", [req.params.id, ex.size, ex.color]);
+          }
+        }
         for (const v of f.variants) {
-          const found = (
-            await c.query(
-              "SELECT stock FROM product_variants WHERE product_id=? AND size=? AND color=? FOR UPDATE",
-              [req.params.id, v.size, v.color],
-            )
-          ).rows[0];
-          if (!found)
-            throw fail(
-              400,
-              "Varian tidak ditemukan. Buat produk baru untuk kombinasi ukuran/warna baru.",
-            );
+          const length = v.lengthCm ?? parseDimensions(v.size)?.length ?? 0;
+          const width = v.widthCm ?? parseDimensions(v.size)?.width ?? 0;
+          const height = v.heightCm ?? parseDimensions(v.size)?.height ?? 0;
           await c.query(
-            "UPDATE product_variants SET stock=?,image_url=COALESCE(?,image_url),length_cm=?,width_cm=?,height_cm=? WHERE product_id=? AND size=? AND color=?",
-            [v.stock, v.imageUrl || null, v.lengthCm ?? parseDimensions(v.size)?.length ?? 0, v.widthCm ?? parseDimensions(v.size)?.width ?? 0, v.heightCm ?? parseDimensions(v.size)?.height ?? 0, req.params.id, v.size, v.color],
+            `INSERT INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,image_url,stock)
+             VALUES(?,?,?,?,?,?,?,?)
+             ON DUPLICATE KEY UPDATE stock=VALUES(stock), image_url=COALESCE(VALUES(image_url), image_url), length_cm=VALUES(length_cm), width_cm=VALUES(width_cm), height_cm=VALUES(height_cm)`,
+            [req.params.id, v.size, length, width, height, v.color, v.imageUrl || null, v.stock],
           );
         }
       }
@@ -1208,7 +1484,7 @@ export function createApp(pool, options = {}) {
     res.json({ revenue, capital:cogs, expenses:operating, netIncome:revenue-cogs-operating, paidOrders:Number(sales.rows[0].orders), expenseRows:expenseRows.rows });
   });
   app.post("/api/admin/expenses", auth, admin, async (req,res) => {
-    const f=z.object({ date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/), description:z.string().trim().min(2).max(200), amount:z.number().int().positive().max(100000000) }).parse(req.body);
+    const f=z.object({ date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/), description:z.string().trim().min(2).max(200), amount:z.preprocess((v) => parseMoneyInt(v, v), z.number().int().positive().max(100000000)) }).parse(req.body);
     const id=randomUUID();
     await pool.query("INSERT INTO store_expenses(id,expense_date,description,amount,created_by) VALUES(?,?,?,?,?)",[id,f.date,f.description,f.amount,req.user.id]);
     res.status(201).json({id});

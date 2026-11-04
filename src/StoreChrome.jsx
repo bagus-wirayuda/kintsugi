@@ -7,6 +7,8 @@ import {
   ShoppingBag,
   ShoppingCart,
   ArrowRight,
+  ChevronRight,
+  ChevronDown,
   Menu,
   X,
   Grid2X2,
@@ -16,12 +18,15 @@ import {
   LogOut,
   HelpCircle,
   Mail,
+  SlidersHorizontal,
 } from "lucide-react";
 import Brand from "./Brand";
+import { getMainCategories, getSubcategories, categoryLabel, catalogCategories } from "./catalog";
 export function StoreHeader({
   nav,
   shop,
-  activeCategory,
+  activeCategory = "Semua",
+  activeSubcategory = "Semua",
   count = 0,
   wishCount = 0,
   onSearch,
@@ -30,34 +35,39 @@ export function StoreHeader({
   config,
 }) {
   const [open, setOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const profileTrigger = useRef(null);
-  const profilePanel = useRef(null);
   const active = location.hash.split('/')[0].slice(1);
-  const departments = config?.categories?.length ? config.categories : [];
+  const allCategories = config?.categories?.length ? config.categories : catalogCategories;
+  const mainCategoriesList = getMainCategories(allCategories);
+  const isAdmin = ["admin", "manager", "staff"].includes(user?.role);
+
   useEffect(() => {
     const close = (e) => {
-      if (e.key === 'Escape') { setProfileOpen(false); setOpen(false); profileTrigger.current?.focus(); }
-      if (e.type === 'pointerdown' && !e.target.closest('[data-profile-area]')) setProfileOpen(false);
+      if (e.key === 'Escape') setOpen(false);
+      if (e.type === 'pointerdown') {
+        if (!e.target.closest('.ks-mobile-departments') && !e.target.closest('[data-bottom-category]')) setOpen(false);
+      }
     };
     document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', close);
     return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
   }, []);
-  useEffect(() => { if (profileOpen) profilePanel.current?.querySelector('button')?.focus(); }, [profileOpen]);
-  const go = (route) => { setProfileOpen(false); setOpen(false); nav(route); };
+  const go = (route) => { setOpen(false); nav(route); };
+  const handleProfileClick = () => {
+    setOpen(false);
+    nav(user ? "account/profile" : "account");
+  };
   const goPromo = () => {
     if (active !== "home") nav("home");
     setTimeout(() => document.getElementById("promo")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
   };
-  const browse = (g) => {
+  const browse = (mainCatId, subCatId = "Semua") => {
     setOpen(false);
-    shop ? shop("Semua", g) : nav("catalog");
+    shop ? shop(mainCatId, subCatId) : nav("catalog");
   };
   return (
     <>
       <div className="ks-announcement">
-        <span>{config?.announcementText || "Ruang tidur yang tenang, dimulai dari tekstil yang baik."}</span>
+        <span>{config?.announcementText || "Koleksi tekstil & busana berkualitas untuk kenyamanan ruang hidup Anda."}</span>
         <span>
           Gratis ongkir mulai Rp699.000 <ArrowRight size={13} />
         </span>
@@ -67,46 +77,67 @@ export function StoreHeader({
         <div className="ks-header-inner">
           <button
             className="ks-brand"
-            onClick={() => nav(user ? "catalog" : "home")}
+            onClick={() => nav("home")}
             aria-label="Kintsugi beranda"
           >
             <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
           </button>
-          <nav className="ks-departments" aria-label="Kategori produk seprai">
-            {departments.slice(0, 4).map(({ id: g, label }) => (
+          <nav className="ks-departments" aria-label="Kategori utama produk">
+            {mainCategoriesList.map((m) => (
               <button
-                key={g}
-                className={activeCategory === g ? "active" : ""}
-                onClick={() => browse(g)}
+                key={m.id}
+                className={activeCategory === m.id ? "active" : ""}
+                onClick={() => browse(m.id, "Semua")}
               >
-                {label.toUpperCase()}
+                {(m.label || m.name || m.id).toUpperCase()}
               </button>
             ))}
           </nav>
           <div className="ks-actions">
+            {isAdmin && (
+              <button
+                className="ks-admin-badge"
+                title="Buka panel administrasi toko"
+                onClick={() => nav("admin/overview")}
+              >
+                <ShieldCheck size={17} />
+                <span>Panel Admin</span>
+              </button>
+            )}
             <button
               className="ks-search"
               aria-label="Cari produk"
               onClick={onSearch || (() => nav("catalog"))}
             >
               <Search size={21} />
-              <span>Cari kebutuhan Anda</span>
+              <span>Cari katalog…</span>
             </button>
-            <button ref={profileTrigger} data-profile-area aria-label="Menu profil" aria-expanded={profileOpen} aria-controls="customer-profile-menu" onClick={() => { setProfileOpen(!profileOpen); setOpen(false); }}>
-              <UserRound size={22} /><span className="ks-profile-label">Profil</span>
+            <button
+              className="ks-profile-btn"
+              aria-label={user ? "Profil saya" : "Masuk ke akun"}
+              onClick={handleProfileClick}
+            >
+              <UserRound size={22} /><span className="ks-profile-label">{user ? "Profil" : "Masuk"}</span>
             </button>
-            <button aria-label="Favorit saya" onClick={() => nav("wishlist")}>
+            <button
+              aria-label="Favorit saya"
+              onClick={() => nav(user?.role === "customer" ? "account/wishlist" : "wishlist")}
+            >
               <Heart size={22} />
               {wishCount > 0 && <b>{wishCount}</b>}
             </button>
-            <button data-cart-target aria-label={`Keranjang belanja, ${count} barang`} onClick={() => nav("cart")}>
+            <button
+              data-cart-target
+              aria-label={`Keranjang belanja, ${count} barang`}
+              onClick={() => nav(user?.role === "customer" ? "account/cart" : "cart")}
+            >
               <ShoppingCart size={22} />
               {count > 0 && <b>{count}</b>}
             </button>
             <button
               className="ks-menu"
               aria-label={open ? "Tutup kategori" : "Buka kategori"}
-              onClick={() => { setOpen(!open); setProfileOpen(false); }}
+              onClick={() => { setOpen(!open); }}
             >
               {open ? <X /> : <Menu />}
             </button>
@@ -116,33 +147,54 @@ export function StoreHeader({
           className={"ks-mobile-departments " + (open ? "expanded" : "")}
           aria-label="Kategori di ponsel"
         >
-          {departments.map(({ id: g, label }) => (
-            <button key={g} onClick={() => browse(g)}>
-              {label}
+          <div className="ks-mobile-departments-header">
+            <span className="ks-mobile-section-title">KATEGORI</span>
+            <button
+              type="button"
+              className="ks-mobile-close-btn"
+              aria-label="Tutup menu kategori"
+              onClick={() => setOpen(false)}
+            >
+              <X size={18} />
             </button>
-          ))}
-          {open && ["Semua", "Produk Baru", "Penawaran Terbatas"].map((c) => <button key={c} onClick={() => { setOpen(false); shop ? shop(c, "Semua") : nav('catalog'); }}>{c === "Semua" ? "Semua koleksi" : c}</button>)}
+          </div>
+          <div className="ks-mobile-cats-list">
+            {mainCategoriesList.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={"ks-mobile-cat-item " + (activeCategory === m.id ? "active" : "")}
+                onClick={() => browse(m.id, "Semua")}
+              >
+                <span>{m.label || m.name || m.id}</span>
+                <ChevronRight size={16} />
+              </button>
+            ))}
+          </div>
         </nav>
-        {profileOpen && createPortal(<section ref={profilePanel} data-profile-area id="customer-profile-menu" className="ks-profile-menu" aria-label="Menu akun pelanggan">
-          <div className="ks-profile-heading"><span className="ks-profile-avatar"><UserRound size={24}/></span><div><strong>{user?.name || 'Selamat datang'}</strong><small>{user ? 'Akun pelanggan Kintsugi' : 'Masuk untuk mengelola belanja Anda'}</small></div><button aria-label="Tutup menu profil" onClick={() => setProfileOpen(false)}><X size={19}/></button></div>
-          {(user ? [
-            ['account/orders', 'Pesanan saya', Package],
-            ['account/profile', 'Profil & data diri', UserRound],
-            ['account/address', 'Alamat pengiriman', MapPin],
-            ['account/security', 'Keamanan akun', ShieldCheck],
-            ['wishlist', 'Favorit saya', Heart],
-            ['cart', 'Keranjang belanja', ShoppingCart],
-            ['account/help', 'Bantuan belanja', HelpCircle],
-          ] : [['account', 'Masuk / daftar', UserRound]]).map(([route, label, Icon]) => <button key={route} onClick={() => go(route)}><Icon size={19}/><span>{label}</span><ArrowRight size={15}/></button>)}
-          {user && onLogout && <button className="ks-profile-logout" onClick={() => { setProfileOpen(false); onLogout(); }}><LogOut size={19}/><span>Keluar dari akun</span></button>}
-        </section>, document.body)}
       </header>
       {createPortal(<nav className="ks-bottom-nav" aria-label="Navigasi belanja ponsel">
         <button className={active === 'catalog' && !open ? 'active' : ''} onClick={() => go('catalog')}><ShoppingBag size={21}/><span>Belanja</span></button>
-        <button className={open ? 'active' : ''} aria-expanded={open} onClick={() => { setOpen(!open); setProfileOpen(false); }}><Grid2X2 size={21}/><span>Kategori</span></button>
-        <button className={active === 'wishlist' ? 'active' : ''} onClick={() => go('wishlist')}><Heart size={21}/><span>Favorit</span>{wishCount > 0 && <b>{wishCount}</b>}</button>
-        <button data-cart-target className={active === 'cart' ? 'active' : ''} aria-label={`Keranjang, ${count} barang`} onClick={() => go('cart')}><ShoppingCart size={21}/><span>Keranjang</span>{count > 0 && <b>{count}</b>}</button>
-        <button data-profile-area className={profileOpen || active === 'account' ? 'active' : ''} aria-label="Profil" aria-controls="customer-profile-menu" aria-expanded={profileOpen} onClick={() => { setProfileOpen(!profileOpen); setOpen(false); }}><UserRound size={21}/><span>Profil</span></button>
+        <button data-bottom-category className={open ? 'active' : ''} aria-expanded={open} onClick={() => { setOpen(!open); }}><Grid2X2 size={21}/><span>Kategori</span></button>
+        <button
+          className={(active === 'wishlist' || (active === 'account' && location.hash.includes('wishlist'))) ? 'active' : ''}
+          onClick={() => go(user?.role === "customer" ? "account/wishlist" : "wishlist")}
+        >
+          <Heart size={21} />
+          <span>Favorit</span>
+          {wishCount > 0 && <b>{wishCount}</b>}
+        </button>
+        <button
+          data-cart-target
+          className={(active === 'cart' || (active === 'account' && location.hash.includes('cart'))) ? 'active' : ''}
+          aria-label={`Keranjang, ${count} barang`}
+          onClick={() => go(user?.role === "customer" ? "account/cart" : "cart")}
+        >
+          <ShoppingCart size={21} />
+          <span>Keranjang</span>
+          {count > 0 && <b>{count}</b>}
+        </button>
+        <button className={active === 'account' ? 'active' : ''} aria-label={user ? "Profil saya" : "Masuk ke akun"} onClick={handleProfileClick}><UserRound size={21}/><span>{user ? "Profil" : "Masuk"}</span></button>
       </nav>, document.body)}
     </>
   );
@@ -151,25 +203,108 @@ export function StoreFooter({ nav, onInfo, contact = "", storeAddress = "", bran
   const info = (title) => onInfo ? onInfo(title) : nav("account/help");
   return (
     <footer className="ks-simple-footer">
-      <nav className="ks-footer-links" aria-label="Informasi Kintsugi">
-        <button onClick={() => info("Kebijakan privasi")}>Kebijakan Privasi</button>
-        <button onClick={() => info("Pengiriman")}>Informasi Pengiriman</button>
-        <button onClick={() => info("Cerita kami")}>Informasi Kintsugi</button>
-        <button onClick={() => info("Panduan belanja")}>Panduan Belanja</button>
-        <button onClick={() => info("Syarat & ketentuan")}>Syarat & Ketentuan</button>
-      </nav>
-      <div className="ks-footer-contact">
-        <p>Hubungi layanan pelanggan {brand}:</p>
-        {contact && <a href={`mailto:${contact}`}>{contact}</a>}
-        {storeAddress && <p>Alamat toko: {storeAddress}</p>}
-        <p>Untuk pertanyaan pesanan, sertakan nomor pesanan Anda.</p>
+      <div className="ks-footer-main">
+        {/* Kolom Brand & Keunggulan */}
+        <div className="ks-footer-brand-col">
+          <div className="ks-footer-brand-wrap">
+            <span className="ks-footer-brand-title">{brand}</span>
+            <span className="ks-footer-brand-gold-bar"></span>
+          </div>
+          <p className="ks-footer-brand-tagline">
+            Koleksi tekstil & busana berkualitas yang dirancang dengan perhatian pada detail dan kenyamanan ruang hidup Anda.
+          </p>
+          <div className="ks-footer-trust-badge">
+            <ShieldCheck size={16} />
+            <span>Kualitas Terjamin & Belanja Aman</span>
+          </div>
+        </div>
+
+        {/* Kolom Informasi & Panduan */}
+        <div className="ks-footer-nav-col">
+          <h4 className="ks-footer-col-title">Informasi & Bantuan</h4>
+          <nav className="ks-footer-links" aria-label={`Informasi ${brand}`}>
+            <button type="button" onClick={() => info("Kebijakan privasi")}>
+              <span>Kebijakan Privasi</span>
+              <ArrowRight size={13} className="ks-footer-link-arrow" />
+            </button>
+            <button type="button" onClick={() => info("Pengiriman")}>
+              <span>Informasi Pengiriman</span>
+              <ArrowRight size={13} className="ks-footer-link-arrow" />
+            </button>
+            <button type="button" onClick={() => info("Cerita kami")}>
+              <span>Informasi {brand}</span>
+              <ArrowRight size={13} className="ks-footer-link-arrow" />
+            </button>
+            <button type="button" onClick={() => info("Panduan belanja")}>
+              <span>Panduan Belanja</span>
+              <ArrowRight size={13} className="ks-footer-link-arrow" />
+            </button>
+            <button type="button" onClick={() => info("Syarat & ketentuan")}>
+              <span>Syarat & Ketentuan</span>
+              <ArrowRight size={13} className="ks-footer-link-arrow" />
+            </button>
+          </nav>
+        </div>
+
+        {/* Kolom Layanan Pelanggan & Kontak */}
+        <div className="ks-footer-contact-col">
+          <h4 className="ks-footer-col-title">Layanan Pelanggan</h4>
+          <div className="ks-footer-contact">
+            <p className="ks-footer-contact-label">Hubungi layanan pelanggan {brand}:</p>
+            {contact && (
+              <a className="ks-footer-contact-card" href={`mailto:${contact}`} title={`Kirim email ke ${contact}`}>
+                <Mail size={16} />
+                <span>{contact}</span>
+              </a>
+            )}
+            {storeAddress && (
+              <div className="ks-footer-address-card">
+                <MapPin size={16} />
+                <span>Alamat toko: {storeAddress}</span>
+              </div>
+            )}
+            <p className="ks-footer-order-note">
+              <HelpCircle size={14} />
+              <span>Untuk pertanyaan pesanan, sertakan nomor pesanan Anda.</span>
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* Footer Bottom Bar */}
       <div className="ks-footer-bottom">
-        <small>Hak Cipta © 2026 {brand}. Semua hak dilindungi undang-undang.</small>
+        <small className="ks-footer-copyright">
+          Hak Cipta © 2026 {brand}. Semua hak dilindungi undang-undang.
+        </small>
         <div className="ks-footer-actions">
-          <button aria-label={`Koleksi ${brand}`} onClick={() => nav("catalog")}><ShoppingBag size={19} /></button>
-          <button aria-label={`Hubungi ${brand}`} onClick={() => info("Hubungi kami")}><HelpCircle size={19} /></button>
-          {contact && <a aria-label={`Kirim email ke ${brand}`} href={`mailto:${contact}`}><Mail size={19} /></a>}
+          <button
+            type="button"
+            className="ks-footer-icon-btn"
+            aria-label={`Koleksi ${brand}`}
+            title={`Koleksi ${brand}`}
+            onClick={() => nav("catalog")}
+          >
+            <ShoppingBag size={18} />
+          </button>
+          <button
+            type="button"
+            className="ks-footer-icon-btn"
+            aria-label={`Hubungi ${brand}`}
+            title="Bantuan & Layanan"
+            onClick={() => info("Hubungi kami")}
+          >
+            <HelpCircle size={18} />
+          </button>
+          {contact && (
+            <a
+              className="ks-footer-icon-btn"
+              aria-label={`Kirim email ke ${brand}`}
+              title={`Kirim email ke ${contact}`}
+              href={`mailto:${contact}`}
+            >
+              <Mail size={18} />
+            </a>
+          )}
         </div>
       </div>
     </footer>
