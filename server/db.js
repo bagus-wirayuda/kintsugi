@@ -12,7 +12,12 @@ export function databaseConfig(database = process.env.DB_NAME || "liny_jaya") {
     charset: "utf8mb4",
     timezone: "Z",
     decimalNumbers: true,
-    connectionLimit: 10,
+    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 20),
+    waitForConnections: true,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
+    connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT || 10000),
   };
 }
 export function createPool(database) {

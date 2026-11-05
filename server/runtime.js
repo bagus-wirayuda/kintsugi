@@ -12,6 +12,9 @@ export async function startRuntime(
   },
 ) {
   const server = createServer(app);
+  // Konfigurasi keepalive HTTP untuk kestabilan reverse proxy (Nginx/Caddy/Cloudflare)
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
   // Gunakan event HTTP asli: callback app.listen Express 5 juga dipanggil saat gagal.
   await new Promise((resolve, reject) => {
     const onError = (error) => {

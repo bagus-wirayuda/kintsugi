@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "dev:server": "node --env-file-if-exists=.env server/index.js",
     "build": "vite build",
     "db:init": "node --env-file-if-exists=.env server/init.js",
     "db:reset": "node --env-file-if-exists=.env scripts/reset-database.mjs",

@@ -35,6 +35,47 @@ export const storage = {
     } catch {}
   },
 };
+function getFriendlyErrorMessage(status, fallbackText = "") {
+  if (status === 502) {
+    return "Gagal terhubung ke server toko (502 Bad Gateway). Layanan sedang memuat ulang atau mengalami gangguan sementara. Silakan coba beberapa saat lagi.";
+  }
+  if (status === 503) {
+    return "Layanan toko sedang dalam pemeliharaan (503 Service Unavailable). Silakan coba sesaat lagi.";
+  }
+  if (status === 504) {
+    return "Koneksi ke server batas waktu habis (504 Gateway Timeout). Silakan muat ulang halaman.";
+  }
+  if (status === 500) {
+    return "Terjadi gangguan pada sistem toko. Silakan coba beberapa saat lagi.";
+  }
+  if (status === 429) {
+    return "Terlalu banyak permintaan. Silakan tunggu beberapa saat sebelum mencoba kembali.";
+  }
+  if (status === 404) {
+    return "Layanan atau data yang diminta tidak ditemukan (404).";
+  }
+  if (status === 403) {
+    return "Akses tidak diizinkan (403).";
+  }
+  if (status === 401) {
+    return "Silakan masuk terlebih dahulu.";
+  }
+  return fallbackText || `Terjadi kendala pada server (status ${status}). Silakan coba kembali.`;
+}
+
+function cleanErrorMessage(msg, status) {
+  if (!msg || typeof msg !== "string") return getFriendlyErrorMessage(status);
+  const trimmed = msg.trim();
+  if (
+    /^\s*<!DOCTYPE/i.test(trimmed) ||
+    /^\s*<html/i.test(trimmed) ||
+    /<[a-z][\s\S]*>/i.test(trimmed)
+  ) {
+    return getFriendlyErrorMessage(status);
+  }
+  return trimmed;
+}
+
 export async function api(path, options = {}) {
   let res;
   try {
@@ -52,42 +93,24 @@ export async function api(path, options = {}) {
   }
 
   const rawText = await res.text();
-  let data;
+  let data = {};
+  let isJson = false;
   try {
-    data = rawText ? JSON.parse(rawText) : {};
-  } catch {
-    if (!res.ok) {
-      throw Object.assign(
-        new Error(
-          rawText?.trim() ||
-            (res.status === 429
-              ? "Terlalu banyak permintaan. Silakan tunggu beberapa saat sebelum mencoba kembali."
-              : res.status === 502
-                ? "Gagal terhubung ke layanan eksternal. Silakan coba kembali."
-                : res.status === 503
-                  ? "Layanan sedang dalam pemeliharaan. Silakan coba sesaat lagi."
-                  : `Terjadi kendala pada server (status ${res.status}). Silakan coba kembali.`)
-        ),
-        { status: res.status }
-      );
+    if (rawText && rawText.trim()) {
+      data = JSON.parse(rawText);
+      isJson = true;
     }
+  } catch {
     data = {};
+    isJson = false;
   }
 
   if (!res.ok) {
-    const errorMsg =
-      data.error ||
-      data.message ||
-      (res.status === 429
-        ? "Terlalu banyak permintaan. Silakan tunggu beberapa saat sebelum mencoba kembali."
-        : res.status === 502
-          ? "Layanan pihak ketiga belum berhasil merespons. Silakan coba kembali."
-          : res.status === 503
-            ? "Layanan toko sedang dalam pemeliharaan. Silakan coba sesaat lagi."
-            : `Terjadi kesalahan (${res.status}). Silakan coba lagi.`);
-    throw Object.assign(new Error(errorMsg), {
+    const rawError = data?.error || data?.message || (isJson ? "" : rawText);
+    const friendlyMsg = cleanErrorMessage(rawError, res.status);
+    throw Object.assign(new Error(friendlyMsg), {
       status: res.status,
-      code: data.code,
+      code: data?.code,
     });
   }
   return data;

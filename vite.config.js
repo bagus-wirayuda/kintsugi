@@ -9,10 +9,15 @@ export default defineConfig({
         target: process.env.VITE_API_URL || "http://127.0.0.1:3001",
         changeOrigin: true,
       },
+      "/uploads": {
+        target: process.env.VITE_API_URL || "http://127.0.0.1:3001",
+        changeOrigin: true,
+      },
     },
   },
   build: {
     outDir: "dist",
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

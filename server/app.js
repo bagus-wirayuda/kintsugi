@@ -92,12 +92,18 @@ export function createApp(pool, options = {}) {
   const payments = createPayments(pool, gateway);
   const app = express();
   app.disable("x-powered-by");
-  app.use("/uploads", express.static(fileURLToPath(new URL("../public/uploads/", import.meta.url)), { fallthrough: false, maxAge: "7d", immutable: true }));
-  if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+  app.use("/uploads", express.static(fileURLToPath(new URL("../public/uploads/", import.meta.url)), { fallthrough: true, maxAge: "7d" }));
+  const trustProxyConfig = env.TRUST_PROXY
+    ? (env.TRUST_PROXY === "true" || env.TRUST_PROXY === "1" ? 1 : isNaN(env.TRUST_PROXY) ? env.TRUST_PROXY : Number(env.TRUST_PROXY))
+    : (env.NODE_ENV === "production" ? 1 : false);
+  if (trustProxyConfig) app.set("trust proxy", trustProxyConfig);
+  const isSecure = env.COOKIE_SECURE != null
+    ? (env.COOKIE_SECURE === "true" || env.COOKIE_SECURE === "1")
+    : env.NODE_ENV === "production";
   const cookieOptions = {
     httpOnly: true,
     sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    secure: isSecure,
     path: "/",
     maxAge: 7 * 86400000,
   };
@@ -132,13 +138,17 @@ export function createApp(pool, options = {}) {
     res.set("Cache-Control", "no-store");
     next();
   });
+  const apiRateLimit = options.test
+    ? 5000
+    : Number(env.API_RATE_LIMIT || (env.NODE_ENV === "production" ? 600 : 400));
   app.use(
     "/api",
     rateLimit({
       windowMs: 60000,
-      limit: options.test ? 5000 : 400,
+      limit: apiRateLimit,
       standardHeaders: "draft-8",
       legacyHeaders: false,
+      validate: { xForwardedForHeader: false, default: true },
     }),
   );
   app.use("/api", (req, res, next) => {
@@ -150,15 +160,26 @@ export function createApp(pool, options = {}) {
     if (req.get("Sec-Fetch-Site") === "cross-site")
       return next(fail(403, "Permintaan lintas situs ditolak."));
     const origin = req.get("Origin");
-    const allowed = [env.APP_URL, req.protocol + "://" + req.get("host")];
-    if (env.NODE_ENV !== "production")
-      allowed.push(
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-      );
-    if (origin && !allowed.includes(origin))
+    const normalizeOrigin = (u) => (u ? String(u).trim().replace(/\/+$/, "") : "");
+    const allowed = new Set();
+    if (env.APP_URL) allowed.add(normalizeOrigin(env.APP_URL));
+    if (req.get("host")) {
+      allowed.add(`${req.protocol}://${req.get("host")}`);
+      const fwdProto = req.get("x-forwarded-proto");
+      if (fwdProto) allowed.add(`${fwdProto}://${req.get("host")}`);
+    }
+    if (env.ALLOWED_ORIGINS) {
+      for (const item of env.ALLOWED_ORIGINS.split(",")) {
+        if (item.trim()) allowed.add(normalizeOrigin(item));
+      }
+    }
+    if (env.NODE_ENV !== "production") {
+      allowed.add("http://127.0.0.1:5173");
+      allowed.add("http://localhost:5173");
+      allowed.add("http://localhost:3001");
+      allowed.add("http://127.0.0.1:3001");
+    }
+    if (origin && !allowed.has(normalizeOrigin(origin)))
       return next(fail(403, "Origin tidak diizinkan."));
     next();
   });
@@ -1049,33 +1070,29 @@ export function createApp(pool, options = {}) {
       where.push(variant + ")");
     }
     const clause = where.join(" AND ");
-    const total = (
-      await pool.query(
-        "SELECT COUNT(*) AS total FROM products p WHERE " + clause,
-        args,
-      )
-    ).rows[0].total;
     const order = {
       recommended: "p.is_new DESC,p.id",
       low: "p.price ASC,p.id",
       high: "p.price DESC,p.id",
       rating: "p.rating DESC,p.id",
     }[q.sort];
-    const rows = (
-      await pool.query(
+    const [countResult, rowsResult, facetsResult] = await Promise.all([
+      pool.query("SELECT COUNT(*) AS total FROM products p WHERE " + clause, args),
+      pool.query(
         "SELECT p.* FROM products p WHERE " +
         clause +
         " ORDER BY " +
         order +
         " LIMIT ? OFFSET ?",
         [...args, q.pageSize, (q.page - 1) * q.pageSize],
-      )
-    ).rows;
-    const facets = (
-      await pool.query(
+      ),
+      pool.query(
         "SELECT DISTINCT v.size,v.color FROM product_variants v JOIN products p ON p.id=v.product_id WHERE p.active=TRUE ORDER BY v.size,v.color",
-      )
-    ).rows;
+      ),
+    ]);
+    const total = Number(countResult.rows[0]?.total || 0);
+    const rows = rowsResult.rows;
+    const facets = facetsResult.rows;
     res.json({
       items: await hydrate(rows, true),
       total,
