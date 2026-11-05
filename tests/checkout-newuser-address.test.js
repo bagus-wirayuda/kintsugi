@@ -130,7 +130,7 @@ test("Checkout: Akun baru wajib buat password & Belanja kedua kali alamat otomat
         items: [{ id: product.id, size: variant.size, color: variant.color, quantity: 1 }],
         address: order1Address,
         shipping: "regular",
-        payment: "xendit",
+        payment: "COD",
         checkoutKey: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       },
       sessionCookie
@@ -162,7 +162,6 @@ test("Checkout: Akun baru wajib buat password & Belanja kedua kali alamat otomat
   } finally {
     if (server) await new Promise((r) => server.close(r));
     await db.end();
-    await unusedPool.end();
     await root.query(`DROP DATABASE \`${name}\``);
     await root.end();
   }

@@ -387,7 +387,6 @@ test("OTP pendaftaran dan keamanan akun via WhatsApp", async (t) => {
         } finally {
           if(server) await new Promise((r) => server.close(r));
           await db.end();
-          await unusedPool.end();
           await root.query("DROP DATABASE `" + name + "`");
           await root.end();
         }

@@ -85,7 +85,8 @@ export function CartView({
     setInput(coupon || "");
   }, [coupon]);
 
-  const total = totals(cart, coupon, "local", config?.shipping?.localDeliveryFee);
+  const manualShippingFee = Number(config?.shipping?.manualShippingFee ?? config?.shipping?.localDeliveryFee ?? 15000);
+  const total = totals(cart, coupon, "standard", manualShippingFee);
 
   function quantity(key, value) {
     if (!setCart) return;
@@ -302,7 +303,7 @@ export function CartView({
 
             <div className="ks-summary-row">
               <span>Estimasi Ongkir</span>
-              <span>{total.delivery > 0 ? money(total.delivery) : "Dihitung saat checkout"}</span>
+              <span>{total.delivery === 0 ? "Gratis" : money(total.delivery)}</span>
             </div>
 
             <div className="ks-summary-divider" />
@@ -496,6 +497,8 @@ export function PaymentPage({
   wishCount,
   onSearch,
 }) {
+  const isCod = order?.payment === "COD" || !order?.invoice_id;
+  const isExternalUrl = order?.payment_url && /^https?:\/\//i.test(order.payment_url);
   const pending = order?.payment_status === "PENDING";
   return (
     <Shell
@@ -509,36 +512,50 @@ export function PaymentPage({
       cartCount={cartCount}
       wishCount={wishCount}
       onSearch={onSearch}
-      title="Pembayaran pesanan"
-      subtitle="Pesanan Anda tersimpan dan dapat dilanjutkan dari halaman pesanan."
+      title={isCod ? "Pesanan Berhasil Dibuat" : "Pembayaran Pesanan"}
+      subtitle={
+        isCod
+          ? "Pesanan Anda berhasil dikonfirmasi dan segera diproses oleh toko."
+          : "Pesanan Anda tersimpan dan dapat dilanjutkan dari halaman pesanan."
+      }
     >
       <section className="ws-panel ws-payment-result">
         <span className="ws-result-icon">
           <CheckCircle2 size={32} />
         </span>
         <h2>
-          {pending
-            ? "Lanjutkan pembayaran"
-            : order?.payment_status === "FAILED"
-              ? "Pembayaran belum berhasil disiapkan"
-              : "Pesanan telah tersimpan"}
+          {isCod
+            ? "Pesanan Berhasil Dibuat (COD)"
+            : pending
+              ? "Lanjutkan Pembayaran"
+              : order?.payment_status === "FAILED"
+                ? "Pembayaran belum berhasil disiapkan"
+                : "Pesanan telah tersimpan"}
         </h2>
         <p>
           Nomor pesanan <b>#{order?.id?.slice(-8).toUpperCase()}</b>
         </p>
         <h3>{money(order?.total || 0)}</h3>
-        <Notice>{order?.paymentError}</Notice>
-        {pending && (
-          <a className="ws-button primary" href={order.payment_url}>
-            Lanjutkan pembayaran
-            <ArrowUpRight size={17} />
-          </a>
+        {order?.paymentError && <Notice>{order.paymentError}</Notice>}
+        {isCod ? (
+          <p style={{ maxWidth: 460, margin: "12px auto", color: "var(--ws-muted)", lineHeight: 1.6 }}>
+            Pesanan Anda menggunakan metode <b>Bayar di Tempat (COD)</b>. Siapkan uang tunai sebesar <b>{money(order?.total || 0)}</b> saat kurir mengantarkan pesanan ke alamat Anda.
+          </p>
+        ) : (
+          pending && isExternalUrl && (
+            <a className="ws-button primary" href={order.payment_url}>
+              Lanjutkan ke Pembayaran Xendit
+              <ArrowUpRight size={17} />
+            </a>
+          )
         )}
         <button className="ws-button" onClick={() => nav("account/orders")}>
-          Lihat status pesanan
+          Lihat Status Pesanan
         </button>
         <p>
-          Status pesanan diperbarui setelah pembayaran berhasil dikonfirmasi.
+          {isCod
+            ? "Status pesanan dapat dipantau berkala pada halaman riwayat pesanan."
+            : "Status pesanan diperbarui setelah pembayaran berhasil dikonfirmasi."}
         </p>
       </section>
     </Shell>

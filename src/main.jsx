@@ -31,6 +31,7 @@ import { categories, colorLabel, money, parseRupiah } from "./data";
 import RupiahInput from "./RupiahInput.jsx";
 import { categoryLabel, catalogCategories, mainCategories, getMainCategories, getSubcategories, mainCategoryLabel } from "./catalog";
 import { storage, api } from "./store";
+import { getPermittedDestination, ADMIN_ROLES } from "./routes";
 import "./styles.css";
 const Admin = lazy(() => import("./Admin.jsx"));
 const Auth = lazy(() => import("./Auth.jsx"));
@@ -80,15 +81,42 @@ class ErrorBoundary extends React.Component {
             <p style={{ color: "#667085", fontSize: "14px", marginBottom: "20px" }}>
               {this.state.error?.message || "Halaman tidak dapat dimuat dengan sempurna."}
             </p>
-            <button
-              className="ws-button primary"
-              onClick={() => {
-                this.setState({ hasError: false, error: null });
-                window.location.reload();
-              }}
-            >
-              Muat Ulang Halaman
-            </button>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                className="ws-button primary"
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  window.location.reload();
+                }}
+              >
+                Muat Ulang Halaman
+              </button>
+              <button
+                className="ws-button"
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  if (this.props.onHome) {
+                    this.props.onHome();
+                  } else {
+                    window.location.hash = "#home";
+                    window.location.reload();
+                  }
+                }}
+              >
+                Kembali ke Beranda
+              </button>
+              {this.props.onLogout && (
+                <button
+                  className="ws-button light"
+                  onClick={() => {
+                    this.setState({ hasError: false, error: null });
+                    this.props.onLogout();
+                  }}
+                >
+                  Keluar dari Akun
+                </button>
+              )}
+            </div>
           </div>
         </div>
       );
@@ -97,10 +125,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-const initialView = () =>
-  routes.includes(location.hash.slice(1).split("/")[0])
-    ? location.hash.slice(1).split("/")[0]
-    : "home";
+const initialView = () => getPermittedDestination(location.hash, null).view;
 function App() {
   const [products, setProducts] = useState([]),
     [activeCategory, setActiveCategory] = useState("Semua"),
@@ -194,9 +219,22 @@ function App() {
       .then((data) => setConfig({ ...data, loaded: true }))
       .catch((e) => notify(e.message));
     api("/me")
-      .then(setUser)
+      .then((u) => {
+        setUser(u);
+        const dest = getPermittedDestination(location.hash, u);
+        if (dest.redirect || (dest.hash && location.hash !== dest.hash)) {
+          history.replaceState(null, "", dest.hash);
+        }
+        setView(dest.view);
+      })
       .catch((e) => {
+        setUser(null);
         if (e.status !== 401) notify(e.message);
+        const dest = getPermittedDestination(location.hash, null);
+        if (dest.redirect || (dest.hash && location.hash !== dest.hash)) {
+          history.replaceState(null, "", dest.hash);
+        }
+        setView(dest.view);
       })
       .finally(() => setAuthReady(true));
   }, []);
@@ -217,33 +255,22 @@ function App() {
     return () => window.removeEventListener("keydown", key);
   }, []);
   useEffect(() => {
+    if (!authReady) return;
     const change = () => {
-      const hash = location.hash.replace(/^#/, "");
-      const top = hash.split("/")[0];
-      if (user?.role === "customer" && (top === "cart" || top === "wishlist")) {
-        history.replaceState(null, "", "#account/" + top);
-        setView("account");
-        return;
+      const dest = getPermittedDestination(location.hash, user);
+      if (dest.redirect || (dest.hash && location.hash !== dest.hash)) {
+        history.replaceState(null, "", dest.hash);
       }
-      setView(initialView());
+      setView(dest.view);
     };
+    change();
     window.addEventListener("hashchange", change);
     window.addEventListener("popstate", change);
     return () => {
       window.removeEventListener("hashchange", change);
       window.removeEventListener("popstate", change);
     };
-  }, [user?.role]);
-  useEffect(() => {
-    if (!authReady) return;
-    if (user?.role === "customer") {
-      const hash = location.hash.replace(/^#/, "");
-      if (hash === "cart" || hash === "wishlist") {
-        history.replaceState(null, "", "#account/" + hash);
-        setView("account");
-      }
-    }
-  }, [authReady, user?.role]);
+  }, [authReady, user?.id, user?.role]);
   useEffect(() => {
     if (!detail && !searchOpen && !menu && !info) return;
     const previous = document.activeElement;
@@ -280,40 +307,65 @@ function App() {
       previous?.focus?.();
     };
   }, [detail, searchOpen, menu, info]);
-  const nav = (v, keepDirect = false) => {
-    let target = v;
-    if (user?.role === "customer") {
-      if (v === "cart" || v === "#cart") target = "account/cart";
-      else if (v === "wishlist" || v === "#wishlist") target = "account/wishlist";
+  const nav = (v, keepDirect = false, replace = false) => {
+    const rawTarget = String(v).startsWith("#") ? v : "#" + v;
+    const dest = getPermittedDestination(rawTarget, user);
+    const targetHash = dest.hash;
+    const targetView = dest.view;
+
+    if ((v === 'checkout' || v === 'payment') && !keepDirect) {
+      if (v === 'checkout') {
+        setDirectPurchase(null);
+        storage.write('direct:' + (user?.id || 'guest'), null);
+      }
     }
-    if (target === 'checkout' && !keepDirect) {
-      setDirectPurchase(null);
-      storage.write('direct:' + (user?.id || 'guest'), null);
-    }
-    const targetHash = "#" + (target === "success" ? "account" : target);
-    if (target === "success") {
+    if (v === "success" || replace || dest.redirect) {
       history.replaceState(null, "", targetHash);
     } else if (location.hash !== targetHash) {
       history.pushState(null, "", targetHash);
     }
-    setView(target.split("/")[0]);
-    if (target !== 'success') window.dispatchEvent(new HashChangeEvent('hashchange'));
+    setView(targetView);
+    if (v !== 'success') window.dispatchEvent(new HashChangeEvent('hashchange'));
     setMenu(false);
     setSearchOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const shop = (cat = "Semua", g = "Semua") => {
-    // Both orderings supported: shop(mainCategory, subcategory) or shop(subcategory, mainCategory)
-    const isMainCat = (val) => mainCategories.some((m) => m.id === val) || ["seprai", "fashion", "home-living"].includes(val);
+    const catsPool = config?.categories?.length ? config.categories : catalogCategories;
+    const isMainCat = (val) => {
+      if (!val || val === "Semua") return false;
+      return catsPool.some(
+        (c) =>
+          (!c.parentId && !c.parent_id) &&
+          (c.id === val ||
+            c.name?.toLowerCase() === String(val).toLowerCase() ||
+            c.label?.toLowerCase() === String(val).toLowerCase())
+      ) || ["bedding", "fashion", "seprai"].includes(val);
+    };
+
     if (isMainCat(cat) && !isMainCat(g)) {
-      setActiveCategory(cat);
+      const match = catsPool.find(
+        (c) =>
+          (!c.parentId && !c.parent_id) &&
+          (c.id === cat ||
+            c.name?.toLowerCase() === String(cat).toLowerCase() ||
+            c.label?.toLowerCase() === String(cat).toLowerCase())
+      );
+      setActiveCategory(match?.id || cat);
       setSubcategory(g);
     } else if (isMainCat(g)) {
-      setActiveCategory(g);
+      const match = catsPool.find(
+        (c) =>
+          (!c.parentId && !c.parent_id) &&
+          (c.id === g ||
+            c.name?.toLowerCase() === String(g).toLowerCase() ||
+            c.label?.toLowerCase() === String(g).toLowerCase())
+      );
+      setActiveCategory(match?.id || g);
       setSubcategory(cat);
     } else {
-      setActiveCategory(g);
-      setSubcategory(cat);
+      setActiveCategory(cat);
+      setSubcategory(g);
     }
     setSearch("");
     nav("catalog");
@@ -558,13 +610,31 @@ function App() {
   }
 
   async function logout() {
+    const prevUserId = user?.id;
     try {
       await api("/auth/logout", { method: "POST" });
+    } catch (e) {
+      console.warn("Logout request failed:", e.message);
+    } finally {
       setUser(null);
       setDetail(null);
-      nav("account");
-    } catch (e) {
-      notify(e.message);
+      setDirectPurchase(null);
+      setPlaced(null);
+      setCart([]);
+      setWish([]);
+      setCoupon("");
+      setCartOwner("guest");
+
+      storage.clearUserSession(prevUserId);
+      storage.write("cart:guest", []);
+      storage.write("wish:guest", []);
+      storage.write("coupon:guest", "");
+      storage.write("direct:guest", null);
+      storage.write("checkout-draft:guest", null);
+
+      history.replaceState(null, "", "#home");
+      setView("home");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
     }
   }
   async function authenticated(u, checkout = false) {
@@ -586,8 +656,19 @@ function App() {
       ]);
       storage.write("wish:guest", []);
     }
+    if (["admin", "manager", "staff"].includes(u.role)) {
+      setCart([]);
+      setWish([]);
+      setCoupon("");
+      setDirectPurchase(null);
+    }
     setUser(u);
-    if (!checkout) nav(u.role === "customer" ? "catalog" : "admin/overview");
+    if (!checkout || ["admin", "manager", "staff"].includes(u.role)) {
+      const target = u.role === "customer"
+        ? "account/overview"
+        : (u.role === "staff" ? "admin/orders" : "admin/overview");
+      nav(target, false, true);
+    }
   }
 
   const productDialog = detail ? (
@@ -789,7 +870,7 @@ function App() {
     );
   if (["admin", "manager", "staff"].includes(user?.role) && view === "admin")
     return (
-      <ErrorBoundary>
+      <ErrorBoundary onLogout={logout} onHome={() => nav(user.role === "staff" ? "admin/orders" : "admin/overview")}>
         <Admin
           user={user}
           notify={notify}
@@ -819,19 +900,38 @@ function App() {
         {feedback}
       </>
     );
-  if (user && view === "admin")
+  if (user?.role === "customer" && view === "admin") {
+    nav("account/overview", false, true);
     return (
       <div className="workspace">
-        <div className="ws-empty">
-          <ShieldCheck size={35} />
-          <h1>Akses khusus administrator</h1>
-          <p>Akun Anda adalah akun pelanggan.</p>
-          <button className="ws-button primary" onClick={() => nav("account")}>
-            Kembali ke akun
-          </button>
+        <div className="ws-loading" role="status">
+          Mengalihkan ke akun pelanggan…
         </div>
       </div>
     );
+  }
+  if (["admin", "manager", "staff"].includes(user?.role) && view === "account") {
+    const adminDest = user.role === "staff" ? "admin/orders" : "admin/overview";
+    nav(adminDest, false, true);
+    return (
+      <div className="workspace">
+        <div className="ws-loading" role="status">
+          Mengalihkan ke panel pengelolaan…
+        </div>
+      </div>
+    );
+  }
+  if (["admin", "manager", "staff"].includes(user?.role) && view !== "admin") {
+    const adminDest = user.role === "staff" ? "admin/orders" : "admin/overview";
+    nav(adminDest, false, true);
+    return (
+      <div className="workspace">
+        <div className="ws-loading" role="status">
+          Mengalihkan ke panel pengelolaan…
+        </div>
+      </div>
+    );
+  }
   const accountProps = {
     user,
     config,
@@ -922,7 +1022,7 @@ function App() {
       </>
     );
   }
-  if (view === "checkout")
+  if (view === "checkout" || view === "payment")
     return (
       <>
         <Checkout
@@ -933,6 +1033,7 @@ function App() {
           coupon={coupon}
           config={config}
           nav={nav}
+          currentView={view}
           onAuthenticated={(u) => authenticated(u, true)}
           onPlaced={(order, buyer, items) => {
             const remaining = directPurchase ? storage.read('cart:' + buyer.id, []) : subtractPurchased(
@@ -969,17 +1070,6 @@ function App() {
     <div
       className={view === "home" ? "modern-storefront" : "catalog-storefront"}
     >
-      {["admin", "manager", "staff"].includes(user?.role) && (
-        <div className="ks-admin-preview-bar">
-          <div className="ks-admin-preview-content">
-            <ShieldCheck size={16} />
-            <span>Mode Pratinjau Toko &mdash; Anda login sebagai <strong>{user.name}</strong> ({user.role})</span>
-          </div>
-          <button className="ks-admin-preview-btn" onClick={() => nav("admin/overview")}>
-            Kembali ke Panel Admin &rarr;
-          </button>
-        </div>
-      )}
       <StoreHeader
         config={config}
         nav={nav}
@@ -1059,9 +1149,11 @@ function App() {
               <span className="eyebrow">
                 {activeCategory === "fashion"
                   ? "KINTSUGI APPAREL & FASHION"
-                  : activeCategory === "home-living"
-                    ? "KINTSUGI LIVING ESSENTIALS"
-                    : "KINTSUGI BEDROOM COLLECTION"}
+                  : activeCategory === "bedding" || activeCategory === "seprai"
+                    ? "KINTSUGI BEDDING COLLECTION"
+                    : activeCategory !== "Semua"
+                      ? ("KINTSUGI " + mainCategoryLabel(activeCategory, allCategories).toUpperCase())
+                      : "KINTSUGI BEDDING & FASHION COLLECTION"}
               </span>
               <h1>
                 {view === "wishlist"
@@ -1079,9 +1171,11 @@ function App() {
                   ? "Simpan hari ini. Temukan lagi saat Anda siap."
                   : activeCategory === "fashion"
                     ? "Busana kasual pria & wanita, kemeja linen, celana chino, dress floral, dan outerwear berkualitas."
-                    : activeCategory === "home-living"
-                      ? "Selimut fleece lembut, bantal silikon hotel, dan handuk katun bambu untuk kenyamanan rumah Anda."
-                      : "Sprei fitted, set sprei spring bed, dan pelindung kasur dengan bahan katun sejuk dan rapi."}
+                    : activeCategory === "bedding" || activeCategory === "seprai"
+                      ? "Sprei katun Jepang, bed cover, sarung bantal guling, pelindung kasur, dan selimut untuk kenyamanan tidur terbaik."
+                      : activeCategory !== "Semua"
+                        ? `Koleksi produk berkualitas untuk ${mainCategoryLabel(activeCategory, allCategories)}.`
+                        : "Koleksi lengkap perlengkapan tidur (bedding) dan busana harian (fashion) berkualitas tinggi."}
               </p>
             </div>
             <span>{catalog.total} produk</span>
@@ -1093,30 +1187,135 @@ function App() {
                 <h3>Kategori</h3>
                 <div className="catalog-category-filter">
                   {activeCategory !== "Semua" ? (
-                    subcategoriesList.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className={subcategory === s.id ? "active is-active" : ""}
-                        onClick={() => setSubcategory(s.id)}
+                    <div className="catalog-cat-subgroup">
+                      {/* Header Nama Kategori Utama sebagai penanda aktif */}
+                      <div
+                        className="catalog-cat-group-title"
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "8px",
+                        }}
                       >
-                        <span>{s.label || s.name}</span>
+                        <strong
+                          style={{
+                            color: "var(--ks-teal, #0a596b)",
+                            fontSize: "12px",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                          }}
+                        >
+                          {mainCategoryLabel(activeCategory, allCategories)}
+                        </strong>
+                      </div>
+
+                      {/* Tombol Lihat Semua Produk di Kategori Ini */}
+                      <button
+                        key="all-in-cat"
+                        type="button"
+                        className={
+                          "catalog-sub-btn " +
+                          (subcategory === "Semua" ? "active is-active" : "")
+                        }
+                        onClick={() => setSubcategory("Semua")}
+                        style={{ marginBottom: "6px" }}
+                      >
+                        <span>
+                          Semua {mainCategoryLabel(activeCategory, allCategories)}
+                        </span>
                         <ChevronRight size={13} />
                       </button>
-                    ))
+
+                      {/* Daftar Subkategori Khusus Kategori Ini */}
+                      {subcategoriesList.length > 0 ? (
+                        subcategoriesList.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className={
+                              "catalog-sub-btn " +
+                              (subcategory === s.id ? "active is-active" : "")
+                            }
+                            onClick={() => setSubcategory(s.id)}
+                          >
+                            <span>{s.label || s.name}</span>
+                            <ChevronRight size={13} />
+                          </button>
+                        ))
+                      ) : (
+                        <div
+                          className="catalog-empty-subs"
+                          style={{
+                            padding: "10px 12px",
+                            fontSize: "12px",
+                            color: "var(--ws-muted, #64748b)",
+                            background: "#f8faf9",
+                            borderRadius: "6px",
+                            margin: "4px 0 8px",
+                            border: "1px dashed var(--ks-line, #dce7e7)",
+                          }}
+                        >
+                          Belum ada subkategori untuk{" "}
+                          {mainCategoryLabel(activeCategory, allCategories)}.
+                        </div>
+                      )}
+
+                      {/* Tombol Kembali ke Semua Kategori */}
+                      <button
+                        type="button"
+                        className="ws-link"
+                        onClick={() => {
+                          setActiveCategory("Semua");
+                          setSubcategory("Semua");
+                        }}
+                        style={{
+                          marginTop: "14px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "12px",
+                          color: "var(--ks-muted, #666)",
+                        }}
+                      >
+                        <ArrowLeft size={13} /> Lihat Semua Kategori
+                      </button>
+                    </div>
                   ) : (
                     mainCats.map((m) => {
                       const subs = getSubcategories(allCategories, m.id);
                       return (
                         <div key={m.id} className="catalog-cat-subgroup">
-                          <div className="catalog-cat-group-title">
+                          <button
+                            type="button"
+                            className="catalog-cat-group-title"
+                            style={{
+                              width: "100%",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              background: "none",
+                              border: "none",
+                              padding: "4px 6px",
+                              cursor: "pointer",
+                              textAlign: "left",
+                            }}
+                            onClick={() => {
+                              setActiveCategory(m.id);
+                              setSubcategory("Semua");
+                            }}
+                          >
                             <strong>{m.label || m.name}</strong>
-                          </div>
+                            <ChevronRight size={12} />
+                          </button>
                           {subs.map((s) => (
                             <button
                               key={s.id}
                               type="button"
-                              className={"catalog-sub-btn " + (subcategory === s.id ? "active is-active" : "")}
+                              className={
+                                "catalog-sub-btn " +
+                                (subcategory === s.id ? "active is-active" : "")
+                              }
                               onClick={() => {
                                 setActiveCategory(m.id);
                                 setSubcategory(s.id);
@@ -1150,37 +1349,164 @@ function App() {
                 </summary>
                 <div className="filter-fields catalog-mobile-cat-options">
                   {activeCategory !== "Semua" ? (
-                    subcategoriesList.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className={"catalog-cat-pill " + (subcategory === s.id ? "active is-active" : "")}
-                        onClick={(e) => {
-                          setSubcategory(s.id);
-                          e.currentTarget.closest("details")?.removeAttribute("open");
+                    <div
+                      className="catalog-cat-subgroup"
+                      style={{ width: "100%" }}
+                    >
+                      {/* Header Nama Kategori Utama Mobile */}
+                      <div
+                        className="catalog-cat-group-title"
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "8px",
+                          padding: "4px 8px",
+                          fontWeight: "700",
+                          color: "var(--ks-teal, #0a596b)",
                         }}
                       >
-                        <span>{s.label || s.name}</span>
+                        <span>
+                          {mainCategoryLabel(activeCategory, allCategories)}
+                        </span>
+                      </div>
+
+                      {/* Tombol Lihat Semua Produk di Kategori Ini */}
+                      <button
+                        key="all-in-cat-mobile"
+                        type="button"
+                        className={
+                          "catalog-cat-pill " +
+                          (subcategory === "Semua" ? "active is-active" : "")
+                        }
+                        onClick={(e) => {
+                          setSubcategory("Semua");
+                          e.currentTarget
+                            .closest("details")
+                            ?.removeAttribute("open");
+                        }}
+                        style={{
+                          width: "100%",
+                          justifyContent: "space-between",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span>
+                          Semua {mainCategoryLabel(activeCategory, allCategories)}
+                        </span>
                         <ChevronRight size={13} />
                       </button>
-                    ))
+
+                      {/* Daftar Subkategori Khusus Kategori Ini */}
+                      {subcategoriesList.length > 0 ? (
+                        subcategoriesList.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className={
+                              "catalog-cat-pill " +
+                              (subcategory === s.id ? "active is-active" : "")
+                            }
+                            onClick={(e) => {
+                              setSubcategory(s.id);
+                              e.currentTarget
+                                .closest("details")
+                                ?.removeAttribute("open");
+                            }}
+                            style={{
+                              width: "100%",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <span>{s.label || s.name}</span>
+                            <ChevronRight size={13} />
+                          </button>
+                        ))
+                      ) : (
+                        <div
+                          className="catalog-empty-subs"
+                          style={{
+                            padding: "10px 12px",
+                            fontSize: "12px",
+                            color: "var(--ws-muted, #64748b)",
+                            background: "#f8faf9",
+                            borderRadius: "6px",
+                            margin: "4px 0 8px",
+                            border: "1px dashed var(--ks-line, #dce7e7)",
+                          }}
+                        >
+                          Belum ada subkategori untuk{" "}
+                          {mainCategoryLabel(activeCategory, allCategories)}.
+                        </div>
+                      )}
+
+                      {/* Tombol Kembali ke Semua Kategori */}
+                      <button
+                        type="button"
+                        className="ws-link"
+                        onClick={(e) => {
+                          setActiveCategory("Semua");
+                          setSubcategory("Semua");
+                          e.currentTarget
+                            .closest("details")
+                            ?.removeAttribute("open");
+                        }}
+                        style={{
+                          marginTop: "10px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "12px",
+                          padding: "6px 8px",
+                        }}
+                      >
+                        <ArrowLeft size={13} /> Lihat Semua Kategori
+                      </button>
+                    </div>
                   ) : (
                     mainCats.map((m) => {
                       const subs = getSubcategories(allCategories, m.id);
                       return (
                         <div key={m.id} className="catalog-cat-subgroup">
-                          <div className="catalog-cat-group-title">
+                          <button
+                            type="button"
+                            className="catalog-cat-group-title"
+                            style={{
+                              width: "100%",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              background: "none",
+                              border: "none",
+                              padding: "4px 6px",
+                              cursor: "pointer",
+                              textAlign: "left",
+                            }}
+                            onClick={(e) => {
+                              setActiveCategory(m.id);
+                              setSubcategory("Semua");
+                              e.currentTarget
+                                .closest("details")
+                                ?.removeAttribute("open");
+                            }}
+                          >
                             <strong>{m.label || m.name}</strong>
-                          </div>
+                            <ChevronRight size={12} />
+                          </button>
                           {subs.map((s) => (
                             <button
                               key={s.id}
                               type="button"
-                              className={"catalog-sub-btn catalog-cat-pill " + (subcategory === s.id ? "active is-active" : "")}
+                              className={
+                                "catalog-sub-btn catalog-cat-pill " +
+                                (subcategory === s.id ? "active is-active" : "")
+                              }
                               onClick={(e) => {
                                 setActiveCategory(m.id);
                                 setSubcategory(s.id);
-                                e.currentTarget.closest("details")?.removeAttribute("open");
+                                e.currentTarget
+                                  .closest("details")
+                                  ?.removeAttribute("open");
                               }}
                             >
                               <span>{s.label || s.name}</span>

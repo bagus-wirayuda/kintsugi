@@ -1,20 +1,29 @@
 import bcrypt from "bcryptjs";
 import { randomInt, randomUUID, randomBytes, createHash } from "node:crypto";
 import { z } from "zod";
-import { fail, sendWhatsApp, normalizePhone } from "./integrations.js";
+import {
+  fail,
+  sendWhatsApp,
+  normalizePhone,
+  renderWhatsAppTemplate,
+} from "./integrations.js";
 
 const phoneSchema = z
   .string()
   .regex(/^[0-9+ ()-]{8,20}$/, "Masukkan nomor WhatsApp yang valid.")
-  .transform((s) => normalizePhone(s));
+  .transform((s) => normalizePhone(s))
+  .refine(
+    (s) => /^628\d{7,13}$/.test(s),
+    "Masukkan nomor WhatsApp yang valid (contoh: 081234567890).",
+  );
 
 export const passwordSchema = z
   .string()
-  .min(8)
+  .min(8, "Kata sandi minimal 8 karakter.")
   .max(72)
   .refine((s) => Buffer.byteLength(s) <= 72, "Kata sandi maksimal 72 byte.");
 
-export function createOtp({ pool, env, transport, session }) {
+export function createOtp({ pool, env, transport, session, cookieOptions }) {
   async function issue(phone, purpose, payload) {
     const c = await pool.connect(),
       id = randomUUID(),
@@ -49,24 +58,47 @@ export function createOtp({ pool, env, transport, session }) {
       c.release();
     }
     try {
-      const purposeText = {
-        register: "Verifikasi pendaftaran akun Anda.",
-        login: "Gunakan kode ini untuk masuk ke akun Anda.",
-        reset: "Gunakan kode ini untuk mengatur ulang kata sandi.",
-      }[purpose];
+      let otpTemplate =
+        "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].";
+      let brand = "Kintsugi";
+      try {
+        const [templateRow, brandRow] = await Promise.all([
+          pool.query(
+            "SELECT setting_value FROM store_settings WHERE setting_key='waTemplates'",
+          ),
+          pool.query(
+            "SELECT setting_value FROM store_settings WHERE setting_key='brand'",
+          ),
+        ]);
+        const rawTemplates =
+          typeof templateRow.rows[0]?.setting_value === "string"
+            ? JSON.parse(templateRow.rows[0].setting_value)
+            : templateRow.rows[0]?.setting_value;
+        if (rawTemplates?.otp) otpTemplate = rawTemplates.otp;
+        const rawBrand =
+          typeof brandRow.rows[0]?.setting_value === "string"
+            ? JSON.parse(brandRow.rows[0].setting_value)
+            : brandRow.rows[0]?.setting_value;
+        if (rawBrand) brand = String(rawBrand);
+      } catch (_) {}
+
+      let message = renderWhatsAppTemplate(otpTemplate, {
+        nama: payload?.name || "Pelanggan",
+        kode_otp: code,
+        toko: brand,
+      });
+
+      if (!message.includes(code)) {
+        message += `\n\nKode OTP Anda: *${code}*`;
+      }
+
       await sendWhatsApp(
         {
           id: "otp/" + id,
           phone,
           recipient: payload?.email,
-          subject: "Kode verifikasi Kintsugi: " + code,
-          message:
-            `*Kintsugi - Kode Verifikasi*\n\n` +
-            `${purposeText}\n\n` +
-            `Kode OTP Anda: *${code}*\n\n` +
-            `Kode berlaku 10 menit dan hanya dapat digunakan satu kali.\n` +
-            `Jangan bagikan kode ini kepada siapa pun.\n\n` +
-            `Jika Anda tidak meminta kode ini, abaikan pesan ini.`,
+          subject: "Kode verifikasi " + brand + ": " + code,
+          message,
         },
         env,
         transport,
@@ -144,12 +176,26 @@ export function createOtp({ pool, env, transport, session }) {
         phone: phoneSchema,
         consent: z.literal(true),
         email: z.string().email().max(254).optional().or(z.literal("")),
-        password: z.string().min(8).max(72).optional(),
+        password: z.string().min(8, "Kata sandi minimal 8 karakter.").max(72).optional(),
       })
       .parse(body);
-    const user = (
-      await pool.query("SELECT id,role FROM users WHERE phone=?", [f.phone])
+    const altPhone = f.phone.startsWith("62") ? "0" + f.phone.slice(2) : f.phone;
+    let user = (
+      await pool.query(
+        "SELECT id, name, role, phone, email FROM users WHERE phone=? OR phone=? LIMIT 1",
+        [f.phone, altPhone]
+      )
     ).rows[0];
+
+    if (!user && f.email && f.email.trim()) {
+      user = (
+        await pool.query(
+          "SELECT id, name, role, phone, email FROM users WHERE email=? LIMIT 1",
+          [f.email.trim().toLowerCase()]
+        )
+      ).rows[0];
+    }
+
     if (user?.role === "admin")
       throw fail(
         403,
@@ -304,7 +350,14 @@ export function createOtp({ pool, env, transport, session }) {
       c.release();
     }
     if (purpose === "reset") {
-      res.clearCookie("lj_session", { path: "/" });
+      res.clearCookie("lj_session", {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: env.NODE_ENV === "production",
+        ...(cookieOptions || {}),
+        maxAge: undefined,
+      });
       return {
         reset: true,
         message: "Kata sandi berhasil diperbarui. Silakan masuk.",

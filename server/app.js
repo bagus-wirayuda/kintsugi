@@ -8,7 +8,6 @@ import { z } from "zod";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { paymentMethods } from '../src/payment-methods.js';
 import {
   orderSchema,
   calculateTotals,
@@ -78,6 +77,15 @@ const variantSchema = z.object({
   widthCm: z.number().int().min(0).max(500).optional(),
   heightCm: z.number().int().min(0).max(500).optional(),
 });
+export const DEFAULT_WA_TEMPLATES = {
+  otp: "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].",
+  purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] sebesar [total] berhasil dikonfirmasi. Pesanan Anda segera disiapkan oleh [toko]. Terima kasih!",
+  processing: "Halo [nama], pesanan [nomor_pesanan] sedang diproses dan dikemas dengan teliti oleh tim [toko]. Kami akan mengabari saat pesanan siap dikirim.",
+  shipped: "Halo [nama], pesanan [nomor_pesanan] telah dikirim menggunakan kurir [kurir]. Nomor resi pengiriman Anda: *[nomor_resi]*. Lacak pesanan Anda secara berkala.",
+  delivered: "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
+  cancelled: "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
+};
+
 export function createApp(pool, options = {}) {
   const env = options.env || process.env;
   const gateway = options.gateway || createGateway(env);
@@ -227,9 +235,13 @@ export function createApp(pool, options = {}) {
   }
   const authLimit = rateLimit({
     windowMs: 900000,
-    limit: options.test ? 500 : 30,
+    limit: options.test ? 500 : 60,
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    message: {
+      error: "Terlalu banyak percobaan autentikasi. Silakan tunggu beberapa menit sebelum mencoba kembali.",
+      code: "RATE_LIMITED",
+    },
   });
   app.get("/api/health", async (req, res) => {
     await pool.query("SELECT 1");
@@ -241,12 +253,18 @@ export function createApp(pool, options = {}) {
       sandbox: gateway.sandbox,
     });
   });
+
   async function readStoreSettings() {
     const rows = (await pool.query("SELECT setting_key,setting_value FROM store_settings")).rows;
-    return Object.fromEntries(rows.map(({ setting_key, setting_value }) => [
+    const settings = Object.fromEntries(rows.map(({ setting_key, setting_value }) => [
       setting_key,
-      setting_value,
+      typeof setting_value === "string" ? (() => { try { return JSON.parse(setting_value); } catch { return setting_value; } })() : setting_value,
     ]));
+    settings.waTemplates = {
+      ...DEFAULT_WA_TEMPLATES,
+      ...(settings.waTemplates || {}),
+    };
+    return settings;
   }
   const promotionPrice = (price, percent) => Math.max(1000, Math.round(Number(price) * (100 - Number(percent)) / 100));
   async function readProductPromotions(productIds) {
@@ -311,26 +329,52 @@ export function createApp(pool, options = {}) {
     return result;
   }
   async function deliveryFor(shipping, option, items) {
-    if(shipping==="pickup") return {delivery:0,name:"Ambil pesanan"};
-    if(shipping==="local") { const settings=await readStoreSettings(); return {delivery:Number(settings.localDeliveryFee)||0,name:"Pengiriman lokal"}; }
-    if(shipping==="rajaongkir") {
-      if(!option?.destinationId||!option.courier||!option.service) throw fail(400,"Pilih alamat tujuan dan layanan kurir terlebih dahulu.");
-      const rates=await rajaRates(option.destinationId,items);
-      const match=rates.find((rate)=>rate.courier===option.courier&&rate.service===option.service);
-      if(!match) throw fail(409,"Tarif pengiriman berubah. Pilih ulang layanan kurir.");
-      return {delivery:match.cost,name:`${match.courierName} ${match.service}`,option:{...option,cost:match.cost,etd:match.etd}};
+    const settings = await readStoreSettings();
+    const manualFee = Number(settings.manualShippingFee ?? settings.localDeliveryFee ?? 15000);
+    const subtotal = items.reduce((s, i) => s + (Number(i.price) || 0) * (Number(i.quantity) || 1), 0);
+    const isFreeShipping = subtotal >= 699000;
+
+    if (shipping === "pickup") {
+      return {
+        delivery: 0,
+        name: "Ambil di Toko",
+        option: { courier: "TOKO", service: "Ambil Sendiri", cost: 0 },
+      };
     }
-    const total=calculateTotals(items,"",shipping);
-    return {delivery:total.delivery,name:shipping==="express"?"Ekspres":"Reguler"};
+
+    if (shipping === "express") {
+      const expressFee = isFreeShipping ? 0 : Math.max(manualFee, 35000);
+      return {
+        delivery: expressFee,
+        name: isFreeShipping ? "Ekspres (Gratis Ongkir)" : "Pengiriman Ekspres Toko",
+        option: { courier: "TOKO", service: "Ekspres", cost: expressFee },
+      };
+    }
+
+    const fee = isFreeShipping ? 0 : manualFee;
+    const name = isFreeShipping
+      ? "Pengiriman Standar (Gratis Ongkir)"
+      : (shipping === "local" ? "Kurir Toko / Pengiriman Standar" : "Pengiriman Standar Toko");
+
+    return {
+      delivery: fee,
+      name,
+      option: {
+        courier: "TOKO",
+        service: "Standar",
+        cost: fee,
+        ...(option && typeof option === "object" ? option : {}),
+        ...(isFreeShipping ? { cost: 0 } : {}),
+      },
+    };
   }
-  app.get("/api/shipping/destinations", async (req,res)=>{
-    const q=z.object({search:z.string().trim().min(3).max(100)}).parse(req.query);
-    const data=await rajaFetch(`destination/domestic-destination?${new URLSearchParams({search:q.search,limit:"10",offset:"0"})}`);
-    res.json((Array.isArray(data)?data:[]).map((row)=>({id:Number(row.id),label:row.label||row.name||row.subdistrict_name||"",province:row.province_name||"",city:row.city_name||""})).filter((row)=>row.id&&row.label));
+  app.get("/api/shipping/destinations", async (_req, res) => {
+    // API pengiriman otomatis dinonaktifkan sementara demi stabilitas checkout
+    res.json([]);
   });
-  app.post("/api/shipping/rates", (req,res,next)=>req.user?customer(req,res,next):next(), async (req,res)=>{
-    const f=z.object({destinationId:z.coerce.number().int().positive(),items:z.array(z.object({id:z.string().max(40),quantity:z.number().int().min(1).max(99)})).min(1).max(50)}).parse(req.body);
-    res.json(await rajaRates(f.destinationId,f.items));
+  app.post("/api/shipping/rates", (req, res, next) => (req.user ? customer(req, res, next) : next()), async (_req, res) => {
+    // API pengiriman otomatis dinonaktifkan sementara demi stabilitas checkout
+    res.json([]);
   });
   app.get("/api/config", async (req, res) => {
     const [settings, categories, methods, promotions] = await Promise.all([
@@ -350,7 +394,11 @@ export function createApp(pool, options = {}) {
       paymentMethods: methods.rows,
       categories: categories.rows.map(({ id, name, parent_id }) => ({ id, label: name, name, parentId: parent_id, parent_id })),
       promotions,
-      shipping: { rajaOngkir: Boolean(env.RAJAONGKIR_API_KEY && (settings.rajaOriginId || env.RAJAONGKIR_ORIGIN_ID)), localDeliveryFee: settings.localDeliveryFee || 0 },
+      shipping: {
+        rajaOngkir: false,
+        manualShippingFee: Number(settings.manualShippingFee ?? settings.localDeliveryFee ?? 15000),
+        localDeliveryFee: Number(settings.localDeliveryFee ?? settings.manualShippingFee ?? 15000),
+      },
       sandbox: gateway.sandbox,
       invoiceDuration: Number(env.INVOICE_DURATION) || 3600,
       whatsappConfigured: Boolean(env.WABLAS_TOKEN),
@@ -360,11 +408,12 @@ export function createApp(pool, options = {}) {
     const [settings, categories, methods, promotions] = await Promise.all([
       readStoreSettings(),
       pool.query("SELECT id,name,parent_id,active,sort_order FROM product_categories ORDER BY sort_order,name"),
-      pool.query("SELECT id,name,group_name AS `group`,detail,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name"),
+      pool.query("SELECT id,name,group_name AS `group`,group_name,detail,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name"),
       pool.query("SELECT sp.*,p.name AS product_name,p.price AS product_price,p.image AS product_image FROM store_promotions sp JOIN products p ON p.id=sp.product_id ORDER BY sp.sort_order,sp.created_at DESC"),
     ]);
     res.json({
       settings,
+      defaultWaTemplates: DEFAULT_WA_TEMPLATES,
       categories: categories.rows.map((c) => ({ ...c, parentId: c.parent_id })),
       paymentMethods: methods.rows,
       promotions: promotions.rows,
@@ -384,11 +433,18 @@ export function createApp(pool, options = {}) {
       paymentMethods: z.array(z.object({ id: z.string().trim().min(2).max(60), enabled: z.boolean(), sortOrder: z.number().int().min(0).max(10000) })).max(40).optional(),
     }).strict().parse(req.body);
     if (f.settings) {
-      const allowed = new Set(["brand","announcementText","contactEmail","storeAddress","logo","heroImage","heroKicker","heroTitle","heroText","homeSections","departmentKicker","departmentTitle","departmentProducts","essentialsKicker","essentialsTitle","essentialsProducts","promoKicker","promoTitle","promoText","promoImage","promoProductId","promoPrice","promoOldPrice","localDeliveryFee","packageWeightGrams","rajaOriginId","waTemplates"]);
+      const allowed = new Set(["brand","announcementText","contactEmail","storeAddress","logo","heroImage","heroKicker","heroTitle","heroText","homeSections","departmentKicker","departmentTitle","departmentProducts","essentialsKicker","essentialsTitle","essentialsProducts","promoKicker","promoTitle","promoText","promoImage","promoProductId","promoPrice","promoOldPrice","localDeliveryFee","manualShippingFee","packageWeightGrams","rajaOriginId","waTemplates"]);
       for (const [key, value] of Object.entries(f.settings)) {
         if (!allowed.has(key)) throw fail(400, "Pengaturan tidak dikenal.");
         if (key === "waTemplates") {
-          const templates = z.object({ purchased: z.string().max(2000), processing: z.string().max(2000), shipped: z.string().max(2000), delivered: z.string().max(2000) }).strict().parse(value);
+          const templates = z.object({
+            otp: z.string().max(2000).optional(),
+            purchased: z.string().max(2000).optional(),
+            processing: z.string().max(2000).optional(),
+            shipped: z.string().max(2000).optional(),
+            delivered: z.string().max(2000).optional(),
+            cancelled: z.string().max(2000).optional(),
+          }).passthrough().parse(value);
           await pool.query("INSERT INTO store_settings(setting_key,setting_value) VALUES(?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)", [key, JSON.stringify(templates)]);
         } else if (key === "homeSections") {
           const sections = z.array(z.object({
@@ -398,7 +454,7 @@ export function createApp(pool, options = {}) {
             productIds: z.array(z.string().trim().max(40)).max(100).optional().default([]),
           })).max(50).parse(value);
           await pool.query("INSERT INTO store_settings(setting_key,setting_value) VALUES(?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)", [key, JSON.stringify(sections)]);
-        } else if (["promoPrice","promoOldPrice","localDeliveryFee","packageWeightGrams"].includes(key)) {
+        } else if (["promoPrice","promoOldPrice","localDeliveryFee","manualShippingFee","packageWeightGrams"].includes(key)) {
           const number = z.preprocess((v) => parseMoneyInt(v, v), z.number().int().min(0).max(100000000)).parse(value);
           await pool.query("INSERT INTO store_settings(setting_key,setting_value) VALUES(?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)", [key, JSON.stringify(number)]);
         } else if (["essentialsProducts","departmentProducts"].includes(key)) {
@@ -625,12 +681,60 @@ export function createApp(pool, options = {}) {
     }
     res.json({ok:true});
   });
-  app.post("/api/admin/payment-methods", auth, admin, async (req,res) => {
-    const f = z.object({ id: z.string().min(2).max(60), name: z.string().trim().min(2).max(100), group: z.string().trim().max(100).default("Pembayaran online"), detail: z.string().trim().max(250).default("Bayar aman saat checkout") }).strict().parse(req.body);
-    if (!paymentMethods.some((method) => method.id === f.id)) throw fail(400,"Pilih kanal pembayaran yang didukung Xendit.");
-    const nextOrder=Number((await pool.query("SELECT COALESCE(MAX(sort_order)+1,0) AS n FROM store_payment_methods")).rows[0].n);
-    await pool.query("INSERT INTO store_payment_methods(id,name,group_name,detail,enabled,sort_order) VALUES(?,?,?,?,TRUE,?) ON DUPLICATE KEY UPDATE name=VALUES(name),group_name=VALUES(group_name),detail=VALUES(detail),enabled=TRUE",[f.id,f.name,f.group,f.detail,nextOrder]);
-    res.status(201).json({ ok:true });
+  app.get("/api/admin/payment-methods", auth, admin, async (req, res) => {
+    const rows = (await pool.query(
+      "SELECT id,name,group_name AS `group`,group_name,detail,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name"
+    )).rows;
+    res.json(rows);
+  });
+  app.post("/api/admin/payment-methods", auth, admin, async (req, res) => {
+    const f = z.object({
+      id: z.string().trim().min(2).max(60).optional(),
+      name: z.string().trim().min(2).max(100),
+      group: z.enum(["Bank", "E-Wallet", "COD"]),
+      detail: z.string().trim().max(250).default(""),
+      enabled: z.boolean().default(true),
+    }).strict().parse(req.body);
+
+    const generatedId = f.id || (f.group === "COD" ? "COD" : `${f.group.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${randomBytes(4).toString("hex")}`);
+    const nextOrder = Number((await pool.query("SELECT COALESCE(MAX(sort_order)+1,0) AS n FROM store_payment_methods")).rows[0].n);
+    await pool.query(
+      `INSERT INTO store_payment_methods(id,name,group_name,detail,enabled,sort_order)
+       VALUES(?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE name=VALUES(name),group_name=VALUES(group_name),detail=VALUES(detail),enabled=VALUES(enabled)`,
+      [generatedId, f.name, f.group, f.detail, f.enabled, nextOrder]
+    );
+    res.status(201).json({ ok: true, id: generatedId });
+  });
+  app.patch("/api/admin/payment-methods/:id", auth, admin, async (req, res) => {
+    const f = z.object({
+      name: z.string().trim().min(2).max(100).optional(),
+      group: z.enum(["Bank", "E-Wallet", "COD"]).optional(),
+      detail: z.string().trim().max(250).optional(),
+      enabled: z.boolean().optional(),
+      sortOrder: z.number().int().min(0).max(10000).optional(),
+    }).strict().parse(req.body);
+
+    const row = (await pool.query("SELECT * FROM store_payment_methods WHERE id=?", [req.params.id])).rows[0];
+    if (!row) throw fail(404, "Metode pembayaran tidak ditemukan.");
+
+    const updatedName = f.name !== undefined ? f.name : row.name;
+    const updatedGroup = f.group !== undefined ? f.group : row.group_name;
+    const updatedDetail = f.detail !== undefined ? f.detail : row.detail;
+    const updatedEnabled = f.enabled !== undefined ? f.enabled : row.enabled;
+    const updatedSort = f.sortOrder !== undefined ? f.sortOrder : row.sort_order;
+
+    await pool.query(
+      "UPDATE store_payment_methods SET name=?,group_name=?,detail=?,enabled=?,sort_order=? WHERE id=?",
+      [updatedName, updatedGroup, updatedDetail, updatedEnabled, updatedSort, req.params.id]
+    );
+    res.json({ ok: true });
+  });
+  app.delete("/api/admin/payment-methods/:id", auth, admin, async (req, res) => {
+    const row = (await pool.query("SELECT id FROM store_payment_methods WHERE id=?", [req.params.id])).rows[0];
+    if (!row) throw fail(404, "Metode pembayaran tidak ditemukan.");
+    await pool.query("DELETE FROM store_payment_methods WHERE id=?", [req.params.id]);
+    res.json({ ok: true });
   });
   app.post("/api/admin/uploads", auth, admin, async (req,res) => {
     const f = z.object({ data: z.string().max(7_000_000) }).parse(req.body);
@@ -650,6 +754,7 @@ export function createApp(pool, options = {}) {
     env,
     transport: options.waTransport || options.mailTransport,
     session,
+    cookieOptions,
   });
   app.post("/api/auth/register", authLimit, async (req, res) =>
     res.status(202).json(await otp.register(req.body)),
@@ -664,25 +769,34 @@ export function createApp(pool, options = {}) {
         email: z.string().optional(),
       })
       .parse(req.body);
-    let exists = false;
-    if (f.phone) {
+    let user = null;
+    if (f.phone && f.phone.trim()) {
       try {
         const phone = normalizePhone(f.phone);
-        const user = (
-          await pool.query("SELECT id FROM users WHERE phone=?", [phone])
+        const alt = phone.startsWith("62") ? "0" + phone.slice(2) : phone;
+        user = (
+          await pool.query(
+            "SELECT id, name, phone, email, role FROM users WHERE phone=? OR phone=? OR phone=? LIMIT 1",
+            [phone, alt, f.phone.trim()]
+          )
         ).rows[0];
-        if (user) exists = true;
       } catch (_) {}
     }
-    if (!exists && f.email) {
-      const user = (
-        await pool.query("SELECT id FROM users WHERE email=?", [
-          f.email.toLowerCase(),
-        ])
+    if (!user && f.email && f.email.trim()) {
+      user = (
+        await pool.query(
+          "SELECT id, name, phone, email, role FROM users WHERE email=? LIMIT 1",
+          [f.email.trim().toLowerCase()]
+        )
       ).rows[0];
-      if (user) exists = true;
     }
-    res.json({ exists, isNew: !exists });
+    const exists = Boolean(user);
+    res.json({
+      exists,
+      isNew: !exists,
+      role: user?.role || "customer",
+      name: user?.name || "",
+    });
   });
   app.post("/api/auth/otp/request", authLimit, async (req, res) =>
     res.status(202).json(await otp.request(req.body)),
@@ -889,12 +1003,32 @@ export function createApp(pool, options = {}) {
     else if (q.category === "Penawaran Terbatas")
       where.push("(p.old_price>p.price OR EXISTS(SELECT 1 FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE))");
     else if (q.category && q.category !== "Semua") {
-      where.push("(p.category=? OR p.subcategory=? OR p.category IN (SELECT id FROM product_categories WHERE parent_id=? OR id=?) OR p.subcategory IN (SELECT id FROM product_categories WHERE parent_id=? OR id=?))");
-      args.push(q.category, q.category, q.category, q.category, q.category, q.category);
+      where.push(
+        "(p.category=? OR p.category IN (SELECT id FROM product_categories WHERE parent_id=? OR id=? OR parent_id IN (SELECT id FROM product_categories WHERE name=? OR id=?)) OR p.category IN (SELECT name FROM product_categories WHERE parent_id=? OR id=? OR parent_id IN (SELECT id FROM product_categories WHERE name=? OR id=?)))"
+      );
+      args.push(
+        q.category,
+        q.category,
+        q.category,
+        q.category,
+        q.category,
+        q.category,
+        q.category,
+        q.category,
+        q.category
+      );
     }
     if (q.subcategory && q.subcategory !== "Semua") {
-      where.push("(p.subcategory=? OR p.category=? OR p.subcategory IN (SELECT id FROM product_categories WHERE name=? OR id=?) OR p.subcategory IN (SELECT name FROM product_categories WHERE name=? OR id=?))");
-      args.push(q.subcategory, q.subcategory, q.subcategory, q.subcategory, q.subcategory, q.subcategory);
+      where.push(
+        "(p.subcategory=? OR p.subcategory IN (SELECT id FROM product_categories WHERE name=? OR id=?) OR p.subcategory IN (SELECT name FROM product_categories WHERE name=? OR id=?))"
+      );
+      args.push(
+        q.subcategory,
+        q.subcategory,
+        q.subcategory,
+        q.subcategory,
+        q.subcategory
+      );
     }
     if (q.ids !== undefined) {
       where.push("p.id IN (?)");
@@ -1002,13 +1136,86 @@ export function createApp(pool, options = {}) {
       throw fail(404, "Produk tidak tersedia atau sudah diarsipkan.");
     res.json((await hydrate(rows, true))[0]);
   });
-  app.get("/api/admin/products", auth, leader, async (req, res) =>
-    res.json(
-      await hydrate(
-        (await pool.query("SELECT * FROM products ORDER BY id")).rows,
+  app.get("/api/admin/products", auth, leader, async (req, res) => {
+    const [productsResult, salesResult] = await Promise.all([
+      pool.query("SELECT * FROM products ORDER BY created_at DESC, id DESC"),
+      pool.query(
+        "SELECT i.product_id, COALESCE(SUM(i.quantity),0) AS sold_units FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.payment_status='PAID' GROUP BY i.product_id"
       ),
-    ),
-  );
+    ]);
+    const salesMap = new Map(
+      salesResult.rows.map((r) => [r.product_id, Number(r.sold_units) || 0])
+    );
+    let items = (await hydrate(productsResult.rows)).map((p) => ({
+      ...p,
+      soldUnits: salesMap.get(p.id) || 0,
+    }));
+
+    // Optional query parameter filtering/sorting
+    const { status, category, subcategory, stock, search, sort } = req.query;
+    if (status && status !== "all") {
+      if (status === "active") items = items.filter((p) => p.active);
+      else if (status === "archived") items = items.filter((p) => !p.active);
+    }
+    if (category && category !== "all") {
+      items = items.filter(
+        (p) =>
+          p.category === category ||
+          String(p.category).toLowerCase() === String(category).toLowerCase()
+      );
+    }
+    if (subcategory && subcategory !== "all") {
+      items = items.filter(
+        (p) =>
+          p.subcategory === subcategory ||
+          String(p.subcategory).toLowerCase() === String(subcategory).toLowerCase()
+      );
+    }
+    if (stock && stock !== "all") {
+      if (stock === "out_of_stock") items = items.filter((p) => (p.stock || 0) <= 0);
+      else if (stock === "in_stock") items = items.filter((p) => (p.stock || 0) > 0);
+      else if (stock === "low_stock") items = items.filter((p) => (p.stock || 0) > 0 && (p.stock || 0) < 5);
+    }
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      items = items.filter((p) =>
+        [p.name, p.sku, p.category, p.subcategory]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+    if (sort) {
+      if (sort === "newest") {
+        items.sort((a, b) => {
+          const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return tB !== tA ? tB - tA : String(b.id).localeCompare(String(a.id));
+        });
+      } else if (sort === "oldest") {
+        items.sort((a, b) => {
+          const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return tA !== tB ? tA - tB : String(a.id).localeCompare(String(b.id));
+        });
+      } else if (sort === "bestseller") {
+        items.sort((a, b) => (Number(b.soldUnits) || 0) - (Number(a.soldUnits) || 0));
+      } else if (sort === "least_sold") {
+        items.sort((a, b) => (Number(a.soldUnits) || 0) - (Number(b.soldUnits) || 0));
+      } else if (sort === "price_high") {
+        items.sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0));
+      } else if (sort === "price_low") {
+        items.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+      } else if (sort === "stock_high") {
+        items.sort((a, b) => (Number(b.stock) || 0) - (Number(a.stock) || 0));
+      } else if (sort === "stock_low") {
+        items.sort((a, b) => (Number(a.stock) || 0) - (Number(b.stock) || 0));
+      }
+    }
+
+    res.json(items);
+  });
   app.get("/api/admin/products/:id/details", auth, leader, async (req,res) => {
     const product=(await pool.query("SELECT * FROM products WHERE id=?",[req.params.id])).rows[0];
     if(!product) throw fail(404,"Produk tidak ditemukan.");
@@ -1100,22 +1307,26 @@ export function createApp(pool, options = {}) {
           stock: p.stock,
         });
       }
-      const shipment=await deliveryFor(f.shipping,f.shippingOption,canonical);
+      const shipment = await deliveryFor(f.shipping, f.shippingOption, canonical);
+      const settings = await readStoreSettings();
+      const manualFee = Number(settings.manualShippingFee ?? settings.localDeliveryFee ?? 15000);
       res.json({
-        ...calculateTotals(canonical, f.coupon, f.shipping, shipment.delivery),
-        shippingName:shipment.name,
-        shippingOption:shipment.option,
+        ...calculateTotals(canonical, f.coupon, f.shipping, shipment.delivery, manualFee),
+        shippingName: shipment.name,
+        shippingOption: shipment.option,
         items: canonical,
       });
     },
   );
   app.post("/api/orders", auth, customer, async (req, res) => {
-    if (!gateway.configured)
-      throw fail(503, "Pembayaran belum tersedia. Hubungi pengelola.");
     const f = orderSchema.parse(req.body),
       items = aggregateItems(f.items);
-    if (!paymentMethods.some((method) => method.id === f.payment) || !(await pool.query("SELECT id FROM store_payment_methods WHERE id=? AND enabled=TRUE",[f.payment])).rows.length)
+    const methodRow = (await pool.query("SELECT id, name, group_name AS `group`, enabled FROM store_payment_methods WHERE id=? AND enabled=TRUE", [f.payment])).rows[0];
+    if (!methodRow)
       throw fail(400, "Metode pembayaran tidak tersedia atau belum diaktifkan admin.");
+    const isCod = methodRow.group === "COD" || methodRow.id === "COD";
+    if (!isCod && !gateway.configured)
+      throw fail(503, "Pembayaran online belum tersedia. Hubungi pengelola.");
     const c = await pool.connect();
     let id;
     try {
@@ -1159,8 +1370,10 @@ export function createApp(pool, options = {}) {
             [i.quantity, i.id, i.size, i.color],
           );
         }
-        const shipment=await deliveryFor(f.shipping,f.shippingOption,canonical);
-        const total = calculateTotals(canonical, f.coupon, f.shipping, shipment.delivery);
+        const shipment = await deliveryFor(f.shipping, f.shippingOption, canonical);
+        const settings = await readStoreSettings();
+        const manualFee = Number(settings.manualShippingFee ?? settings.localDeliveryFee ?? 15000);
+        const total = calculateTotals(canonical, f.coupon, f.shipping, shipment.delivery, manualFee);
         id = "LJ-" + randomUUID();
         await c.query(
           "INSERT INTO orders(id,user_id,address,shipping,shipping_name,payment,coupon,subtotal,discount,delivery,total,checkout_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1278,25 +1491,54 @@ export function createApp(pool, options = {}) {
       const o = (
         await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
       ).rows[0];
+      const methodRow = (await c.query("SELECT group_name FROM store_payment_methods WHERE id=?", [o.payment])).rows[0];
+      const isCod = o.payment === "COD" || methodRow?.group_name === "COD";
       if (
-        o.payment_status !== "PAID" ||
+        (!isCod && o.payment_status !== "PAID") ||
         !transitions[o.status]?.includes(f.status)
       )
         throw fail(
           409,
-          "Perubahan status tidak diizinkan. Pembayaran harus dikonfirmasi Xendit.",
+          !isCod
+            ? "Perubahan status tidak diizinkan. Pembayaran harus dikonfirmasi Xendit."
+            : "Transisi status pesanan tidak diizinkan.",
         );
       const trackingNumber = f.status === "Dikirim" ? f.trackingNumber : o.tracking_number || "";
-      await c.query("UPDATE orders SET status=?,tracking_number=? WHERE id=?", [f.status, trackingNumber, o.id]);
+      if (isCod && f.status === "Selesai") {
+        await c.query("UPDATE orders SET status=?,tracking_number=?,payment_status='PAID',paid_at=UTC_TIMESTAMP(3) WHERE id=?", [f.status, trackingNumber, o.id]);
+      } else {
+        await c.query("UPDATE orders SET status=?,tracking_number=? WHERE id=?", [f.status, trackingNumber, o.id]);
+      }
       const a = orderRow(o).address;
-      const templateRow=(await c.query("SELECT setting_value FROM store_settings WHERE setting_key='waTemplates'")).rows[0];
-      const templates=templateRow?.setting_value||{};
-      const brandRow=(await c.query("SELECT setting_value FROM store_settings WHERE setting_key='brand'")).rows[0];
-      const brand=brandRow?.setting_value||"Kintsugi";
-      const templateKey=f.status==="Dikirim"?"shipped":f.status==="Selesai"?"delivered":"processing";
-      const values={nama:a.name,nomor_pesanan:o.id,total:`Rp${Number(o.total).toLocaleString("id-ID")}`,nomor_resi:trackingNumber,kurir:o.shipping_name||o.shipping||"",toko:brand};
-      const defaults={shipped:"Halo [nama], pesanan [nomor_pesanan] dikirim. Resi: [nomor_resi]. Kurir: [kurir].",delivered:"Pesanan [nomor_pesanan] telah sampai. Terima kasih telah berbelanja di [toko].",processing:"Pesanan [nomor_pesanan] sedang kami proses. Terima kasih telah berbelanja di [toko]."};
-      await queueWhatsApp(c,"status/"+o.id+"/"+f.status,a.phone,renderWhatsAppTemplate(templates[templateKey]||defaults[templateKey],values));
+      const templateRow = (await c.query("SELECT setting_value FROM store_settings WHERE setting_key='waTemplates'")).rows[0];
+      const rawTemplates = typeof templateRow?.setting_value === "string" ? JSON.parse(templateRow.setting_value) : templateRow?.setting_value;
+      const templates = { ...DEFAULT_WA_TEMPLATES, ...(rawTemplates || {}) };
+      const brandRow = (await c.query("SELECT setting_value FROM store_settings WHERE setting_key='brand'")).rows[0];
+      const brand = brandRow?.setting_value || "Kintsugi";
+      const templateKey =
+        f.status === "Dikirim"
+          ? "shipped"
+          : f.status === "Selesai"
+            ? "delivered"
+            : f.status === "Dibatalkan"
+              ? "cancelled"
+              : "processing";
+      const values = {
+        nama: a.name,
+        nomor_pesanan: o.id,
+        total: `Rp${Number(o.total).toLocaleString("id-ID")}`,
+        nomor_resi: trackingNumber,
+        kurir: o.shipping_name || o.shipping || "",
+        toko: brand,
+      };
+      if (templates[templateKey] !== false && templates[templateKey]) {
+        await queueWhatsApp(
+          c,
+          "status/" + o.id + "/" + f.status,
+          a.phone,
+          renderWhatsAppTemplate(templates[templateKey], values),
+        );
+      }
       await c.query("COMMIT");
       res.json({ ok: true });
     } catch (e) {
@@ -1467,7 +1709,7 @@ export function createApp(pool, options = {}) {
       gateway: gateway.configured,
       sandbox: gateway.sandbox,
       whatsappConfigured: Boolean(env.WABLAS_TOKEN),
-      whatsappHost: env.WABLAS_API_HOST || "https://smg.wablas.com",
+      whatsappHost: env.WABLAS_API_HOST || "https://texas.wablas.com",
       whatsapp: wa.rows,
       email: email.rows,
       rajaOngkirConfigured:Boolean(env.RAJAONGKIR_API_KEY&&(settings.rajaOriginId||env.RAJAONGKIR_ORIGIN_ID)),

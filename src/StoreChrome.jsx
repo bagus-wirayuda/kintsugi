@@ -54,7 +54,11 @@ export function StoreHeader({
   const go = (route) => { setOpen(false); nav(route); };
   const handleProfileClick = () => {
     setOpen(false);
-    nav(user ? "account/profile" : "account");
+    if (isAdmin) {
+      nav(user?.role === "staff" ? "admin/orders" : "admin/overview");
+    } else {
+      nav(user ? "account/profile" : "account");
+    }
   };
   const goPromo = () => {
     if (active !== "home") nav("home");

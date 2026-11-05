@@ -2750,52 +2750,96 @@ td select {
   }
 
   .overlay {
-    padding: 15px;
+    padding: max(18px, calc(env(safe-area-inset-top, 0px) + 14px)) 12px max(24px, calc(76px + env(safe-area-inset-bottom, 0px)));
+    z-index: 1200;
   }
 
   .product-dialog {
+    display: flex;
+    flex-direction: column;
     grid-template-columns: 1fr;
-    max-height: 93vh;
+    width: 100%;
+    max-width: 480px;
+    max-height: calc(100dvh - 36px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    border-radius: 16px;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .detail-image {
     min-height: 0;
-    height: 300px;
+    height: 280px;
+    background: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    border-bottom: 1px solid #e2e8f0;
+    flex-shrink: 0;
   }
 
   .detail-image img {
-    object-position: center 35%;
+    max-width: 100%;
+    max-height: 250px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    margin: auto;
   }
 
   .detail-info {
-    padding: 25px;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 18px calc(48px + env(safe-area-inset-bottom, 0px));
   }
 
   .detail-info h1 {
-    font-size: 22px;
-    margin-top: 15px;
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1.35;
+    margin: 0 0 8px 0;
+    color: #0f172a;
   }
 
   .detail-info>.eyebrow {
-    font-size: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #086169;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 6px 0;
   }
 
   .detail-info>p {
-    font-size: 11px;
-  }
-
-  .close {
-    position: sticky;
-    margin-left: auto;
-    top: 10px;
-    right: 10px;
-    margin-bottom: -31px;
-    transform: translateX(-10px);
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #334155;
+    margin: 0 0 18px 0;
   }
 
   .product-dialog>.close {
-    position: absolute;
+    position: sticky;
+    top: 12px;
+    align-self: flex-end;
+    margin-right: 12px;
+    margin-top: 12px;
+    margin-bottom: -52px;
+    z-index: 60;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    color: #0f172a;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+    cursor: pointer;
     transform: none;
+    padding: 0;
   }
 
   .drawer-overlay {

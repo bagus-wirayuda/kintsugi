@@ -109,24 +109,32 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
       <Notice>{error}</Notice>
       {pending && (
         <div className="ws-payment-actions">
-          {o.payment_url && o.payment_status === "PENDING" && (
-            <a className="ws-button primary" href={o.payment_url}>
-              Bayar sekarang
-              <ArrowUpRight size={17} />
-            </a>
+          {o.payment === "COD" ? (
+            <p className="ws-payment-expiry" style={{ width: "100%", margin: "4px 0" }}>
+              Metode Bayar di Tempat (COD). Siapkan uang pas kepada kurir saat pesanan sampai.
+            </p>
+          ) : (
+            <>
+              {o.payment_url && /^https?:\/\//i.test(o.payment_url) && (
+                <a className="ws-button primary" href={o.payment_url}>
+                  Bayar sekarang
+                  <ArrowUpRight size={17} />
+                </a>
+              )}
+              <button
+                className="ws-button"
+                disabled={busy}
+                onClick={() => action("payment")}
+              >
+                <RefreshCw size={16} />
+                {busy
+                  ? "Memeriksa…"
+                  : o.payment_status === "CREATING"
+                    ? "Siapkan pembayaran"
+                    : "Periksa pembayaran"}
+              </button>
+            </>
           )}
-          <button
-            className="ws-button"
-            disabled={busy}
-            onClick={() => action("payment")}
-          >
-            <RefreshCw size={16} />
-            {busy
-              ? "Memeriksa…"
-              : o.payment_status === "CREATING"
-                ? "Siapkan pembayaran"
-                : "Periksa pembayaran"}
-          </button>
           <button
             className="ws-link danger"
             disabled={busy}
@@ -154,7 +162,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
           </button>
         </div>
       )}
-      {pending && o.expires_at && (
+      {pending && o.expires_at && o.payment !== "COD" && (
         <p className="ws-payment-expiry">
           <Clock3 size={15} />
           Bayar sebelum {new Date(o.expires_at).toLocaleString("id-ID")}

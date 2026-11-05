@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   LayoutDashboard,
   Package,
@@ -7,6 +7,7 @@ import {
   Plus,
   Search,
   RefreshCw,
+  RotateCcw,
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
@@ -30,6 +31,10 @@ import {
   Edit2,
   Eye,
   EyeOff,
+  Check,
+  Wallet,
+  Landmark,
+  Banknote,
 } from "lucide-react";
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import { api } from "./store";
@@ -37,7 +42,7 @@ import { colorLabel, money, formatRupiah, parseRupiah } from "./data";
 import RupiahInput from "./RupiahInput.jsx";
 import { paymentLabel } from "./Orders";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
-import { paymentMethods as supportedPayments } from "./payment-methods.js";
+import { PAYMENT_GROUPS } from "./payment-methods.js";
 
 export default function Admin({ user, notify, onLogout, config, reloadConfig }) {
   const isAdmin = user.role === "admin";
@@ -69,6 +74,10 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     [message, setMessage] = useState(""),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("all"),
+    [productCategory, setProductCategory] = useState("all"),
+    [productSubcategory, setProductSubcategory] = useState("all"),
+    [productStock, setProductStock] = useState("all"),
+    [productSort, setProductSort] = useState("newest"),
     [edit, setEdit] = useState(null),
     [sizeMode, setSizeMode] = useState("dimensions"),
     [sizeRows, setSizeRows] = useState([{ id: "default", size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30", imageUrl: "" }]),
@@ -81,6 +90,46 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     [promotions, setPromotions] = useState([]),
     [metrics, setMetrics] = useState(null),
     [team, setTeam] = useState([]);
+
+  const DEFAULT_WA_TEMPLATES = useMemo(
+    () => ({
+      otp: "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].",
+      purchased:
+        "Halo [nama], pembayaran pesanan [nomor_pesanan] sebesar [total] berhasil dikonfirmasi. Pesanan Anda segera disiapkan oleh [toko]. Terima kasih!",
+      processing:
+        "Halo [nama], pesanan [nomor_pesanan] sedang diproses dan dikemas dengan teliti oleh tim [toko]. Kami akan mengabari saat pesanan siap dikirim.",
+      shipped:
+        "Halo [nama], pesanan [nomor_pesanan] telah dikirim menggunakan kurir [kurir]. Nomor resi pengiriman Anda: *[nomor_resi]*. Lacak pesanan Anda secara berkala.",
+      delivered:
+        "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
+      cancelled:
+        "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
+    }),
+    [],
+  );
+
+  const [templatesDraft, setTemplatesDraft] = useState(() => ({
+    otp: "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].",
+    purchased:
+      "Halo [nama], pembayaran pesanan [nomor_pesanan] sebesar [total] berhasil dikonfirmasi. Pesanan Anda segera disiapkan oleh [toko]. Terima kasih!",
+    processing:
+      "Halo [nama], pesanan [nomor_pesanan] sedang diproses dan dikemas dengan teliti oleh tim [toko]. Kami akan mengabari saat pesanan siap dikirim.",
+    shipped:
+      "Halo [nama], pesanan [nomor_pesanan] telah dikirim menggunakan kurir [kurir]. Nomor resi pengiriman Anda: *[nomor_resi]*. Lacak pesanan Anda secara berkala.",
+    delivered:
+      "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
+    cancelled:
+      "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
+  }));
+
+  useEffect(() => {
+    if (settings?.waTemplates) {
+      setTemplatesDraft({
+        ...DEFAULT_WA_TEMPLATES,
+        ...settings.waTemplates,
+      });
+    }
+  }, [settings?.waTemplates, DEFAULT_WA_TEMPLATES]);
 
   const productsRef = useRef(products);
   productsRef.current = products;
@@ -119,8 +168,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   const [categoryDraft, setCategoryDraft] = useState("");
   const [mainCategoryDraft, setMainCategoryDraft] = useState("");
   const [subcategoryDraft, setSubcategoryDraft] = useState("");
-  const [selectedParentForSub, setSelectedParentForSub] = useState("seprai");
-  const [formCategory, setFormCategory] = useState("seprai");
+  const [selectedParentForSub, setSelectedParentForSub] = useState("bedding");
+  const [formCategory, setFormCategory] = useState("bedding");
   const [formSubcategory, setFormSubcategory] = useState("");
   const [subDrafts, setSubDrafts] = useState({});
   const [editingCatId, setEditingCatId] = useState(null);
@@ -128,6 +177,120 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   const [promotionDraft, setPromotionDraft] = useState(null);
   const [promoSearch, setPromoSearch] = useState("");
   const [promoCategory, setPromoCategory] = useState("all");
+
+  const [paymentFormOpen, setPaymentFormOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
+  const [paymentForm, setPaymentForm] = useState({ name: "", group: "Bank", detail: "", enabled: true });
+
+  const openAddPayment = () => {
+    setPaymentForm({ name: "", group: "Bank", detail: "", enabled: true });
+    setEditingPaymentId(null);
+    setPaymentFormOpen(true);
+  };
+
+  const openEditPayment = (method) => {
+    setPaymentForm({
+      name: method.name || "",
+      group: method.group || method.group_name || "Bank",
+      detail: method.detail || "",
+      enabled: Boolean(method.enabled),
+    });
+    setEditingPaymentId(method.id);
+    setPaymentFormOpen(true);
+  };
+
+  const closePaymentForm = () => {
+    setPaymentFormOpen(false);
+    setEditingPaymentId(null);
+  };
+
+  const togglePaymentMethod = async (method) => {
+    const nextEnabled = !method.enabled;
+    const ok = await perform(
+      () =>
+        api(`/admin/payment-methods/${encodeURIComponent(method.id)}`, {
+          method: "PATCH",
+          body: { enabled: nextEnabled },
+        }),
+      `Metode ${method.name} ${nextEnabled ? "diaktifkan" : "dinonaktifkan"}.`
+    );
+    if (ok) {
+      setPaymentMethods((list) =>
+        list.map((m) => (m.id === method.id ? { ...m, enabled: nextEnabled } : m))
+      );
+      if (reloadConfig) reloadConfig();
+    }
+  };
+
+  const handleDeletePayment = async (method) => {
+    if (!window.confirm(`Hapus metode pembayaran "${method.name}"?`)) return;
+    const ok = await perform(
+      () => api(`/admin/payment-methods/${encodeURIComponent(method.id)}`, { method: "DELETE" }),
+      `Metode ${method.name} berhasil dihapus.`
+    );
+    if (ok) {
+      setPaymentMethods((list) => list.filter((m) => m.id !== method.id));
+      if (reloadConfig) reloadConfig();
+    }
+  };
+
+  const handleSavePaymentForm = async (e) => {
+    e.preventDefault();
+    if (!paymentForm.name.trim()) return notify("Nama metode pembayaran wajib diisi.");
+    if (editingPaymentId) {
+      const ok = await perform(
+        () =>
+          api(`/admin/payment-methods/${encodeURIComponent(editingPaymentId)}`, {
+            method: "PATCH",
+            body: {
+              name: paymentForm.name.trim(),
+              group: paymentForm.group,
+              detail: paymentForm.detail.trim(),
+              enabled: paymentForm.enabled,
+            },
+          }),
+        "Metode pembayaran berhasil diperbarui."
+      );
+      if (ok) {
+        setPaymentMethods((list) =>
+          list.map((m) =>
+            m.id === editingPaymentId
+              ? {
+                  ...m,
+                  name: paymentForm.name.trim(),
+                  group: paymentForm.group,
+                  group_name: paymentForm.group,
+                  detail: paymentForm.detail.trim(),
+                  enabled: paymentForm.enabled,
+                }
+              : m
+          )
+        );
+        closePaymentForm();
+        if (reloadConfig) reloadConfig();
+      }
+    } else {
+      const ok = await perform(
+        () =>
+          api("/admin/payment-methods", {
+            method: "POST",
+            body: {
+              name: paymentForm.name.trim(),
+              group: paymentForm.group,
+              detail: paymentForm.detail.trim(),
+              enabled: paymentForm.enabled,
+            },
+          }),
+        "Metode pembayaran baru berhasil ditambahkan."
+      );
+      if (ok) {
+        const s = await api("/admin/settings");
+        if (s?.paymentMethods) setPaymentMethods(s.paymentMethods);
+        closePaymentForm();
+        if (reloadConfig) reloadConfig();
+      }
+    }
+  };
 
   function initPromoFromProduct(product) {
     const basePrice = Number(product.price || 0);
@@ -149,16 +312,26 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   }
 
   function editPromoFromProduct(promo) {
+    const product = products.find((p) => p.id === promo.product_id);
+    const basePrice = Number(product?.price || promo.product_price || 0);
+    const discPercent = Number(promo.discount_percent) || 10;
+    const salePrice =
+      promo.promo_price && Number(promo.promo_price) > 0
+        ? Number(promo.promo_price)
+        : basePrice > 0
+        ? Math.round((basePrice * (100 - discPercent)) / 100)
+        : null;
+
     setPromotionDraft({
       id: promo.id,
       productId: promo.product_id,
-      eyebrow: promo.eyebrow,
-      title: promo.title,
-      description: promo.description,
+      eyebrow: promo.eyebrow || "PENAWARAN TERBATAS",
+      title: promo.title || product?.name || "",
+      description: promo.description || "",
       image: promo.image || "",
-      discountPercent: Number(promo.discount_percent),
-      promoPrice: promo.promo_price ? Number(promo.promo_price) : null,
-      active: Boolean(promo.active),
+      discountPercent: discPercent,
+      promoPrice: salePrice,
+      active: promo.active === undefined ? true : Boolean(promo.active),
     });
     setTimeout(() => {
       document.getElementById("promo-form-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -357,17 +530,26 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     }
   }
   async function uploadAsset(file, input) {
-    if (!file) return;
-    if (file.size > 5_000_000) return setError("Ukuran gambar maksimal 5 MB.");
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const { url } = await api("/admin/uploads", { method: "POST", body: { data: reader.result } });
-        input.value = url;
-        setMessage("Gambar berhasil diunggah.");
-      } catch (e) { setError(e.message); }
-    };
-    reader.readAsDataURL(file);
+    if (!file) return null;
+    if (file.size > 5_000_000) {
+      setError("Ukuran gambar maksimal 5 MB.");
+      return null;
+    }
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const { url } = await api("/admin/uploads", { method: "POST", body: { data: reader.result } });
+          if (input) input.value = url;
+          setMessage("Gambar berhasil diunggah.");
+          resolve(url);
+        } catch (e) {
+          setError(e.message);
+          resolve(null);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   }
   async function refresh() {
     const [p, o, h, m, s, t] = await Promise.all([
@@ -413,6 +595,10 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     setTab(nextTab);
     setSearch("");
     setFilter("all");
+    setProductCategory("all");
+    setProductSubcategory("all");
+    setProductStock("all");
+    setProductSort("newest");
     setError("");
     setMessage("");
 
@@ -595,7 +781,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     setSizeRows([
       { id: "default", size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30", imageUrl: "" },
     ]);
-    const firstCat = cats.find((c) => (!c.parent_id && !c.parentId) && c.active)?.id || "seprai";
+    const firstCat = cats.find((c) => (!c.parent_id && !c.parentId) && c.active)?.id || "bedding";
     const firstSub = cats.find((c) => ((c.parent_id || c.parentId) === firstCat) && c.active)?.id || "";
     setFormCategory(firstCat);
     setFormSubcategory(firstSub);
@@ -643,7 +829,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         : [{ id: "default", size: "", variation: "", stock: 30, length: "", width: "", height: "", imageUrl: "" }]
     );
     const catMatch = cats.find((c) => (!c.parent_id && !c.parentId) && (c.id === p.category || c.name.toLowerCase() === (p.category || "").toLowerCase()));
-    const catId = catMatch ? catMatch.id : (p.category || "seprai");
+    const catId = catMatch ? catMatch.id : (p.category || "bedding");
     setFormCategory(catId);
 
     const subMatch = cats.find((c) => ((c.parent_id || c.parentId) === catId) && (c.id === p.subcategory || c.name.toLowerCase() === (p.subcategory || "").toLowerCase()));
@@ -912,16 +1098,122 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     templates: "Template notifikasi WhatsApp",
     team: "Tim dan peran akses",
   };
-  const productRows = products.filter(
-    (p) =>
-      (filter === "all" ||
-        (filter === "active" && p.active) ||
-        (filter === "archived" && !p.active)) &&
-      [p.name, p.sku, p.category]
-        .join(" ")
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
+  const availableSubcategories = useMemo(() => {
+    if (productCategory !== "all") {
+      return categories.filter(
+        (c) => (c.parent_id || c.parentId) === productCategory && c.active !== false
+      );
+    }
+    return categories.filter((c) => (c.parent_id || c.parentId) && c.active !== false);
+  }, [categories, productCategory]);
+
+  const mainCategoryOptions = useMemo(() => {
+    return categories.filter((c) => !c.parent_id && !c.parentId && c.active !== false);
+  }, [categories]);
+
+  const resetProductFilters = () => {
+    setSearch("");
+    setFilter("all");
+    setProductCategory("all");
+    setProductSubcategory("all");
+    setProductStock("all");
+    setProductSort("newest");
+  };
+
+  const isProductFilterActive =
+    Boolean(search.trim()) ||
+    filter !== "all" ||
+    productCategory !== "all" ||
+    productSubcategory !== "all" ||
+    productStock !== "all" ||
+    productSort !== "newest";
+
+  const productRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const result = products.filter((p) => {
+      // 1. Status Filter (Aktif / Disembunyikan)
+      if (filter === "active" && !p.active) return false;
+      if (filter === "archived" && p.active) return false;
+
+      // 2. Kategori Filter (Berdasarkan kategori yang tersedia di database)
+      if (productCategory !== "all") {
+        const catMatch =
+          p.category === productCategory ||
+          String(p.category).toLowerCase() === String(productCategory).toLowerCase();
+        if (!catMatch) return false;
+      }
+
+      // 3. Subkategori Filter
+      if (productSubcategory !== "all") {
+        const subMatch =
+          p.subcategory === productSubcategory ||
+          String(p.subcategory).toLowerCase() === String(productSubcategory).toLowerCase();
+        if (!subMatch) return false;
+      }
+
+      // 4. Stok Filter (Stok Habis: produk dengan stok 0)
+      const stock = Number(p.stock) || 0;
+      if (productStock === "out_of_stock" && stock > 0) return false;
+      if (productStock === "in_stock" && stock <= 0) return false;
+      if (productStock === "low_stock" && (stock >= 5 || stock <= 0)) return false;
+
+      // 5. Pencarian (Nama, SKU, Kategori, Subkategori)
+      if (query) {
+        const catName = categories.find((c) => c.id === p.category)?.name || p.category || "";
+        const subName = categories.find((c) => c.id === p.subcategory)?.name || p.subcategory || "";
+        const haystack = [p.name, p.sku, p.category, catName, p.subcategory, subName]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+
+      return true;
+    });
+
+    // 6. Urutkan Produk (Pisahkan Filter dan Urutkan)
+    result.sort((a, b) => {
+      if (productSort === "newest") {
+        const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (tA !== tB) return tB - tA;
+        return String(b.id).localeCompare(String(a.id));
+      }
+      if (productSort === "oldest") {
+        const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (tA !== tB) return tA - tB;
+        return String(a.id).localeCompare(String(b.id));
+      }
+      if (productSort === "bestseller") {
+        const soldA = Number(a.soldUnits) || 0;
+        const soldB = Number(b.soldUnits) || 0;
+        if (soldA !== soldB) return soldB - soldA;
+        return (Number(b.stock) || 0) - (Number(a.stock) || 0);
+      }
+      if (productSort === "least_sold") {
+        const soldA = Number(a.soldUnits) || 0;
+        const soldB = Number(b.soldUnits) || 0;
+        if (soldA !== soldB) return soldA - soldB;
+        return (Number(a.stock) || 0) - (Number(b.stock) || 0);
+      }
+      if (productSort === "price_high") {
+        return (Number(b.price) || 0) - (Number(a.price) || 0);
+      }
+      if (productSort === "price_low") {
+        return (Number(a.price) || 0) - (Number(b.price) || 0);
+      }
+      if (productSort === "stock_high") {
+        return (Number(b.stock) || 0) - (Number(a.stock) || 0);
+      }
+      if (productSort === "stock_low") {
+        return (Number(a.stock) || 0) - (Number(b.stock) || 0);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [products, filter, productCategory, productSubcategory, productStock, search, productSort, categories]);
   const orderRows = orders.filter(
     (o) =>
       (filter === "all" || o.status === filter) &&
@@ -1117,8 +1409,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               }}
             >
               {filteredPromoProducts.map((product) => {
-                const activePromo = promotions.find(
-                  (item) => item.product_id === product.id && item.active
+                const existingPromo = promotions.find(
+                  (item) => item.product_id === product.id
                 );
                 const isSelected = promotionDraft?.productId === product.id;
 
@@ -1175,30 +1467,32 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           · {product.category}
                         </span>
                       </div>
-                      {activePromo && (
+                      {existingPromo && (
                         <div style={{ marginTop: "4px" }}>
                           <span
                             style={{
                               fontSize: "10.5px",
                               fontWeight: "600",
-                              color: "#047857",
-                              background: "#ecfdf5",
+                              color: existingPromo.active ? "#047857" : "#64748b",
+                              background: existingPromo.active ? "#ecfdf5" : "#f1f5f9",
                               padding: "2px 6px",
                               borderRadius: "4px",
                               display: "inline-block",
                             }}
                           >
-                            Slide Aktif (-{activePromo.discount_percent}%)
+                            {existingPromo.active
+                              ? `Slide Aktif (-${existingPromo.discount_percent}%)`
+                              : `Disembunyikan (-${existingPromo.discount_percent}%)`}
                           </span>
                         </div>
                       )}
                     </div>
                     <div style={{ flexShrink: 0 }}>
-                      {activePromo ? (
+                      {existingPromo ? (
                         <button
                           type="button"
                           className="ws-button small"
-                          onClick={() => editPromoFromProduct(activePromo)}
+                          onClick={() => editPromoFromProduct(existingPromo)}
                           style={{
                             fontSize: "12px",
                             padding: "6px 10px",
@@ -1314,7 +1608,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               </div>
             )}
 
-            <form className="ws-form-grid" onSubmit={savePromotion}>
+            <form
+              key={promotionDraft.id ? `promo-edit-${promotionDraft.id}` : `promo-new-${promotionDraft.productId}`}
+              className="ws-form-grid"
+              onSubmit={savePromotion}
+            >
               {/* Field Tersembunyi / Pemilihan Produk */}
               <input type="hidden" name="productId" value={promotionDraft.productId} />
 
@@ -1333,8 +1631,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       return {
                         ...curr,
                         productId: pId,
-                        title: curr.title || prod?.name || "",
-                        description: curr.description || (prod?.description ? prod.description.slice(0, 160) : ""),
+                        title: curr.id ? curr.title : (prod?.name || ""),
+                        description: curr.id ? curr.description : (prod?.description ? prod.description.slice(0, 160) : ""),
                         promoPrice: sale,
                         discountPercent: disc,
                       };
@@ -1361,7 +1659,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     const prod = products.find((p) => p.id === promotionDraft.productId);
                     const base = parseRupiah(prod?.price || 0);
                     if (base > 0 && val && val < base) {
-                      const pct = Math.max(1, Math.min(99, Math.round((1 - val / base) * 100)));
+                      const pct = Math.max(1, Math.min(90, Math.round((1 - val / base) * 100)));
                       setPromotionDraft((curr) => ({ ...curr, promoPrice: val, discountPercent: pct }));
                     } else {
                       setPromotionDraft((curr) => ({ ...curr, promoPrice: val || null }));
@@ -1386,13 +1684,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   name="discountPercent"
                   type="number"
                   min="1"
-                  max="99"
+                  max="90"
                   value={promotionDraft.discountPercent ?? 10}
                   onChange={(event) => {
                     const pct = Number(event.target.value);
                     const prod = products.find((p) => p.id === promotionDraft.productId);
                     const base = parseRupiah(prod?.price || 0);
-                    if (base > 0 && pct >= 1 && pct <= 99) {
+                    if (base > 0 && pct >= 1 && pct <= 90) {
                       const sale = Math.round((base * (100 - pct)) / 100);
                       setPromotionDraft((curr) => ({ ...curr, discountPercent: pct, promoPrice: sale }));
                     } else {
@@ -1401,7 +1699,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   }}
                   required
                 />
-                <small>Otomatis menghitung harga promo (1% - 99%).</small>
+                <small>Otomatis menghitung harga promo (1% - 90%).</small>
               </label>
 
               {/* Tagline Promo (Kicker) */}
@@ -1410,7 +1708,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 <input
                   name="eyebrow"
                   maxLength="100"
-                  defaultValue={promotionDraft.eyebrow}
+                  value={promotionDraft.eyebrow || ""}
+                  onChange={(e) => setPromotionDraft((curr) => ({ ...curr, eyebrow: e.target.value }))}
                   placeholder="Contoh: PENAWARAN TERBATAS"
                 />
                 <small>Teks kecil di atas judul promo pada slide beranda.</small>
@@ -1423,7 +1722,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   name="title"
                   maxLength="160"
                   required
-                  defaultValue={promotionDraft.title}
+                  value={promotionDraft.title || ""}
+                  onChange={(e) => setPromotionDraft((curr) => ({ ...curr, title: e.target.value }))}
                   placeholder="Contoh: Keindahan Nyata di Setiap Sudut Kamar."
                 />
                 <small>Judul utama yang menarik perhatian pembeli di beranda.</small>
@@ -1436,7 +1736,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   name="description"
                   rows="3"
                   maxLength="600"
-                  defaultValue={promotionDraft.description}
+                  value={promotionDraft.description || ""}
+                  onChange={(e) => setPromotionDraft((curr) => ({ ...curr, description: e.target.value }))}
                   placeholder="Pilihan sprei dan selimut berkualitas tinggi untuk kenyamanan istirahat maksimal Anda dan keluarga."
                 />
                 <small>Penjelasan singkat nilai dan keunggulan promo (maksimal 600 karakter).</small>
@@ -1449,7 +1750,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   <div style={{ flex: 1, minWidth: "240px" }}>
                     <input
                       name="image"
-                      defaultValue={promotionDraft.image || ""}
+                      value={promotionDraft.image || ""}
                       placeholder="Kosongkan untuk otomatis menggunakan gambar utama produk"
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1460,9 +1761,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
                       style={{ marginTop: "8px" }}
-                      onChange={(event) =>
-                        uploadAsset(event.target.files?.[0], event.currentTarget.previousElementSibling)
-                      }
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        const urlInput = event.currentTarget.previousElementSibling;
+                        const url = await uploadAsset(file, urlInput);
+                        if (url) {
+                          setPromotionDraft((curr) => ({ ...curr, image: url }));
+                        }
+                      }}
                     />
                     <small style={{ display: "block", marginTop: "4px" }}>
                       Pilih gambar editorial khusus promo (PNG, JPG, WebP maks 5 MB). Jika tidak diunggah, sistem otomatis menggunakan gambar utama produk.
@@ -1514,7 +1820,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 <input
                   name="active"
                   type="checkbox"
-                  defaultChecked={promotionDraft.active}
+                  checked={Boolean(promotionDraft.active)}
+                  onChange={(e) => setPromotionDraft((curr) => ({ ...curr, active: e.target.checked }))}
                 />{" "}
                 Tampilkan di slider halaman beranda publik (Aktif)
               </label>
@@ -1706,6 +2013,440 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               <p>Pilih produk dari katalog di atas dan klik tombol “Buat Promo” untuk membuat slide promo pertama.</p>
             </div>
           )}
+        </section>
+      </div>
+    );
+  };
+
+  const renderTemplatesPage = () => {
+    const templateItems = [
+      {
+        key: "otp",
+        title: "OTP Registrasi & Login",
+        badge: "Autentikasi",
+        badgeColor: "#0369a1",
+        badgeBg: "#e0f2fe",
+        description:
+          "Dikirim ke WhatsApp pelanggan saat membuat akun baru saat checkout atau meminta kode verifikasi masuk.",
+        placeholders: ["[nama]", "[kode_otp]", "[toko]"],
+      },
+      {
+        key: "purchased",
+        title: "Pembayaran Berhasil",
+        badge: "Transaksi",
+        badgeColor: "#15803d",
+        badgeBg: "#dcfce7",
+        description:
+          "Dikirim otomatis sesaat setelah pembayaran pesanan berhasil diverifikasi dan terkonfirmasi lunas.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[toko]"],
+      },
+      {
+        key: "processing",
+        title: "Pesanan Diproses",
+        badge: "Pesanan",
+        badgeColor: "#b45309",
+        badgeBg: "#fef3c7",
+        description:
+          "Dikirim saat admin/staf mengubah status pesanan menjadi Sedang Diproses / Dikemas.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[kurir]", "[toko]"],
+      },
+      {
+        key: "shipped",
+        title: "Pesanan Dikirim & Info Resi",
+        badge: "Logistik",
+        badgeColor: "#6d28d9",
+        badgeBg: "#ede9fe",
+        description:
+          "Dikirim saat pesanan diserahkan ke jasa ekspedisi/kurir, memuat nomor resi pelacakan pengiriman.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[nomor_resi]", "[kurir]", "[toko]"],
+      },
+      {
+        key: "delivered",
+        title: "Pesanan Selesai / Sampai",
+        badge: "Selesai",
+        badgeColor: "#047857",
+        badgeBg: "#d1fae5",
+        description:
+          "Dikirim saat pesanan telah berhasil sampai dan diterima oleh pelanggan di alamat tujuan.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[nomor_resi]", "[kurir]", "[toko]"],
+      },
+      {
+        key: "cancelled",
+        title: "Pembatalan Pesanan",
+        badge: "Dibatalkan",
+        badgeColor: "#b91c1c",
+        badgeBg: "#fee2e2",
+        description:
+          "Dikirim saat pesanan dibatalkan oleh admin atau sistem karena kendala transaksi.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[toko]"],
+      },
+    ];
+
+    const previewSample = {
+      nama: "Budi Santoso",
+      kode_otp: "749210",
+      nomor_pesanan: "ORD-2026-8801",
+      total: "Rp185.000",
+      nomor_resi: "JNE-9920148819",
+      kurir: "JNE Reguler",
+      toko: settings?.brand || "Kintsugi",
+    };
+
+    const formatPreview = (text) =>
+      String(text || "").replace(/\[([a-z_]+)\]/gi, (match, key) =>
+        Object.hasOwn(previewSample, key.toLowerCase())
+          ? previewSample[key.toLowerCase()]
+          : match
+      );
+
+    const handleResetSingle = (key) => {
+      setTemplatesDraft((prev) => ({
+        ...prev,
+        [key]: DEFAULT_WA_TEMPLATES[key] || "",
+      }));
+    };
+
+    const handleResetAll = () => {
+      if (
+        window.confirm(
+          "Kembalikan semua template pesan WhatsApp ke pengaturan bawaan default?",
+        )
+      ) {
+        setTemplatesDraft({ ...DEFAULT_WA_TEMPLATES });
+      }
+    };
+
+    const handleInsertPlaceholder = (key, placeholder) => {
+      setTemplatesDraft((prev) => {
+        const cur = prev[key] || "";
+        const spacer =
+          cur.length > 0 && !cur.endsWith(" ") && !cur.endsWith("\n")
+            ? " "
+            : "";
+        return {
+          ...prev,
+          [key]: cur + spacer + placeholder,
+        };
+      });
+    };
+
+    const handleSave = async (e) => {
+      if (e) e.preventDefault();
+      await saveStoreSettings(
+        { settings: { waTemplates: templatesDraft } },
+        "Seluruh template WhatsApp berhasil disimpan ke database.",
+      );
+    };
+
+    return (
+      <div className="ws-templates-page" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <section className="ws-panel ws-form-panel">
+          <div
+            className="ws-panel-heading"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              flexWrap: "wrap",
+              gap: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 6px" }}>
+                <MessageSquareText size={22} color="var(--ks-teal)" />
+                Template Pesan WhatsApp Otomatis
+              </h2>
+              <p style={{ margin: 0, color: "var(--ks-muted)", fontSize: 13, lineHeight: 1.6 }}>
+                Template default bawaan langsung aktif secara otomatis tanpa perlu diisi manual. Anda dapat menyesuaikan teks pesan dan mengembalikan ke template default kapan saja.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="ws-button secondary"
+                onClick={handleResetAll}
+                disabled={busy}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}
+              >
+                <RotateCcw size={14} /> Kembalikan Semua ke Default
+              </button>
+              <button
+                type="button"
+                className="ws-button primary"
+                onClick={handleSave}
+                disabled={busy}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}
+              >
+                <Check size={16} /> Simpan Semua Template
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: "14px 16px",
+              margin: "18px 0 24px",
+            }}
+          >
+            <strong style={{ fontSize: 13, color: "#334155" }}>
+              Placeholder Dinamis yang Tersedia:
+            </strong>
+            <p style={{ fontSize: 12, color: "#64748b", margin: "4px 0 10px" }}>
+              Klik tombol tag placeholder pada kartu di bawah untuk menyisipkan otomatis ke dalam teks template pesan:
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {[
+                { tag: "[nama]", desc: "Nama pelanggan" },
+                { tag: "[kode_otp]", desc: "Kode verifikasi OTP 6 digit" },
+                { tag: "[nomor_pesanan]", desc: "ID / nomor pesanan" },
+                { tag: "[total]", desc: "Total nominal belanja" },
+                { tag: "[nomor_resi]", desc: "Nomor resi ekspedisi" },
+                { tag: "[kurir]", desc: "Layanan kurir pengiriman" },
+                { tag: "[toko]", desc: "Nama toko / brand" },
+              ].map(({ tag, desc }) => (
+                <span
+                  key={tag}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    background: "#fff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 4,
+                    padding: "3px 8px",
+                    fontSize: 12,
+                    fontFamily: "monospace",
+                    color: "#0f172a",
+                  }}
+                  title={desc}
+                >
+                  <b style={{ color: "#0284c7" }}>{tag}</b>: {desc}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <form onSubmit={handleSave}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+                gap: 20,
+              }}
+            >
+              {templateItems.map((item) => {
+                const currentVal =
+                  templatesDraft[item.key] ??
+                  DEFAULT_WA_TEMPLATES[item.key] ??
+                  "";
+                const isModified =
+                  currentVal !== DEFAULT_WA_TEMPLATES[item.key];
+                return (
+                  <div
+                    key={item.key}
+                    className="ws-panel"
+                    style={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      padding: 18,
+                      background: "#fff",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <h3 style={{ margin: 0, fontSize: 15, color: "var(--ks-ink)" }}>
+                          {item.title}
+                        </h3>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            padding: "2px 8px",
+                            borderRadius: 12,
+                            background: item.badgeBg,
+                            color: item.badgeColor,
+                          }}
+                        >
+                          {item.badge}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="ws-link"
+                        onClick={() => handleResetSingle(item.key)}
+                        disabled={busy || !isModified}
+                        style={{
+                          fontSize: 12,
+                          color: isModified ? "#0284c7" : "#94a3b8",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          cursor: isModified ? "pointer" : "default",
+                        }}
+                        title={
+                          isModified
+                            ? "Kembalikan template ini ke bawaan default"
+                            : "Template ini sudah sesuai default bawaan"
+                        }
+                      >
+                        <RotateCcw size={12} />
+                        Kembalikan ke Default
+                      </button>
+                    </div>
+
+                    <p style={{ margin: 0, fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                      {item.description}
+                    </p>
+
+                    <div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "#64748b",
+                          display: "block",
+                          marginBottom: 6,
+                          fontWeight: 500,
+                        }}
+                      >
+                        Sisipkan placeholder dinamis:
+                      </span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {item.placeholders.map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => handleInsertPlaceholder(item.key, p)}
+                            style={{
+                              background: "#f1f5f9",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: 4,
+                              padding: "3px 8px",
+                              fontSize: 11,
+                              fontFamily: "monospace",
+                              cursor: "pointer",
+                              color: "#0369a1",
+                            }}
+                            title={`Klik untuk menyisipkan ${p}`}
+                          >
+                            + {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={5}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        fontFamily: "inherit",
+                        borderRadius: 6,
+                        border: "1px solid #cbd5e1",
+                        resize: "vertical",
+                      }}
+                      value={currentVal}
+                      onChange={(e) =>
+                        setTemplatesDraft((prev) => ({
+                          ...prev,
+                          [item.key]: e.target.value,
+                        }))
+                      }
+                      placeholder="Ketik format template pesan WhatsApp..."
+                    />
+
+                    {/* Preview Bubble */}
+                    <div style={{ marginTop: 2 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "#475569",
+                          fontWeight: 600,
+                          display: "block",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Simulasi Tampilan di WhatsApp:
+                      </span>
+                      <div
+                        style={{
+                          background: "#eef7e9",
+                          border: "1px solid #cce5c4",
+                          borderRadius: 8,
+                          padding: "10px 14px",
+                          fontSize: 12,
+                          lineHeight: 1.6,
+                          whiteSpace: "pre-wrap",
+                          color: "#143818",
+                          maxHeight: 140,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {formatPreview(currentVal)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                marginTop: 24,
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="ws-button secondary"
+                onClick={handleResetAll}
+                disabled={busy}
+              >
+                <RotateCcw
+                  size={14}
+                  style={{
+                    display: "inline",
+                    verticalAlign: "middle",
+                    marginRight: 6,
+                  }}
+                />
+                Kembalikan Semua ke Default
+              </button>
+              <button
+                type="submit"
+                className="ws-button primary"
+                disabled={busy}
+              >
+                <Check
+                  size={16}
+                  style={{
+                    display: "inline",
+                    verticalAlign: "middle",
+                    marginRight: 6,
+                  }}
+                />
+                Simpan Semua Template
+              </button>
+            </div>
+          </form>
         </section>
       </div>
     );
@@ -1906,26 +2647,154 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
           )}
           {tab === "products" && !edit && !selectedProduct && (
             <section className="ws-panel">
-              <div className="ws-toolbar">
-                <label className="ws-search">
+              <div
+                className="ws-toolbar ws-toolbar-wrap"
+                style={{ flexWrap: "wrap", gap: "10px", alignItems: "center" }}
+              >
+                {/* 1. Pencarian Produk */}
+                <label
+                  className="ws-search"
+                  style={{ minWidth: "180px", flex: "1 1 200px" }}
+                >
                   <Search size={18} />
                   <input
                     aria-label="Cari produk admin"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Cari nama, SKU, atau departemen…"
+                    placeholder="Cari nama, SKU, kategori…"
                   />
                 </label>
+
+                {/* 2. Filter Status (Pertahankan Aktif & Disembunyikan) */}
                 <select
                   aria-label="Status publikasi"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
+                  style={{ minWidth: "120px", flex: "0 1 auto" }}
                 >
-                  <option value="all">Semua produk</option>
+                  <option value="all">Semua Status</option>
                   <option value="active">Aktif</option>
                   <option value="archived">Disembunyikan</option>
                 </select>
-                <span className="ws-muted">{productRows.length} produk</span>
+
+                {/* 3. Filter Kategori dari Database */}
+                <select
+                  aria-label="Filter kategori"
+                  value={productCategory}
+                  onChange={(e) => {
+                    setProductCategory(e.target.value);
+                    setProductSubcategory("all");
+                  }}
+                  style={{ minWidth: "140px", flex: "0 1 auto" }}
+                >
+                  <option value="all">Semua Kategori</option>
+                  {mainCategoryOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name || c.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* 4. Filter Subkategori */}
+                <select
+                  aria-label="Filter subkategori"
+                  value={productSubcategory}
+                  onChange={(e) => setProductSubcategory(e.target.value)}
+                  style={{ minWidth: "140px", flex: "0 1 auto" }}
+                  disabled={availableSubcategories.length === 0}
+                >
+                  <option value="all">
+                    {availableSubcategories.length === 0
+                      ? "Tanpa Subkategori"
+                      : "Semua Subkategori"}
+                  </option>
+                  {availableSubcategories.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name || s.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* 5. Filter Stok */}
+                <select
+                  aria-label="Filter stok"
+                  value={productStock}
+                  onChange={(e) => setProductStock(e.target.value)}
+                  style={{ minWidth: "130px", flex: "0 1 auto" }}
+                >
+                  <option value="all">Semua Stok</option>
+                  <option value="out_of_stock">Stok Habis (0)</option>
+                  <option value="in_stock">Stok Tersedia (&gt;0)</option>
+                  <option value="low_stock">Stok Menipis (&lt;5)</option>
+                </select>
+
+                {/* 6. Pisahkan Urutkan dari Filter */}
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--ws-muted, #64748b)",
+                      fontWeight: "600",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    Urutkan:
+                  </span>
+                  <select
+                    aria-label="Urutkan produk"
+                    value={productSort}
+                    onChange={(e) => setProductSort(e.target.value)}
+                    style={{ minWidth: "160px", flex: "0 1 auto" }}
+                  >
+                    <option value="newest">Terbaru</option>
+                    <option value="oldest">Terlama</option>
+                    <option value="bestseller">Terlaris (Penjualan Terbanyak)</option>
+                    <option value="least_sold">Kurang Laris (Penjualan Tersedikit)</option>
+                    <option value="price_high">Harga Tertinggi</option>
+                    <option value="price_low">Harga Terendah</option>
+                    <option value="stock_high">Stok Terbanyak</option>
+                    <option value="stock_low">Stok Tersedikit</option>
+                  </select>
+                </div>
+
+                {/* 7. Tombol Reset Filter */}
+                {isProductFilterActive && (
+                  <button
+                    type="button"
+                    className="ws-button secondary"
+                    onClick={resetProductFilters}
+                    title="Kembalikan filter dan pengurutan ke awal"
+                    style={{
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      height: "36px",
+                    }}
+                  >
+                    <RotateCcw size={13} />
+                    <span>Reset Filter</span>
+                  </button>
+                )}
+
+                <span
+                  className="ws-muted"
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: "12px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {productRows.length} dari {products.length} produk
+                </span>
               </div>
               {productRows.length ? (
                 <div className="ws-table-scroll">
@@ -1949,6 +2818,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                 <b>{p.name}</b>
                                 <small>
                                   {p.sku} · {categories.find((category)=>category.id===p.category)?.name || p.category}
+                                  {p.subcategory ? ` / ${categories.find((category)=>category.id===p.subcategory)?.name || p.subcategory}` : ""}
                                 </small>
                               </div>
                             </div>
@@ -1956,7 +2826,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           <td>{money(p.price)}</td>
                           <td>
                             <b>{p.stock}</b> unit
-                            <small>{p.variants.length} varian</small>
+                            <small>{p.variants.length} varian · Terjual {p.soldUnits || 0}</small>
                           </td>
                           <td>
                             <Status tone={p.active ? "success" : "neutral"}>
@@ -2002,7 +2872,22 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 </div>
               ) : (
                 <Empty icon={Boxes} title="Produk tidak ditemukan">
-                  Coba kata pencarian atau status lain.
+                  {isProductFilterActive ? (
+                    <div>
+                      <p style={{ margin: "0 0 10px" }}>
+                        Tidak ada produk yang cocok dengan kombinasi filter atau pencarian saat ini.
+                      </p>
+                      <button
+                        type="button"
+                        className="ws-button secondary"
+                        onClick={resetProductFilters}
+                      >
+                        Reset Filter
+                      </button>
+                    </div>
+                  ) : (
+                    "Coba kata pencarian atau status lain."
+                  )}
                 </Empty>
               )}
             </section>
@@ -2857,7 +3742,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
             </div>
           )}
           {tab === "discounts" && renderDiscountsPage()}
-          {tab === "templates" && <section className="ws-panel ws-form-panel"><div className="ws-panel-heading"><h2>Pesan WhatsApp otomatis</h2><p>Gunakan placeholder dalam tanda kurung siku agar sistem menggantinya dengan data pesanan.</p><small>[nama] · [nomor_pesanan] · [total] · [nomor_resi] · [kurir] · [toko]</small></div>{settings?.waTemplates && <form className="ws-form-grid" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const fields=Object.fromEntries(new FormData(form));saveStoreSettings({settings:{waTemplates:fields}},"Template WhatsApp disimpan.");}}>{[["purchased","Pembayaran berhasil"],["processing","Pesanan diproses"],["shipped","Pesanan dikirim"],["delivered","Pesanan telah sampai"]].map(([key,label])=><label className="ws-wide" key={key}>{label}<textarea name={key} rows="3" defaultValue={settings.waTemplates[key]||""}/></label>)}<div className="ws-wide ws-form-actions"><button className="ws-button primary">Simpan template</button></div></form>}</section>}
+          {tab === "templates" && renderTemplatesPage()}
           {tab === "team" && <><section className="ws-panel ws-form-panel"><div className="ws-panel-heading"><h2>Tambah pimpinan atau karyawan</h2><p>Pimpinan melihat laporan kinerja; karyawan fokus pada pemantauan dan pemrosesan pesanan.</p></div><form className="ws-inline-expense" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const f=Object.fromEntries(new FormData(form));perform(()=>api("/admin/users",{method:"POST",body:f}),"Akun tim berhasil dibuat.").then((ok)=>ok&&form.reset());}}><label>Nama<input name="name" required/></label><label>Email masuk<input name="email" type="email" required/></label><label>WhatsApp<input name="phone"/></label><label>Kata sandi sementara<input name="password" minLength="12" required/></label><label>Peran<select name="role"><option value="staff">Karyawan</option><option value="manager">Pimpinan</option></select></label><button className="ws-button primary">Buat akun</button></form></section><section className="ws-panel"><div className="ws-panel-heading"><h2>Akun terdaftar</h2></div><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Nama</th><th>Email</th><th>Nomor</th><th>Peran</th></tr></thead><tbody>{team.map((member)=><tr key={member.id}><td>{member.name}</td><td>{member.email}</td><td>{member.phone}</td><td><select aria-label={`Peran ${member.name}`} disabled={member.id===user.id} value={member.role} onChange={(event)=>perform(()=>api(`/admin/users/${member.id}/role`,{method:"PATCH",body:{role:event.target.value}}),"Peran akun diperbarui.")}><option value="customer">Pelanggan</option><option value="staff">Karyawan</option><option value="manager">Pimpinan</option><option value="admin">Admin</option></select></td></tr>)}</tbody></table></div></section></>}
           {tab === "settings" && (
             <>
@@ -3276,44 +4161,45 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 <section className="ws-panel ws-form-panel">
                   <div className="ws-panel-heading">
                     <h2>Pengiriman & Ekspedisi</h2>
-                    <p>Konfigurasi asal pengiriman kurir nasional (RajaOngkir), tarif lokal toko, dan berat default paket.</p>
+                    <p>Kelola tarif ongkos kirim manual toko dan berat default paket. Sistem pengiriman checkout menggunakan tarif manual toko.</p>
                   </div>
                   <form
                     className="ws-form-grid"
                     onSubmit={(event) => {
                       event.preventDefault();
                       const f = Object.fromEntries(new FormData(event.currentTarget));
+                      const fee = parseRupiah(f.manualShippingFee ?? f.localDeliveryFee ?? 15000);
                       saveStoreSettings(
                         {
                           settings: {
+                            manualShippingFee: fee,
+                            localDeliveryFee: fee,
                             rajaOriginId: String(f.rajaOriginId || "").trim(),
-                            localDeliveryFee: parseRupiah(f.localDeliveryFee || 0),
                             packageWeightGrams: Math.max(1, Number(f.packageWeightGrams || 1000)),
                           },
                         },
-                        "Pengaturan pengiriman berhasil disimpan."
+                        "Pengaturan ongkos kirim manual berhasil disimpan."
                       );
                     }}
                   >
+                    <label className="ws-wide">
+                      Tarif Ongkir Manual Toko (Rp)
+                      <RupiahInput
+                        name="manualShippingFee"
+                        defaultValue={settings?.manualShippingFee ?? settings?.localDeliveryFee ?? 15000}
+                        placeholder="15.000"
+                        required
+                      />
+                      <small>Biaya ongkir flat standar untuk checkout pelanggan (gratis ongkir otomatis berlaku untuk pembelanjaan minimal Rp 699.000).</small>
+                    </label>
                     <label>
-                      ID Kota / Kabupaten Asal RajaOngkir
+                      ID Kota / Kabupaten Asal (Opsional)
                       <input
                         name="rajaOriginId"
                         defaultValue={settings?.rajaOriginId || ""}
                         placeholder="Contoh: 501"
-                        required
                       />
-                      <small>Kode ID kota asal lokasi gudang/toko Anda di sistem RajaOngkir.</small>
-                    </label>
-                    <label>
-                      Ongkir Lokal Toko (Rp)
-                      <RupiahInput
-                        name="localDeliveryFee"
-                        defaultValue={settings?.localDeliveryFee || 0}
-                        placeholder="15.000"
-                        required
-                      />
-                      <small>Biaya kurir flat untuk pengiriman instan/lokal dalam kota.</small>
+                      <small>Kode asal pengiriman (dicadangkan untuk pengembangan ekspedisi selanjutnya).</small>
                     </label>
                     <label>
                       Berat Paket Default (gram)
@@ -3338,86 +4224,199 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               {/* Submenu 4: Metode Pembayaran */}
               {settingsSubmenu === "payments" && (
                 <section className="ws-panel ws-form-panel">
-                  <div className="ws-panel-heading">
-                    <h2>Kanal Pembayaran Online Xendit</h2>
-                    <p>Aktifkan atau nonaktifkan metode pembayaran yang didukung akun Xendit Anda untuk transaksi checkout pelanggan.</p>
+                  <div className="ws-panel-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "14px" }}>
+                    <div>
+                      <h2>Pengaturan Metode Pembayaran</h2>
+                      <p>Kelola metode pembayaran pelanggan toko. Pembayaran online (Bank dan E-Wallet) terhubung langsung ke Xendit, sedangkan COD diproses tunai tanpa gateway.</p>
+                    </div>
+                    {!paymentFormOpen && (
+                      <button
+                        type="button"
+                        className="ws-button primary"
+                        onClick={openAddPayment}
+                        disabled={busy}
+                      >
+                        <Plus size={16} /> Tambah Metode Pembayaran
+                      </button>
+                    )}
                   </div>
-                  <div className="ws-payments-list">
-                    {paymentMethods.map((method, index) => (
-                      <label className="ws-payment-toggle" key={method.id}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(method.enabled)}
-                          onChange={(event) =>
-                            setPaymentMethods((list) =>
-                              list.map((item, i) =>
-                                i === index ? { ...item, enabled: event.target.checked } : item
-                              )
-                            )
-                          }
-                        />
-                        <span>
-                          <b>{method.name}</b>
-                          <small>{method.group} · {method.detail}</small>
-                        </span>
-                      </label>
-                    ))}
+
+                  {paymentFormOpen && (
+                    <div className="ws-payment-form-card" style={{ background: "var(--ws-surface)", border: "1px solid var(--ws-border)", borderRadius: "10px", padding: "20px", marginBottom: "26px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "600" }}>
+                          {editingPaymentId ? "Ubah Metode Pembayaran" : "Tambah Metode Pembayaran Baru"}
+                        </h3>
+                        <button
+                          type="button"
+                          className="ws-cat-btn-icon"
+                          onClick={closePaymentForm}
+                          style={{ padding: "4px" }}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <form onSubmit={handleSavePaymentForm}>
+                        <div className="ws-form-grid" style={{ marginBottom: "18px" }}>
+                          <label>
+                            Nama Metode Pembayaran
+                            <input
+                              type="text"
+                              required
+                              placeholder="Contoh: Transfer Bank / E-Wallet & QRIS / Bayar di Tempat"
+                              value={paymentForm.name}
+                              onChange={(e) => setPaymentForm((f) => ({ ...f, name: e.target.value }))}
+                            />
+                          </label>
+                          <label>
+                            Kategori / Jenis Pembayaran
+                            <select
+                              value={paymentForm.group}
+                              onChange={(e) => setPaymentForm((f) => ({ ...f, group: e.target.value }))}
+                            >
+                              <option value="Bank">Bank (Transfer Bank Virtual Account via Xendit)</option>
+                              <option value="E-Wallet">E-Wallet (QRIS & Dompet Digital via Xendit)</option>
+                              <option value="COD">COD (Bayar Tunai di Tempat ke Kurir)</option>
+                            </select>
+                          </label>
+                          <label className="ws-wide">
+                            Informasi / Petunjuk Pembayaran untuk Pelanggan
+                            <input
+                              type="text"
+                              placeholder={
+                                paymentForm.group === "COD"
+                                  ? "Contoh: Bayar tunai langsung kepada kurir saat pesanan sampai."
+                                  : "Contoh: Pilihan bank / e-wallet dipilih langsung di halaman pembayaran Xendit."
+                              }
+                              value={paymentForm.detail}
+                              onChange={(e) => setPaymentForm((f) => ({ ...f, detail: e.target.value }))}
+                            />
+                          </label>
+                          <div className="ws-wide">
+                            <label className="ws-payment-toggle" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "10px" }}>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(paymentForm.enabled)}
+                                onChange={(e) => setPaymentForm((f) => ({ ...f, enabled: e.target.checked }))}
+                              />
+                              <span>Aktifkan metode ini agar dapat dipilih pelanggan saat checkout</span>
+                            </label>
+                          </div>
+                        </div>
+                        <div className="ws-form-actions" style={{ paddingTop: "16px", margin: 0 }}>
+                          <button className="ws-button primary" type="submit" disabled={busy}>
+                            {editingPaymentId ? "Simpan Perubahan" : "Simpan Metode"}
+                          </button>
+                          <button className="ws-button" type="button" onClick={closePaymentForm} disabled={busy}>
+                            Batal
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
+                  {/* Daftar Metode per Kategori: Bank, E-Wallet, COD */}
+                  <div className="ws-payment-groups-container" style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+                    {PAYMENT_GROUPS.map((group) => {
+                      const groupMethods = paymentMethods.filter((m) => (m.group || m.group_name) === group);
+                      const groupLabel = group === "Bank" ? "Transfer Bank" : group === "E-Wallet" ? "E-Wallet & QRIS" : "Bayar di Tempat (COD)";
+                      const groupDesc =
+                        group === "COD"
+                          ? "Pelanggan membayar tunai kepada kurir saat pesanan tiba. Pesanan langsung masuk status Diproses tanpa memanggil Xendit."
+                          : "Pelanggan memilih bank atau dompet digital spesifik langsung di halaman pembayaran resmi Xendit.";
+                      const GroupIcon = group === "Bank" ? Landmark : group === "E-Wallet" ? Wallet : Banknote;
+
+                      return (
+                        <div key={group} className="ws-payment-category-block" style={{ border: "1px solid var(--ws-border)", borderRadius: "10px", padding: "18px 20px", background: "var(--ws-panel-bg, #fff)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "10px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <GroupIcon size={20} style={{ color: "var(--ws-primary, #111)" }} />
+                              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "600" }}>{groupLabel}</h3>
+                              <span style={{ fontSize: "12px", background: "var(--ws-border, #eee)", padding: "2px 8px", borderRadius: "12px", fontWeight: 500 }}>
+                                {groupMethods.length} metode
+                              </span>
+                            </div>
+                          </div>
+                          <p style={{ margin: "0 0 14px 0", fontSize: "13px", color: "var(--ws-muted, #666)" }}>{groupDesc}</p>
+
+                          {groupMethods.length === 0 ? (
+                            <div style={{ padding: "14px", background: "var(--ws-surface, #f9f9f9)", borderRadius: "8px", fontSize: "13px", color: "var(--ws-muted, #777)", textAlign: "center" }}>
+                              Belum ada metode pembayaran untuk kategori {groupLabel}. Klik <b>Tambah Metode Pembayaran</b> untuk menambahkan.
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                              {groupMethods.map((method) => (
+                                <div
+                                  key={method.id}
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    padding: "12px 16px",
+                                    background: "var(--ws-surface, #fdfdfd)",
+                                    border: "1px solid var(--ws-border, #e5e5e5)",
+                                    borderRadius: "8px",
+                                    gap: "14px",
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <div style={{ flex: "1 1 240px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                                      <b style={{ fontSize: "14px" }}>{method.name}</b>
+                                      <span
+                                        style={{
+                                          fontSize: "11px",
+                                          fontWeight: 600,
+                                          padding: "2px 7px",
+                                          borderRadius: "4px",
+                                          background: method.enabled ? "#e6f7ed" : "#f1f1f1",
+                                          color: method.enabled ? "#0d8a43" : "#777",
+                                        }}
+                                      >
+                                        {method.enabled ? "Aktif" : "Nonaktif"}
+                                      </span>
+                                    </div>
+                                    <small style={{ color: "var(--ws-muted, #666)", fontSize: "12px" }}>
+                                      {method.detail || "(Tidak ada informasi tambahan)"}
+                                    </small>
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12px", marginRight: "6px" }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(method.enabled)}
+                                        disabled={busy}
+                                        onChange={() => togglePaymentMethod(method)}
+                                      />
+                                      <span>{method.enabled ? "Aktif" : "Nonaktif"}</span>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      className="ws-button small"
+                                      disabled={busy}
+                                      onClick={() => openEditPayment(method)}
+                                      title="Ubah metode pembayaran ini"
+                                    >
+                                      <Edit2 size={13} /> Ubah
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ws-button small danger"
+                                      disabled={busy}
+                                      onClick={() => handleDeletePayment(method)}
+                                      title="Hapus metode pembayaran ini"
+                                    >
+                                      <Trash2 size={13} /> Hapus
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="ws-form-actions" style={{ marginTop: "16px", marginBottom: "28px" }}>
-                    <button
-                      className="ws-button primary"
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        saveStoreSettings(
-                          {
-                            paymentMethods: paymentMethods.map((method, index) => ({
-                              id: method.id,
-                              enabled: Boolean(method.enabled),
-                              sortOrder: index,
-                            })),
-                          },
-                          "Metode pembayaran aktif berhasil diperbarui."
-                        )
-                      }
-                    >
-                      Simpan Metode Pembayaran
-                    </button>
-                  </div>
-                  <hr style={{ margin: "24px 0", borderColor: "var(--ws-border)" }} />
-                  <div className="ws-panel-heading">
-                    <h3>Tambah Kanal Pembayaran Xendit</h3>
-                    <p>Tambahkan metode pembayaran baru dari daftar kanal yang didukung.</p>
-                  </div>
-                  <form
-                    className="ws-inline-expense"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      const f = Object.fromEntries(new FormData(event.currentTarget));
-                      const method = supportedPayments.find((item) => item.id === f.id);
-                      if (method)
-                        perform(
-                          () => api("/admin/payment-methods", { method: "POST", body: method }),
-                          "Metode pembayaran baru berhasil ditambahkan."
-                        );
-                    }}
-                  >
-                    <label>
-                      Pilih Kanal Xendit
-                      <select name="id">
-                        {supportedPayments
-                          .filter((item) => !paymentMethods.some((current) => current.id === item.id))
-                          .map((item) => (
-                            <option value={item.id} key={item.id}>
-                              {item.name} ({item.group})
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <button className="ws-button" disabled={busy}>
-                      Tambah Metode
-                    </button>
-                  </form>
                 </section>
               )}
 

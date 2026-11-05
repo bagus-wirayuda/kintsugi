@@ -1,4 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 export const fail = (status, message) =>
   Object.assign(new Error(message), { status });
@@ -93,13 +95,47 @@ export function createGateway(env = process.env, transport = fetch) {
 
 /**
  * Normalisasi nomor telepon ke format internasional (62xxx).
- * Menerima format 08xx, +628xx, 628xx.
+ * Menerima format 08xx, 8xx, +628xx, 628xx, 6208xx.
  */
 export function normalizePhone(phone) {
   let p = String(phone || "").replace(/[\s()\-+]/g, "");
   if (p.startsWith("0")) p = "62" + p.slice(1);
-  else if (p.startsWith("+62")) p = p.slice(1);
+  else if (p.startsWith("8")) p = "62" + p;
+  else if (p.startsWith("620")) p = "62" + p.slice(3);
   return p;
+}
+
+/**
+ * Baca konfigurasi Wablas secara dinamis (sinkron dengan file .env di disk jika runtime node aktif).
+ */
+export function getWablasConfig(env = process.env) {
+  let host = env.WABLAS_API_HOST;
+  let token = env.WABLAS_TOKEN || env.WABLAS_API_KEY || env.RESEND_API_KEY;
+  let secret = env.WABLAS_SECRET_KEY;
+
+  if (env === process.env) {
+    try {
+      const envPath = path.resolve(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const [k, ...vParts] = trimmed.split("=");
+          const v = vParts.join("=").trim().replace(/^["']|["']$/g, "");
+          if (k === "WABLAS_API_HOST" && v) host = v;
+          if ((k === "WABLAS_TOKEN" || k === "WABLAS_API_KEY") && v) token = v;
+          if (k === "WABLAS_SECRET_KEY" && v) secret = v;
+        }
+      }
+    } catch (_) {}
+  }
+
+  return {
+    host: (host || "https://texas.wablas.com").replace(/\/$/, ""),
+    token: token || "",
+    secret: secret || "",
+  };
 }
 
 /**
@@ -110,55 +146,94 @@ export function normalizePhone(phone) {
  * @returns {Promise<object>} Hasil dari Wablas API
  */
 export async function sendWhatsApp(wa, env = process.env, transport = fetch) {
-  if (!env.WABLAS_TOKEN && !env.RESEND_API_KEY)
+  const { host: apiHost, token: rawToken, secret: rawSecret } = getWablasConfig(env);
+
+  if (!rawToken)
     throw fail(503, "Layanan WhatsApp belum dikonfigurasi. Hubungi pengelola.");
-  const apiHost = (env.WABLAS_API_HOST || "https://smg.wablas.com").replace(
-    /\/$/,
-    "",
-  );
-  const token = env.WABLAS_TOKEN || env.RESEND_API_KEY;
+
+  let authHeader = rawToken;
+  if (rawSecret) {
+    // Wablas format: <token_or_api_key>.<secret_key>
+    // Primary key biasanya ~50 karakter, secret key ~8 karakter.
+    const [primary, secret] =
+      rawToken.length < rawSecret.length
+        ? [rawSecret, rawToken]
+        : [rawToken, rawSecret];
+    authHeader = `${primary}.${secret}`;
+  }
+
+  const normalizedPhone = normalizePhone(wa.phone);
+  if (!/^628\d{7,13}$/.test(normalizedPhone)) {
+    throw Object.assign(
+      fail(400, "Nomor WhatsApp tidak valid (contoh: 081234567890)."),
+      { code: "WA_INVALID_PHONE" }
+    );
+  }
+
   let response;
   try {
     response = await transport(apiHost + "/api/send-message", {
       method: "POST",
       signal: AbortSignal.timeout(15000),
       headers: {
-        Authorization: env.WABLAS_SECRET_KEY
-          ? `${token}.${env.WABLAS_SECRET_KEY}`
-          : token,
+        Authorization: authHeader,
         "Content-Type": "application/json",
         ...(wa.id ? { "Idempotency-Key": wa.id } : {}),
       },
       body: JSON.stringify({
-        phone: normalizePhone(wa.phone),
+        phone: normalizedPhone,
         message: wa.message,
-        to: [wa.recipient || normalizePhone(wa.phone)],
+        flag: "instant",
+        ref_id: wa.id || undefined,
+        to: [wa.recipient || normalizedPhone],
         subject: wa.subject || "Kode verifikasi Liny Jaya",
       }),
     });
-  } catch {
-    throw fail(
-      502,
-      "WhatsApp belum berhasil dikirim. Periksa koneksi dan coba kirim ulang.",
-    );
-  }
-  const result = await response.json().catch(() => null);
-  if (!response.ok || result?.status === false) {
-    let code = "WA_PROVIDER_ERROR",
-      message =
-        "Layanan WhatsApp belum berhasil mengirim pesan. Silakan coba lagi.";
-    if (response.status === 429) {
-      code = "WA_RATE_LIMITED";
-      message =
-        "Layanan WhatsApp sedang membatasi pengiriman. Tunggu sebentar lalu coba lagi.";
-    } else if (response.status === 401 || response.status === 403) {
-      code = "WA_AUTH_ERROR";
-      message =
-        "Token Wablas ditolak atau tidak memiliki izin kirim. Hubungi pengelola.";
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw Object.assign(
+        fail(504, "Koneksi ke gateway WhatsApp waktu habis (timeout). Silakan coba lagi."),
+        { code: "WA_TIMEOUT" }
+      );
     }
     throw Object.assign(
       fail(
-        response.status === 429 || response.status === 401 || response.status === 403
+        502,
+        "Gagal menghubungi server WhatsApp: " + (err.message || "koneksi terputus") + ". Periksa koneksi internet.",
+      ),
+      { code: "WA_NETWORK_ERROR" }
+    );
+  }
+
+  const result = await response.json().catch(() => null);
+  if (!response.ok || result?.status === false) {
+    let code = "WA_PROVIDER_ERROR";
+    const providerMsg = String(result?.message || "");
+    let message = providerMsg || "Layanan WhatsApp belum berhasil mengirim pesan. Silakan coba lagi.";
+
+    if (response.status === 429) {
+      code = "WA_RATE_LIMITED";
+      message =
+        "Layanan WhatsApp sedang membatasi pengiriman (rate limited). Tunggu sebentar lalu coba lagi.";
+    } else if (response.status === 401 || response.status === 403) {
+      code = "WA_AUTH_ERROR";
+      message = providerMsg
+        ? "Kredensial WhatsApp: " + providerMsg
+        : "Kredensial token WhatsApp ditolak atau kedaluwarsa. Hubungi pengelola toko.";
+    } else if (
+      providerMsg.toLowerCase().includes("disconnected") ||
+      providerMsg.toLowerCase().includes("qr code")
+    ) {
+      code = "WA_DEVICE_DISCONNECTED";
+      message =
+        "Perangkat WhatsApp toko terputus (perlu scan QR ulang). Hubungi admin toko atau gunakan opsi masuk kata sandi jika sudah memiliki akun.";
+    } else if (providerMsg) {
+      message = "Layanan WhatsApp: " + providerMsg;
+    }
+
+    throw Object.assign(
+      fail(
+        response.status === 429 || response.status === 401 || response.status === 403 || code === "WA_DEVICE_DISCONNECTED"
           ? 503
           : 502,
         message,
@@ -166,13 +241,21 @@ export async function sendWhatsApp(wa, env = process.env, transport = fetch) {
       {
         code,
         providerStatus: response.status,
-        providerError:
-          typeof result?.message === "string"
-            ? result.message
-            : "invalid_response",
+        providerError: providerMsg || "invalid_response",
       },
     );
   }
+
+  if (Array.isArray(result?.data?.messages) && result.data.messages.length === 0) {
+    throw Object.assign(
+      fail(
+        400,
+        "Nomor WhatsApp tidak valid atau tidak dapat menerima pesan. Periksa kembali nomor yang Anda masukkan.",
+      ),
+      { code: "WA_INVALID_PHONE" }
+    );
+  }
+
   return result;
 }
 

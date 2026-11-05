@@ -5181,3 +5181,311 @@ img, svg { max-width: 100%; }
     font-size: 18px;
   }
 }
+
+/* ==========================================================================
+   DETAIL PRODUK MODE PONSEL (RESPONSIVE MOBILE PRODUCT MODAL)
+   ========================================================================== */
+@media (max-width: 768px) {
+  /* 1. Backdrop Overlay: Terposisi dengan aman di atas header & bottom nav */
+  .overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 1200 !important;
+    background: rgba(15, 23, 42, 0.72) !important;
+    backdrop-filter: blur(5px) !important;
+    -webkit-backdrop-filter: blur(5px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: max(18px, calc(env(safe-area-inset-top, 0px) + 14px)) 12px max(24px, calc(76px + env(safe-area-inset-bottom, 0px))) !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  /* 2. Dialog Card: Layout vertikal satu kolom, rapi, dan terisolasi */
+  .product-dialog {
+    display: flex !important;
+    flex-direction: column !important;
+    grid-template-columns: 1fr !important;
+    width: 100% !important;
+    max-width: 480px !important;
+    max-height: calc(100dvh - 36px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+    border-radius: 16px !important;
+    border: 1px solid #dbeafe !important;
+    border-top: 4px solid var(--ks-gold, #c59b27) !important;
+    box-shadow: 0 20px 48px -8px rgba(15, 23, 42, 0.35) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    position: relative !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* 3. Tombol Tutup (X): Selalu terlihat (Sticky), mudah diklik, dan tidak tertutup header */
+  .product-dialog > .close {
+    position: sticky !important;
+    top: 12px !important;
+    align-self: flex-end !important;
+    margin-right: 12px !important;
+    margin-top: 12px !important;
+    margin-bottom: -52px !important;
+    z-index: 60 !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    min-height: 40px !important;
+    border-radius: 50% !important;
+    background: #ffffff !important;
+    border: 1.5px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    display: grid !important;
+    place-items: center !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16) !important;
+    cursor: pointer !important;
+    transform: none !important;
+    padding: 0 !important;
+    touch-action: manipulation !important;
+    transition: transform 0.15s ease, background 0.15s ease !important;
+  }
+  .product-dialog > .close:active {
+    transform: scale(0.92) !important;
+    background: #f1f5f9 !important;
+  }
+  .product-dialog > .close svg {
+    width: 20px !important;
+    height: 20px !important;
+    stroke-width: 2.2 !important;
+  }
+
+  /* 4. Gambar Produk: Wadah terpisah, bersih, tidak tertumpuk teks */
+  .detail-image {
+    width: 100% !important;
+    height: 280px !important;
+    min-height: 240px !important;
+    max-height: 320px !important;
+    background: #f8fafc !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px !important;
+    box-sizing: border-box !important;
+    position: relative !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+  }
+  .detail-image img {
+    max-width: 100% !important;
+    max-height: 250px !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    display: block !important;
+    margin: auto !important;
+  }
+
+  /* 5. Informasi Produk: Tepat di bawah gambar dengan latar belakang putih solid */
+  .detail-info {
+    background: #ffffff !important;
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 22px 18px calc(48px + env(safe-area-inset-bottom, 0px)) !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* 6. Tipografi dan Elemen Rinci */
+  .detail-info > .eyebrow {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: #086169 !important;
+    margin: 0 0 6px 0 !important;
+    line-height: 1.4 !important;
+  }
+
+  .detail-info h1 {
+    font-size: 21px !important;
+    font-weight: 700 !important;
+    line-height: 1.35 !important;
+    color: #0f172a !important;
+    margin: 0 0 8px 0 !important;
+    letter-spacing: -0.02em !important;
+    word-break: break-word !important;
+  }
+
+  .detail-info .rating {
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: #855e0a !important;
+    margin: 0 0 12px 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+
+  .detail-price {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    margin: 0 0 14px 0 !important;
+    display: flex !important;
+    align-items: baseline !important;
+    gap: 10px !important;
+  }
+  .detail-price del {
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    color: #94a3b8 !important;
+    text-decoration: line-through !important;
+  }
+
+  .detail-info > p {
+    font-size: 13.5px !important;
+    line-height: 1.6 !important;
+    color: #334155 !important;
+    margin: 0 0 18px 0 !important;
+  }
+
+  .detail-info > label {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    margin: 14px 0 8px 0 !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+  .detail-info > label > span {
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    color: #64748b !important;
+  }
+
+  .color-choices {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    margin: 0 0 14px 0 !important;
+  }
+  .color-choices .ks-variant-choice {
+    min-height: 38px !important;
+    padding: 6px 12px !important;
+    border-radius: 8px !important;
+    font-size: 12.5px !important;
+  }
+
+  .product-size-label {
+    margin: 14px 0 4px 0 !important;
+  }
+  .product-size-hint {
+    font-size: 12px !important;
+    color: #64748b !important;
+    margin: 0 0 8px 0 !important;
+  }
+
+  .size-choices {
+    margin: 0 0 12px 0 !important;
+  }
+  .size-choices.has-dimensions {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .size-choices.has-dimensions button {
+    min-height: 56px !important;
+    border-radius: 8px !important;
+  }
+  .selected-size-summary {
+    font-size: 12px !important;
+    color: #086169 !important;
+    margin: 4px 0 14px 0 !important;
+  }
+
+  .detail-info > .qty {
+    display: inline-flex !important;
+    align-items: center !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+    margin: 0 0 18px 0 !important;
+    width: fit-content !important;
+    background: #ffffff !important;
+  }
+  .detail-info > .qty button {
+    width: 42px !important;
+    height: 42px !important;
+    background: #f1f5f9 !important;
+    border: none !important;
+    display: grid !important;
+    place-items: center !important;
+    color: #0f172a !important;
+    cursor: pointer !important;
+  }
+  .detail-info > .qty span {
+    min-width: 44px !important;
+    text-align: center !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+  }
+
+  .detail-info > .btn {
+    width: 100% !important;
+    min-height: 48px !important;
+    font-size: 14.5px !important;
+    font-weight: 600 !important;
+    border-radius: 10px !important;
+    margin: 0 0 10px 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+  }
+  .detail-info > .btn.black.full {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    border: none !important;
+  }
+  .detail-info > .btn.outline.full {
+    border: 1.5px solid #0b4d54 !important;
+    color: #0b4d54 !important;
+    background: #ffffff !important;
+  }
+
+  .detail-delivery {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 10px !important;
+    padding: 12px 14px !important;
+    margin: 14px 0 !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+    font-size: 12.5px !important;
+    color: #334155 !important;
+    line-height: 1.4 !important;
+  }
+
+  .detail-info details {
+    border-top: 1px solid #e2e8f0 !important;
+    padding: 12px 0 6px !important;
+    margin: 10px 0 0 0 !important;
+    font-size: 13px !important;
+    color: #334155 !important;
+  }
+  .detail-info details summary {
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    cursor: pointer !important;
+    margin-bottom: 8px !important;
+  }
+}

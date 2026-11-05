@@ -4,9 +4,9 @@ export const addressSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.email().max(254),
   phone: z.string().regex(/^[0-9+ ()-]{8,20}$/),
-  street: z.string().trim().min(10).max(500),
-  city: z.string().trim().min(2).max(100),
-  postal: z.string().trim().max(5).refine((value) => !value || /^\d{5}$/.test(value), "Kode pos harus 5 digit."),
+  street: z.string().trim().min(1).max(500),
+  city: z.string().trim().min(1).max(100),
+  postal: z.string().trim().max(10).optional().default("").refine((value) => !value || /^\d{5}$/.test(value), "Kode pos harus 5 digit."),
 });
 export const orderSchema = z.object({
   items: z
@@ -28,11 +28,19 @@ export const orderSchema = z.object({
   address: addressSchema,
   shipping: z.string().trim().min(1).max(100),
   payment: z.string().trim().min(2).max(60).default("xendit"),
-  shippingOption: z.object({ destinationId:z.coerce.number().int().positive().optional(), courier:z.string().trim().max(30).optional(), service:z.string().trim().max(80).optional(), cost:z.number().int().nonnegative().optional(), etd:z.string().max(60).optional() }).optional(),
+  shippingOption: z
+    .object({
+      destinationId: z.any().optional(),
+      courier: z.any().optional(),
+      service: z.any().optional(),
+      cost: z.any().optional(),
+      etd: z.any().optional(),
+    })
+    .nullish(),
   checkoutKey: z.string().uuid(),
   coupon: z.enum(["", "LINY10"]).default(""),
 });
-export function calculateTotals(items, coupon, shipping, deliveryOverride) {
+export function calculateTotals(items, coupon, shipping, deliveryOverride, manualFeeOverride = 15000) {
   const subtotal = items.reduce((s, i) => s + (Number(String(i.price).replace(/\D/g, "")) || 0) * (Number(i.quantity) || 1), 0);
   if (!Number.isSafeInteger(subtotal) || subtotal > 100000000)
     throw Object.assign(new Error("Total pesanan melebihi batas."), {
@@ -40,12 +48,14 @@ export function calculateTotals(items, coupon, shipping, deliveryOverride) {
     });
   const discount =
     coupon === "LINY10" ? Math.min(Math.round(subtotal * 0.1), 100000) : 0;
-  const delivery = deliveryOverride ?? (
-    shipping === "pickup" || subtotal >= 699000
-      ? 0
-      : shipping === "express"
-        ? 35000
-        : 15000);
+  const defaultFee = Number(manualFeeOverride) >= 0 ? Number(manualFeeOverride) : 15000;
+  const delivery = deliveryOverride !== undefined && deliveryOverride !== null
+    ? Number(deliveryOverride)
+    : (shipping === "pickup" || subtotal >= 699000
+        ? 0
+        : shipping === "express"
+          ? Math.max(defaultFee, 35000)
+          : defaultFee);
   return {
     subtotal,
     discount,

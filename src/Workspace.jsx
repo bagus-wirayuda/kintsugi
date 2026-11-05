@@ -15,26 +15,41 @@ export default function Workspace({
   actions,
 }) {
   const [open, setOpen] = React.useState(false);
+  const isStaffRole = ["admin", "manager", "staff"].includes(user?.role);
+  const isAdminWorkspace = admin || isStaffRole;
+  const roleLabel =
+    user?.role === "admin"
+      ? "Administrator"
+      : user?.role === "manager"
+      ? "Pimpinan"
+      : user?.role === "staff"
+      ? "Karyawan"
+      : user?.role === "customer"
+      ? "Pelanggan"
+      : isAdminWorkspace
+      ? "Administrator"
+      : "Pelanggan";
+
   return (
-    <div className={"workspace " + (admin ? "ws-admin" : "ws-customer")}>
+    <div className={"workspace " + (isAdminWorkspace ? "ws-admin" : "ws-customer")}>
       <aside className={"ws-sidebar " + (open ? "is-open" : "")}>
         <a
           className="ws-logo"
-          href={admin ? (user?.role === "staff" ? "#admin/orders" : "#admin/overview") : "#account/overview"}
+          href={isAdminWorkspace ? (user?.role === "staff" ? "#admin/orders" : "#admin/overview") : "#account/overview"}
           onClick={(e) => {
             if (onSelect) {
               e.preventDefault();
-              onSelect(admin ? (user?.role === "staff" ? "orders" : "overview") : "overview");
+              onSelect(isAdminWorkspace ? (user?.role === "staff" ? "orders" : "overview") : "overview");
             }
           }}
         >
           <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
           <div>
-            <small>{admin ? `${config?.brand || "TOKO"} / PENGELOLAAN` : "AKUN PELANGGAN"}</small>
+            <small>{isAdminWorkspace ? `${config?.brand || "TOKO"} / PENGELOLAAN` : "AKUN PELANGGAN"}</small>
           </div>
         </a>
-        <p className="ws-nav-caption">{admin ? "RUANG KERJA" : "MENU AKUN"}</p>
-        <nav aria-label={admin ? "Navigasi admin" : "Navigasi akun"}>
+        <p className="ws-nav-caption">{isAdminWorkspace ? "RUANG KERJA" : "MENU AKUN"}</p>
+        <nav aria-label={isAdminWorkspace ? "Navigasi admin" : "Navigasi akun"}>
           {items.map(({ id, label, icon: Icon, count }) => (
             <button
               key={id}
@@ -52,11 +67,7 @@ export default function Workspace({
           ))}
         </nav>
         <div className="ws-sidebar-bottom">
-          {admin ? (
-            <a href="#home">
-              <ArrowLeft size={18} /> Lihat tampilan toko
-            </a>
-          ) : (
+          {!isAdminWorkspace && (
             <a href="#catalog">
               <ArrowLeft size={18} /> Kembali ke katalog
             </a>
@@ -66,7 +77,7 @@ export default function Workspace({
             Keluar dari akun
           </button>
           <small>
-            {admin
+            {isAdminWorkspace
               ? "Akun ini digunakan untuk pengelolaan toko."
               : "Favorit, pesanan, dan informasi Anda."}
           </small>
@@ -88,14 +99,14 @@ export default function Workspace({
           >
             {open ? <X /> : <Menu />}
           </button>
-          <span>{admin ? "Pusat pengelolaan toko" : "Ruang pelanggan"}</span>
+          <span>{isAdminWorkspace ? "Pusat pengelolaan toko" : "Ruang pelanggan"}</span>
           <div className="ws-user">
             <span className="ws-avatar">
               {user?.name?.slice(0, 2).toUpperCase()}
             </span>
             <div>
               <b>{user?.name}</b>
-              <small>{user?.role === "manager" ? "Pimpinan" : user?.role === "staff" ? "Karyawan" : admin ? "Administrator" : "Pelanggan"}</small>
+              <small>{roleLabel}</small>
             </div>
           </div>
         </header>
@@ -103,7 +114,7 @@ export default function Workspace({
           <div className="ws-page-heading">
             <div>
               <p className="ws-kicker">
-                {admin ? `${config?.brand || "TOKO"} / OPERASIONAL` : "AKUN SAYA"}
+                {isAdminWorkspace ? `${config?.brand || "TOKO"} / OPERASIONAL` : "AKUN SAYA"}
               </p>
               <h1>{title}</h1>
               {subtitle && <p>{subtitle}</p>}

@@ -44,10 +44,11 @@ export function createPayments(pool, gateway) {
     const brandValue=brandRow.rows[0]?.setting_value;
     const brand=brandValue;
     const defaults = {
-      purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] berhasil. Total: [total].",
-      processing: "Pesanan [nomor_pesanan] sedang kami proses. Terima kasih telah berbelanja di [toko].",
-      shipped: "Pesanan [nomor_pesanan] dikirim. Resi: [nomor_resi]. Kurir: [kurir].",
-      delivered: "Pesanan [nomor_pesanan] telah sampai. Terima kasih telah berbelanja di [toko].",
+      purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] sebesar [total] berhasil dikonfirmasi. Pesanan Anda segera disiapkan oleh [toko]. Terima kasih!",
+      processing: "Halo [nama], pesanan [nomor_pesanan] sedang diproses dan dikemas dengan teliti oleh tim [toko]. Kami akan mengabari saat pesanan siap dikirim.",
+      shipped: "Halo [nama], pesanan [nomor_pesanan] telah dikirim menggunakan kurir [kurir]. Nomor resi pengiriman Anda: *[nomor_resi]*. Lacak pesanan Anda secara berkala.",
+      delivered: "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
+      cancelled: "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
     };
     return renderWhatsAppTemplate(config?.[key] || defaults[key], {...values,toko:values.toko||brand||"Kintsugi"});
   }
@@ -65,6 +66,32 @@ export function createPayments(pool, gateway) {
       if (o.payment_status !== "CREATING") {
         await c.query("COMMIT");
         return o;
+      }
+      const method = (await c.query("SELECT group_name FROM store_payment_methods WHERE id=?", [o.payment])).rows[0];
+      const isCod = o.payment === "COD" || method?.group_name === "COD";
+      if (isCod) {
+        await c.query(
+          "UPDATE orders SET payment_status='PENDING',status='Diproses',payment_url='/#account' WHERE id=?",
+          [o.id],
+        );
+        result = {
+          ...o,
+          payment_status: "PENDING",
+          status: "Diproses",
+          payment_url: "/#account",
+        };
+        const address = orderRow(o).address;
+        const values = {
+          nama: address.name,
+          nomor_pesanan: o.id,
+          total: `Rp${Number(o.total).toLocaleString("id-ID")}`,
+          toko: "Kintsugi",
+          nomor_resi: o.tracking_number || "",
+          kurir: o.shipping_name || "",
+        };
+        await queueWhatsApp(c, "processing/" + o.id, address.phone, await notification(c, "processing", values));
+        await c.query("COMMIT");
+        return result;
       }
       try {
         const invoice = await gateway.create(o);
@@ -191,6 +218,8 @@ export function createPayments(pool, gateway) {
     }
   }
   async function sync(order) {
+    const isCod = order.payment === "COD" || (await pool.query("SELECT group_name FROM store_payment_methods WHERE id=?", [order.payment])).rows[0]?.group_name === "COD";
+    if (isCod) return;
     if (order.payment_status === "CREATING") order = await ensure(order.id);
     if (
       order.invoice_id &&
@@ -199,6 +228,27 @@ export function createPayments(pool, gateway) {
       await apply(await gateway.get(order.invoice_id));
   }
   async function cancel(order) {
+    const isCod = order.payment === "COD" || (await pool.query("SELECT group_name FROM store_payment_methods WHERE id=?", [order.payment])).rows[0]?.group_name === "COD";
+    if (isCod) {
+      if (order.status !== "Menunggu pembayaran" && order.status !== "Diproses")
+        throw fail(409, "Pesanan ini tidak dapat dibatalkan.");
+      const c = await pool.connect();
+      try {
+        await c.query("START TRANSACTION");
+        const o = (await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])).rows[0];
+        if (!o.stock_released) {
+          await releaseStock(c, o);
+          await c.query("UPDATE orders SET status='Dibatalkan',payment_status='CANCELLED' WHERE id=?", [o.id]);
+        }
+        await c.query("COMMIT");
+        return;
+      } catch (e) {
+        await c.query("ROLLBACK");
+        throw e;
+      } finally {
+        c.release();
+      }
+    }
     if (
       order.status !== "Menunggu pembayaran" ||
       !["CREATING", "PENDING"].includes(order.payment_status)

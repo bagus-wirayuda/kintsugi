@@ -87,8 +87,14 @@ export default function Account({
     };
   }, [initialTab]);
   useEffect(() => {
+    if (user && user.role !== "customer") {
+      nav(user.role === "staff" ? "admin/orders" : "admin/overview", false, true);
+    }
+  }, [user, nav]);
+  useEffect(() => {
     let alive = true;
     async function load() {
+      if (user && user.role !== "customer") return;
       try {
         const [o, p] = await Promise.all([api("/orders"), api("/me/profile")]);
         if (!alive) return;
@@ -201,6 +207,17 @@ export default function Account({
       (filter === "complete" && o.status === "Selesai") ||
       (filter === "cancelled" && o.status === "Dibatalkan"),
   );
+  if (user && user.role !== "customer") {
+    const adminDest = user.role === "staff" ? "admin/orders" : "admin/overview";
+    nav(adminDest, false, true);
+    return (
+      <div className="workspace">
+        <div className="ws-loading" role="status">
+          Mengalihkan ke panel pengelolaan…
+        </div>
+      </div>
+    );
+  }
   return (
     <Workspace
       config={config}

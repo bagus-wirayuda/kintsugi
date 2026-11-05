@@ -17,15 +17,17 @@ const dimensionSize = (value) => {
 
 function seedProductDetails(product) {
   const name = product.name.toLowerCase();
-  const motif = name.includes("dino") ? "Dinosaurus" : name.includes("bintang") || name.includes("moon") || name.includes("cloud") ? "Langit & bintang" : name.includes("animal") || name.includes("safari") || name.includes("bear") ? "Karakter" : name.includes("floral") || name.includes("botanical") || name.includes("daisy") ? "Floral" : name.includes("kotak") || name.includes("gingham") ? "Kotak" : name.includes("geometrik") ? "Geometrik" : name.includes("stripe") || name.includes("dobby") ? "Stripe" : name.includes("rumbai") || name.includes("rempel") ? "Rumbai" : name.includes("quilted") ? "Quilted" : name.includes("embos") ? "Embos" : name.includes("waterproof") || name.includes("anti air") ? "Waterproof" : name.includes("motif") ? "Motif dekoratif" : "Polos";
-  const weightGrams = product.category === "Sarung Bantal & Guling" ? 450 : product.category === "Pelindung Kasur" ? 1100 : product.category === "Set Sprei" ? 1700 : name.includes("bayi") || name.includes("baby") ? 700 : 1000;
-  return { costPrice: Math.round(product.price * 0.58 / 1000) * 1000, motif, weightGrams };
+  const motif = product.motif || (name.includes("dino") ? "Dinosaurus" : name.includes("bintang") || name.includes("moon") || name.includes("cloud") ? "Langit & bintang" : name.includes("animal") || name.includes("safari") || name.includes("bear") ? "Karakter" : name.includes("floral") || name.includes("botanical") || name.includes("daisy") ? "Floral" : name.includes("kotak") || name.includes("gingham") ? "Kotak" : name.includes("geometrik") ? "Geometrik" : name.includes("stripe") || name.includes("dobby") ? "Stripe" : name.includes("rumbai") || name.includes("rempel") ? "Rumbai" : name.includes("quilted") ? "Quilted" : name.includes("embos") ? "Embos" : name.includes("waterproof") || name.includes("anti air") ? "Waterproof" : name.includes("motif") ? "Motif dekoratif" : "Polos");
+  const weightGrams = product.weightGrams || (product.category === "Sarung Bantal & Guling" ? 450 : product.category === "Pelindung Kasur" ? 1100 : product.category === "Set Sprei" ? 1700 : name.includes("bayi") || name.includes("baby") ? 700 : 1000);
+  const costPrice = product.costPrice || (Math.round(product.price * 0.58 / 1000) * 1000);
+  const variationLabel = product.variationLabel || "Warna";
+  return { costPrice, motif, weightGrams, variationLabel };
 }
 
 function stableDemoStock(productId, size, color) {
   const seed = `${productId}|${size}|${color}`;
   const hash = [...seed].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7);
-  return 8 + (hash % 32);
+  return 15 + (hash % 28);
 }
 
 async function syncSepraiCatalog(target) {
@@ -35,18 +37,35 @@ async function syncSepraiCatalog(target) {
     for (const p of products) {
       const details = seedProductDetails(p);
       await client.query(
-        `INSERT INTO products(id,sku,name,category,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,rating,reviews,is_new,active)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
-         ON DUPLICATE KEY UPDATE id=VALUES(id)`,
+        `INSERT INTO products(id,sku,name,category,subcategory,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,rating,reviews,is_new,active)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+         ON DUPLICATE KEY UPDATE
+           sku=VALUES(sku),
+           name=VALUES(name),
+           category=VALUES(category),
+           subcategory=VALUES(subcategory),
+           price=VALUES(price),
+           old_price=VALUES(old_price),
+           cost_price=VALUES(cost_price),
+           variation_label=VALUES(variation_label),
+           motif=VALUES(motif),
+           weight_grams=VALUES(weight_grams),
+           image=VALUES(image),
+           description=VALUES(description),
+           rating=VALUES(rating),
+           reviews=VALUES(reviews),
+           is_new=VALUES(is_new),
+           active=VALUES(active)`,
         [
           p.id,
           p.sku,
           p.name,
           p.category,
+          p.subcategory || "",
           p.price,
           p.oldPrice,
           details.costPrice,
-          "Warna",
+          details.variationLabel,
           details.motif,
           details.weightGrams,
           p.image,
@@ -60,7 +79,12 @@ async function syncSepraiCatalog(target) {
         const d = dimensionSize(size);
         for (const color of p.colors) {
           await client.query(
-            "INSERT IGNORE INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,stock) VALUES(?,?,?,?,?,?,?)",
+            `INSERT INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,stock)
+             VALUES(?,?,?,?,?,?,?)
+             ON DUPLICATE KEY UPDATE
+               length_cm=VALUES(length_cm),
+               width_cm=VALUES(width_cm),
+               height_cm=VALUES(height_cm)`,
             [p.id, d.size, d.length, d.width, d.height, color, stableDemoStock(p.id, d.size, color)],
           );
         }
@@ -101,6 +125,7 @@ export async function initialize(target = pool, seed = true) {
     await ensureColumn("products", "variation_label", "variation_label VARCHAR(80) NOT NULL DEFAULT 'Warna'");
     await ensureColumn("products", "motif", "motif VARCHAR(100) NOT NULL DEFAULT ''");
     await ensureColumn("products", "weight_grams", "weight_grams INT UNSIGNED NOT NULL DEFAULT 1000");
+    await ensureColumn("products", "created_at", "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
     await ensureColumn("product_variants", "image_url", "image_url TEXT NULL");
     await target.query("ALTER TABLE product_variants MODIFY color VARCHAR(100) NOT NULL");
     await ensureColumn("orders", "shipping_name", "shipping_name VARCHAR(150) NOT NULL DEFAULT ''");
@@ -116,12 +141,19 @@ export async function initialize(target = pool, seed = true) {
         [category.id, category.label, catalogCategories.indexOf(category)],
       );
     }
-    for (const [index, method] of paymentMethods.entries()) {
-      await target.query(
-        "INSERT IGNORE INTO store_payment_methods(id,name,group_name,detail,enabled,sort_order) VALUES(?,?,?,?,TRUE,?)",
-        [method.id, method.name, method.group, method.detail, index],
-      );
-    }
+    // Bersihkan channel bawaan lama (QRIS, DANA, BCA, dll.) dari store_payment_methods
+    const legacyPaymentIds = [
+      "QRIS", "DANA", "OVO", "SHOPEEPAY", "LINKAJA",
+      "BCA", "BNI", "BRI", "MANDIRI", "PERMATA", "BSI", "CREDIT_CARD",
+    ];
+    await target.query("DELETE FROM store_payment_methods WHERE id IN (?)", [legacyPaymentIds]);
+
+    // Sisakan hanya metode COD sebagai contoh default di database/init
+    await target.query(
+      `INSERT INTO store_payment_methods(id, name, group_name, detail, enabled, sort_order)
+       VALUES('COD', 'Bayar di Tempat (COD)', 'COD', 'Bayar tunai langsung kepada kurir saat pesanan sampai di alamat Anda.', TRUE, 0)
+       ON DUPLICATE KEY UPDATE group_name='COD'`,
+    );
     const defaults = {
       brand: "Kintsugi",
       announcementText: "Ruang tidur yang tenang, dimulai dari tekstil yang baik.",
@@ -149,10 +181,12 @@ export async function initialize(target = pool, seed = true) {
       packageWeightGrams: 1000,
       rajaOriginId: "",
       waTemplates: {
-        purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] berhasil dan sedang kami proses. Total: [total].",
-        shipped: "Halo [nama], pesanan [nomor_pesanan] telah dikirim. Nomor resi: [nomor_resi]. Kurir: [kurir].",
-        delivered: "Halo [nama], pesanan [nomor_pesanan] telah sampai. Terima kasih telah berbelanja di [toko].",
-        processing: "Halo [nama], pesanan [nomor_pesanan] sedang kami siapkan. Terima kasih telah berbelanja di [toko].",
+        otp: "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].",
+        purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] sebesar [total] berhasil dikonfirmasi. Pesanan Anda segera disiapkan oleh [toko]. Terima kasih!",
+        processing: "Halo [nama], pesanan [nomor_pesanan] sedang diproses dan dikemas dengan teliti oleh tim [toko]. Kami akan mengabari saat pesanan siap dikirim.",
+        shipped: "Halo [nama], pesanan [nomor_pesanan] telah dikirim menggunakan kurir [kurir]. Nomor resi pengiriman Anda: *[nomor_resi]*. Lacak pesanan Anda secara berkala.",
+        delivered: "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
+        cancelled: "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
       },
     };
     for (const [key, value] of Object.entries(defaults))
@@ -987,6 +1021,95 @@ export async function initialize(target = pool, seed = true) {
 
   // Sinkronisasi katalog seprai
   await syncSepraiCatalog(target);
+
+  // Bersihkan metode bawaan lama dan sisakan hanya COD sebagai contoh default
+  const paymentMethodsMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_cleanup_payment_methods_cod_only"],
+  )).rows[0];
+  if (!paymentMethodsMigration) {
+    const legacyPaymentIds = [
+      "QRIS", "DANA", "OVO", "SHOPEEPAY", "LINKAJA",
+      "BCA", "BNI", "BRI", "MANDIRI", "PERMATA", "BSI", "CREDIT_CARD",
+    ];
+    await target.query("DELETE FROM store_payment_methods WHERE id IN (?)", [legacyPaymentIds]);
+    await target.query(
+      `INSERT INTO store_payment_methods(id, name, group_name, detail, enabled, sort_order)
+       VALUES('COD', 'Bayar di Tempat (COD)', 'COD', 'Bayar tunai langsung kepada kurir saat pesanan sampai di alamat Anda.', TRUE, 0)
+       ON DUPLICATE KEY UPDATE group_name='COD'`,
+    );
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_cleanup_payment_methods_cod_only"]);
+  }
+
+  // Finalisasi katalog 2 kategori utama: BEDDING & FASHION, pembersihan kategori usang & produk usang
+  const catalogFinalizationMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_finalize_bedding_and_fashion_catalog"],
+  )).rows[0];
+  if (!catalogFinalizationMigration) {
+    const validCategoryIds = catalogCategories.map((c) => c.id);
+    await target.query(
+      "DELETE FROM product_categories WHERE id NOT IN (?)",
+      [validCategoryIds],
+    );
+    for (const [index, cat] of catalogCategories.entries()) {
+      await target.query(
+        `INSERT INTO product_categories(id,name,parent_id,active,sort_order)
+         VALUES(?,?,?,1,?)
+         ON DUPLICATE KEY UPDATE name=VALUES(name), parent_id=VALUES(parent_id), active=1, sort_order=VALUES(sort_order)`,
+        [cat.id, cat.name || cat.label, cat.parentId || null, index],
+      );
+    }
+
+    const validProductIds = products.map((p) => p.id);
+    await target.query(
+      `DELETE FROM product_variants 
+       WHERE product_id NOT IN (?) 
+         AND product_id NOT IN (SELECT product_id FROM order_items) 
+         AND product_id NOT IN (SELECT product_id FROM store_promotions)`,
+      [validProductIds],
+    );
+    await target.query(
+      `DELETE FROM products 
+       WHERE id NOT IN (?) 
+         AND id NOT IN (SELECT product_id FROM order_items) 
+         AND id NOT IN (SELECT product_id FROM store_promotions)`,
+      [validProductIds],
+    );
+
+    const defaultHomeSections = [
+      {
+        id: "section-bedding",
+        kicker: "SLEEP ESSENTIALS",
+        title: "Koleksi Pilihan untuk Tidur Nyaman",
+        productIds: ["lj-1-1", "lj-1-2", "lj-1-8", "lj-2-1"],
+      },
+      {
+        id: "section-fashion",
+        kicker: "DAILY APPAREL",
+        title: "Pilihan Busana Kasual & Formal Favorit",
+        productIds: ["lj-fsh-kaos-1", "lj-fsh-kemeja-1", "lj-fsh-celana-1", "lj-fsh-dress-1"],
+      },
+    ];
+    await target.query(
+      "INSERT INTO store_settings(setting_key,setting_value) VALUES('homeSections',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+      [JSON.stringify(defaultHomeSections)],
+    );
+    await target.query(
+      "INSERT INTO store_settings(setting_key,setting_value) VALUES('essentialsProducts',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+      [JSON.stringify(["lj-1-1", "lj-1-2", "lj-1-8", "lj-2-1"])],
+    );
+    await target.query(
+      "INSERT INTO store_settings(setting_key,setting_value) VALUES('departmentProducts',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+      [JSON.stringify(["lj-fsh-kaos-1", "lj-fsh-kemeja-1", "lj-fsh-celana-1", "lj-fsh-dress-1"])],
+    );
+    await target.query(
+      "INSERT INTO store_settings(setting_key,setting_value) VALUES('heroKicker',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+      [JSON.stringify("KINTSUGI / BEDDING & FASHION")],
+    );
+
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_finalize_bedding_and_fashion_catalog"]);
+  }
 
   if (!seed) return;
   const client = await target.connect();
