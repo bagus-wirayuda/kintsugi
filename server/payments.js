@@ -1,11 +1,74 @@
 import { createHash } from "node:crypto";
+import QRCode from "qrcode";
 import { fail, queueWhatsApp, renderWhatsAppTemplate } from "./integrations.js";
+import {
+  PAYMENT_TYPES,
+  isCodMethod,
+  isManualQrisMethod,
+  isStorePickupMethod,
+} from "../src/payment-methods.js";
+import {
+  assessQrisCompatibility,
+  convertStaticQrisToDynamic,
+  validateQrisPayload,
+} from "../src/qris.js";
 
 export const orderRow = (o) => ({
   ...o,
   address: typeof o.address === "string" ? JSON.parse(o.address) : o.address,
   createdAt: o.created_at,
 });
+
+export async function renderQrDataUrl(payload) {
+  const clean = String(payload || "").trim();
+  if (!clean) return "";
+  return QRCode.toDataURL(clean, {
+    errorCorrectionLevel: "M",
+    margin: 2,
+    width: 320,
+    color: {
+      dark: "#1A1A1A",
+      light: "#FFFFFF",
+    },
+  });
+}
+
+export async function enrichQrisOrder(order) {
+  if (!order) return order;
+  const isQris =
+    order.payment_type === PAYMENT_TYPES.QRIS_MANUAL ||
+    Boolean(order.qris_payload || order.qris_static_payload);
+  if (!isQris) return order;
+
+  const activePayload = order.qris_payload || order.qris_static_payload || "";
+  const staticPayload = order.qris_static_payload || order.qris_payload || "";
+  const [qrisQrDataUrl, qrisStaticQrDataUrl] = await Promise.all([
+    activePayload ? renderQrDataUrl(activePayload) : Promise.resolve(""),
+    staticPayload
+      ? staticPayload === activePayload && activePayload
+        ? Promise.resolve("")
+        : renderQrDataUrl(staticPayload)
+      : Promise.resolve(""),
+  ]);
+
+  let compatibility = null;
+  try {
+    if (activePayload) compatibility = assessQrisCompatibility(activePayload);
+  } catch {
+    compatibility = null;
+  }
+
+  return {
+    ...order,
+    qrisQrDataUrl,
+    qrisStaticQrDataUrl: qrisStaticQrDataUrl || qrisQrDataUrl,
+    qrisCompatibility: compatibility,
+  };
+}
+
+export async function enrichQrisOrders(orders = []) {
+  return Promise.all(orders.map((o) => enrichQrisOrder(o)));
+}
 export function validateInvoice(invoice, order) {
   if (
     invoice.id !== order.invoice_id ||
@@ -67,15 +130,68 @@ export function createPayments(pool, gateway) {
         await c.query("COMMIT");
         return o;
       }
-      const method = (await c.query("SELECT group_name FROM store_payment_methods WHERE id=?", [o.payment])).rows[0];
-      const isCod = o.payment === "COD" || method?.group_name === "COD";
-      if (isCod) {
+      const isStorePickup =
+        isStorePickupMethod(o) ||
+        (o.shipping === "pickup" && o.payment === "store_pickup");
+      if (isStorePickup) {
+        const methodName = o.payment_method_name || "Bayar di Toko (Store Pickup)";
         await c.query(
-          "UPDATE orders SET payment_status='PENDING',status='Diproses',payment_url='/#account' WHERE id=?",
-          [o.id],
+          "UPDATE orders SET payment='store_pickup',payment_type='store_pickup',payment_method_name=?,payment_status='PENDING',status='Menunggu Pengambilan & Pembayaran',payment_url='/#account/orders' WHERE id=?",
+          [methodName, o.id],
         );
         result = {
           ...o,
+          payment: "store_pickup",
+          payment_type: "store_pickup",
+          payment_method_name: methodName,
+          payment_status: "PENDING",
+          status: "Menunggu Pengambilan & Pembayaran",
+          payment_url: "/#account/orders",
+        };
+        const settingsRows = (
+          await c.query(
+            "SELECT setting_key, setting_value FROM store_settings WHERE setting_key IN ('brand','storeAddress','contactPhone','pickupInfo')",
+          )
+        ).rows;
+        const settingsMap = Object.fromEntries(
+          settingsRows.map(({ setting_key, setting_value }) => {
+            try {
+              return [setting_key, typeof setting_value === "string" ? JSON.parse(setting_value) : setting_value];
+            } catch {
+              return [setting_key, setting_value];
+            }
+          }),
+        );
+        const address = orderRow(o).address;
+        const brandName = settingsMap.brand || "Kintsugi";
+        const storeAddr = settingsMap.storeAddress ? `\nLokasi Toko: ${settingsMap.storeAddress}` : "";
+        const pickupNote = settingsMap.pickupInfo ? `\nCatatan: ${settingsMap.pickupInfo}` : "";
+        const totalStr = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+        const msg =
+          `Halo ${address.name}, pesanan Ambil di Toko *${o.id}* sebesar *${totalStr}* telah kami catat (Status: Menunggu Pengambilan & Pembayaran).` +
+          ` Pembayaran dilakukan langsung saat pengambilan di toko.${storeAddr}${pickupNote}\n\nTerima kasih telah berbelanja di ${brandName}.`;
+        await queueWhatsApp(c, "pickup/" + o.id, address.phone, msg);
+        await c.query("COMMIT");
+        return result;
+      }
+
+      const method = (
+        await c.query("SELECT * FROM store_payment_methods WHERE id=?", [o.payment])
+      ).rows[0];
+      const isCod = isCodMethod(method) || o.payment === "COD";
+      const isQrisManual =
+        isManualQrisMethod(method) || o.payment_type === PAYMENT_TYPES.QRIS_MANUAL;
+
+      if (isCod) {
+        const methodName = method?.name || "Bayar di Tempat (COD)";
+        await c.query(
+          "UPDATE orders SET payment_type='cod',payment_method_name=?,payment_status='PENDING',status='Diproses',payment_url='/#account' WHERE id=?",
+          [methodName, o.id],
+        );
+        result = {
+          ...o,
+          payment_type: "cod",
+          payment_method_name: methodName,
           payment_status: "PENDING",
           status: "Diproses",
           payment_url: "/#account",
@@ -90,6 +206,86 @@ export function createPayments(pool, gateway) {
           kurir: o.shipping_name || "",
         };
         await queueWhatsApp(c, "processing/" + o.id, address.phone, await notification(c, "processing", values));
+        await c.query("COMMIT");
+        return result;
+      }
+
+      if (isQrisManual) {
+        const staticPayload = String(
+          method?.qris_payload || o.qris_static_payload || "",
+        ).trim();
+        const staticValidation = validateQrisPayload(staticPayload);
+        if (!staticValidation.valid || !staticValidation.parsed) {
+          throw fail(
+            502,
+            `Konfigurasi QRIS manual tidak valid: ${staticValidation.errors.join(" ")}`,
+          );
+        }
+
+        const methodMode = method?.qris_mode === "static" ? "static" : "dynamic";
+        let qrisPayloadActual = staticValidation.parsed.normalized;
+        let qrisModeActual = "static_fallback";
+
+        if (methodMode === "dynamic" && Number(o.total) > 0) {
+          try {
+            const converted = convertStaticQrisToDynamic(
+              staticValidation.parsed.normalized,
+              Number(o.total),
+            );
+            qrisPayloadActual = converted.payload;
+            qrisModeActual = "dynamic";
+          } catch {
+            // Fallback ke QRIS statis jika konversi dinamis tidak memungkinkan
+            qrisPayloadActual = staticValidation.parsed.normalized;
+            qrisModeActual = "static_fallback";
+          }
+        }
+
+        const methodName =
+          method?.name ||
+          o.payment_method_name ||
+          `QRIS ${staticValidation.parsed.provider || "Manual"}`.trim();
+        const merchantName =
+          method?.qris_merchant_name ||
+          staticValidation.parsed.merchantName ||
+          o.qris_merchant_name ||
+          "";
+        const provider =
+          method?.qris_provider ||
+          staticValidation.parsed.provider ||
+          o.qris_provider ||
+          "QRIS";
+
+        await c.query(
+          `UPDATE orders
+           SET payment_type=?, payment_method_name=?, qris_payload=?, qris_static_payload=?,
+               qris_mode=?, qris_merchant_name=?, qris_provider=?,
+               payment_status='PENDING', payment_url='/#account/orders'
+           WHERE id=?`,
+          [
+            PAYMENT_TYPES.QRIS_MANUAL,
+            methodName,
+            qrisPayloadActual,
+            staticValidation.parsed.normalized,
+            qrisModeActual,
+            merchantName,
+            provider,
+            o.id,
+          ],
+        );
+
+        result = {
+          ...o,
+          payment_type: PAYMENT_TYPES.QRIS_MANUAL,
+          payment_method_name: methodName,
+          qris_payload: qrisPayloadActual,
+          qris_static_payload: staticValidation.parsed.normalized,
+          qris_mode: qrisModeActual,
+          qris_merchant_name: merchantName,
+          qris_provider: provider,
+          payment_status: "PENDING",
+          payment_url: "/#account/orders",
+        };
         await c.query("COMMIT");
         return result;
       }
@@ -217,9 +413,27 @@ export function createPayments(pool, gateway) {
       c.release();
     }
   }
+  async function resolveMethodFlags(order) {
+    if (order.payment_type === PAYMENT_TYPES.STORE_PICKUP || order.payment === "store_pickup") {
+      return { isCod: false, isQrisManual: false, isStorePickup: true };
+    }
+    if (order.payment_type === PAYMENT_TYPES.COD) return { isCod: true, isQrisManual: false, isStorePickup: false };
+    if (order.payment_type === PAYMENT_TYPES.QRIS_MANUAL) return { isCod: false, isQrisManual: true, isStorePickup: false };
+    const method = (
+      await pool.query(
+        "SELECT id, group_name, payment_type, qris_payload FROM store_payment_methods WHERE id=?",
+        [order.payment],
+      )
+    ).rows[0];
+    return {
+      isCod: isCodMethod(method) || order.payment === "COD",
+      isQrisManual: isManualQrisMethod(method),
+      isStorePickup: false,
+    };
+  }
   async function sync(order) {
-    const isCod = order.payment === "COD" || (await pool.query("SELECT group_name FROM store_payment_methods WHERE id=?", [order.payment])).rows[0]?.group_name === "COD";
-    if (isCod) return;
+    const { isCod, isQrisManual, isStorePickup } = await resolveMethodFlags(order);
+    if (isCod || isQrisManual || isStorePickup) return;
     if (order.payment_status === "CREATING") order = await ensure(order.id);
     if (
       order.invoice_id &&
@@ -228,9 +442,16 @@ export function createPayments(pool, gateway) {
       await apply(await gateway.get(order.invoice_id));
   }
   async function cancel(order) {
-    const isCod = order.payment === "COD" || (await pool.query("SELECT group_name FROM store_payment_methods WHERE id=?", [order.payment])).rows[0]?.group_name === "COD";
-    if (isCod) {
-      if (order.status !== "Menunggu pembayaran" && order.status !== "Diproses")
+    const { isCod, isQrisManual, isStorePickup } = await resolveMethodFlags(order);
+    if (isCod || isQrisManual || isStorePickup) {
+      const allowedStatus = isStorePickup
+        ? ["Menunggu Pengambilan & Pembayaran", "Menunggu pembayaran", "Diproses"].includes(order.status) &&
+          order.payment_status !== "PAID"
+        : isCod
+          ? order.status === "Menunggu pembayaran" || order.status === "Diproses"
+          : order.status === "Menunggu pembayaran" &&
+            ["CREATING", "PENDING", "WAITING_VERIFICATION"].includes(order.payment_status);
+      if (!allowedStatus)
         throw fail(409, "Pesanan ini tidak dapat dibatalkan.");
       const c = await pool.connect();
       try {
@@ -276,5 +497,5 @@ export function createPayments(pool, gateway) {
     }
     await apply(expired, true);
   }
-  return { ensure, apply, sync, cancel };
+  return { ensure, apply, sync, cancel, notification };
 }

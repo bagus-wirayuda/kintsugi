@@ -79,18 +79,27 @@ test("Sistem Metode Pembayaran Admin dan COD Tanpa Duplikasi Xendit", async (t) 
     assert.equal(custLogin.status, 200);
     customerCookie = custLogin.cookie;
 
-    await t.test("1. Pembersihan Data Bawaan: Hanya COD yang tersedia secara default", async () => {
+    await t.test("1. Data Bawaan: COD dan Sampel QRIS DANA Manual Tersedia Secara Default", async () => {
       const res = await req("/admin/payment-methods", null, adminCookie, "GET");
       assert.equal(res.status, 200);
       assert.ok(Array.isArray(res.data));
 
-      // Memastikan hanya ada 1 metode default yaitu COD
-      assert.equal(res.data.length, 1);
-      assert.equal(res.data[0].id, "COD");
-      assert.equal(res.data[0].group, "COD");
-      assert.equal(res.data[0].enabled, 1);
+      // Memastikan tersedia 2 metode default: COD dan QRIS_DANA_MANUAL
+      assert.equal(res.data.length, 2);
+      const codMethod = res.data.find((m) => m.id === "COD");
+      const qrisMethod = res.data.find((m) => m.id === "QRIS_DANA_MANUAL");
+      assert.ok(codMethod);
+      assert.equal(codMethod.group, "COD");
+      assert.equal(Boolean(codMethod.enabled), true);
 
-      // Memastikan channel lama (BCA, QRIS, DANA) sudah bersih
+      assert.ok(qrisMethod);
+      assert.equal(qrisMethod.group, "QRIS");
+      assert.equal(qrisMethod.paymentType, "qris_manual");
+      assert.equal(qrisMethod.qrisMerchantName, "BAGUS WIRAYUDA");
+      assert.equal(qrisMethod.qrisProvider, "DANA");
+      assert.equal(Boolean(qrisMethod.enabled), true);
+
+      // Memastikan channel lama Xendit (BCA, QRIS, DANA, BNI) sudah bersih
       const hasLegacy = res.data.some((m) => ["BCA", "QRIS", "DANA", "BNI"].includes(m.id));
       assert.equal(hasLegacy, false);
     });

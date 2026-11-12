@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -8,13 +8,16 @@ import {
   Truck,
   CreditCard,
   MapPin,
+  Store,
+  Phone,
+  Clock,
 } from "lucide-react";
 import { api, storage, totals } from "./store";
 import { colorLabel, money } from "./data";
 import { Notice } from "./Workspace";
 import Brand from "./Brand";
 import { StoreHeader } from "./StoreChrome";
-import { paymentName } from "./payment-methods";
+import { isManualOfflineMethod, paymentName } from "./payment-methods";
 import CheckoutIdentity, {
   clearCheckoutVerification,
 } from "./CheckoutIdentity";
@@ -44,6 +47,7 @@ export default function Checkout({
   wishCount,
   onSearch,
   onLogout,
+  onUpdateQuantity,
   currentView = "checkout",
 }) {
   const owner = user?.id || "guest";
@@ -80,14 +84,25 @@ export default function Checkout({
     return { courier: "TOKO", service: "Standar", cost: manualFee };
   });
 
-  const [payment, setPayment] = useState(initial?.payment || "");
+  const [payment, setPayment] = useState(
+    initial?.shipping === "pickup" ? "" : (initial?.payment || "")
+  );
   const methods = config.paymentMethods || [];
   const [identity, setIdentity] = useState(Boolean(initial?.identity && !user));
   const [quote, setQuote] = useState(null);
   const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState("");
   const [quoteError, setQuoteError] = useState("");
+
+  useEffect(() => {
+    if (shipping === "pickup" && payment) {
+      setPayment("");
+    } else if (shipping !== "pickup" && payment === "store_pickup") {
+      setPayment("");
+    }
+  }, [shipping, payment]);
 
   function validateCheckout() {
     if (!address.name || address.name.trim().length < 2) {
@@ -196,8 +211,9 @@ export default function Checkout({
       method: "POST",
       signal: c.signal,
       body: {
-        items: cart.map(({ id, size, color, quantity }) => ({
+        items: cart.map(({ id, variantId, size, color, quantity }) => ({
           id,
+          ...(variantId ? { variantId } : {}),
           size,
           color,
           quantity,
@@ -218,9 +234,12 @@ export default function Checkout({
   }, [cart, coupon, shipping, shippingOption]);
 
   async function pay(buyer) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError("");
     const activeOption = resolveShippingOption(shippingOption, shipping);
+    const effectivePayment = shipping === "pickup" ? "store_pickup" : payment;
     const cleanAddress = {
       ...address,
       street:
@@ -231,8 +250,9 @@ export default function Checkout({
         (shipping === "pickup" ? "Lokasi Toko" : ""),
     };
     const payload = {
-      items: cart.map(({ id, size, color, quantity }) => ({
+      items: cart.map(({ id, variantId, size, color, quantity }) => ({
         id,
+        ...(variantId ? { variantId } : {}),
         size,
         color,
         quantity,
@@ -241,7 +261,7 @@ export default function Checkout({
       shipping,
       shippingOption: activeOption,
       coupon,
-      payment,
+      payment: effectivePayment,
     };
     const signature = JSON.stringify(payload),
       saved = storage.read("checkout:" + buyer.id, null);
@@ -273,6 +293,7 @@ export default function Checkout({
       setError(e.message);
       setIdentity(false);
       setBusy(false);
+      submittingRef.current = false;
     }
   }
 
@@ -284,12 +305,15 @@ export default function Checkout({
       return;
     }
     setError("");
-    if (shipping === "pickup" && (!address.street || !address.city)) {
-      setAddress((current) => ({
-        ...current,
-        street: current.street?.trim() || "Ambil langsung di Toko Fisik",
-        city: current.city?.trim() || "Lokasi Toko",
-      }));
+    if (shipping === "pickup") {
+      setPayment("");
+      if (!address.street || !address.city) {
+        setAddress((current) => ({
+          ...current,
+          street: current.street?.trim() || "Ambil langsung di Toko Fisik",
+          city: current.city?.trim() || "Lokasi Toko",
+        }));
+      }
     }
     setStep("payment");
     nav("payment", true);
@@ -297,6 +321,7 @@ export default function Checkout({
 
   function submitPayment(e) {
     if (e) e.preventDefault();
+    if (submittingRef.current || busy || !quote || checking) return;
     const err = validateCheckout();
     if (err) {
       setStep("checkout");
@@ -304,13 +329,14 @@ export default function Checkout({
       setError(err);
       return;
     }
-    if (!payment) {
-      return setError("Pilih salah satu metode pembayaran online terlebih dahulu.");
+    if (shipping !== "pickup") {
+      if (!payment) {
+        return setError("Pilih salah satu metode pembayaran terlebih dahulu.");
+      }
+      if (!methods.some((method) => method.id === payment)) {
+        return setError("Metode pembayaran tidak valid atau belum tersedia.");
+      }
     }
-    if (!methods.some((method) => method.id === payment)) {
-      return setError("Metode pembayaran tidak valid atau belum tersedia.");
-    }
-    if (!quote || checking || busy) return;
     setError("");
     if (!user) {
       setIdentity(true);
@@ -384,17 +410,25 @@ export default function Checkout({
 
         <div className="checkout-page-title">
           <p className="ks-kicker">
-            {step === "checkout" ? "KINTSUGI / CHECKOUT" : "KINTSUGI / PEMBAYARAN"}
+            {step === "checkout"
+              ? "KINTSUGI / CHECKOUT"
+              : shipping === "pickup"
+                ? "KINTSUGI / AMBIL DI TOKO"
+                : "KINTSUGI / PEMBAYARAN"}
           </p>
           <h1>
             {step === "checkout"
               ? "Informasi Penerima & Pengiriman"
-              : "Pilih Metode Pembayaran"}
+              : shipping === "pickup"
+                ? "Konfirmasi Pengambilan di Toko"
+                : "Pilih Metode Pembayaran"}
           </h1>
           <p>
             {step === "checkout"
               ? "Lengkapi identitas dan opsi pengiriman pesanan Anda."
-              : "Periksa kembali data pesanan, lalu pilih cara pembayaran yang Anda inginkan."}
+              : shipping === "pickup"
+                ? "Periksa detail toko dan konfirmasi pesanan untuk diambil serta dibayar langsung di toko."
+                : "Periksa kembali data pesanan, lalu pilih cara pembayaran yang Anda inginkan."}
           </p>
         </div>
 
@@ -408,7 +442,7 @@ export default function Checkout({
           </span>
           <i />
           <span className={step === "payment" ? "active" : ""}>
-            Pilih Pembayaran
+            {shipping === "pickup" ? "Konfirmasi Pesanan" : "Pilih Pembayaran"}
           </span>
         </div>
 
@@ -604,19 +638,22 @@ export default function Checkout({
                                 checked={shipping === value}
                                 onChange={() => {
                                   setShipping(value);
-                                  setShippingOption(
-                                    value === "pickup"
-                                      ? {
-                                          courier: "TOKO",
-                                          service: "Ambil di Toko",
-                                          cost: 0,
-                                        }
-                                      : {
-                                          courier: "TOKO",
-                                          service: "Standar",
-                                          cost: isFree ? 0 : manualFee,
-                                        }
-                                  );
+                                  setError("");
+                                  if (value === "pickup") {
+                                    setPayment("");
+                                    setShippingOption({
+                                      courier: "TOKO",
+                                      service: "Ambil di Toko",
+                                      cost: 0,
+                                    });
+                                  } else {
+                                    if (payment === "store_pickup") setPayment("");
+                                    setShippingOption({
+                                      courier: "TOKO",
+                                      service: "Standar",
+                                      cost: isFree ? 0 : manualFee,
+                                    });
+                                  }
                                 }}
                               />
                               <div>
@@ -640,7 +677,7 @@ export default function Checkout({
                   </fieldset>
                 </form>
               ) : (
-                /* TAHAP 2: PILIH METODE PEMBAYARAN - HANYA DITAMPILKAN DI TAHAP INI */
+                /* TAHAP 2: PILIH METODE PEMBAYARAN (PENGIRIMAN) ATAU INFORMASI AMBIL DI TOKO */
                 <div>
                   <section className="ws-panel ws-form-panel">
                     <div className="ks-saved-address-card" style={{ margin: 0 }}>
@@ -669,7 +706,7 @@ export default function Checkout({
                         <p className="ks-saved-street">
                           <b>Layanan: </b>
                           {shipping === "pickup"
-                            ? "Ambil Langsung di Toko (Bebas Ongkir)"
+                            ? "Ambil Langsung di Toko (Gratis Ongkir Rp0)"
                             : "Pengiriman Standar Kurir Toko"}
                         </p>
                         {shipping !== "pickup" ? (
@@ -683,7 +720,7 @@ export default function Checkout({
                             className="ks-saved-street"
                             style={{ color: "var(--ks-muted)" }}
                           >
-                            Lokasi dan waktu pengambilan dikoordinasikan via WhatsApp toko.
+                            Pengambilan pesanan langsung di lokasi toko (tanpa kurir & tanpa biaya kirim).
                           </p>
                         )}
                         {address.email && (
@@ -695,69 +732,140 @@ export default function Checkout({
                     </div>
                   </section>
 
-                  <section className="ws-panel ws-form-panel">
-                    <div className="ws-panel-heading">
-                      <h2>
-                        <CreditCard size={20} /> Pilih Metode Pembayaran
-                      </h2>
-                      <p>
-                        Pilih cara pembayaran online Anda. Transaksi diproses aman dan status pembayaran terkonfirmasi otomatis.
-                      </p>
-                    </div>
-                    <div className="ks-payment-methods">
-                      {["Bank", "E-Wallet", "COD", ...new Set(methods.map((method) => method.group))]
-                        .filter((group, index, arr) => arr.indexOf(group) === index && methods.some((m) => m.group === group))
-                        .map((group) => (
-                          <fieldset key={group}>
-                            <legend>
-                              {group === "Bank"
-                                ? "Transfer Bank (Virtual Account)"
-                                : group === "E-Wallet"
-                                  ? "E-Wallet & QRIS"
-                                  : group === "COD"
-                                    ? "Bayar di Tempat (COD)"
-                                    : group}
-                            </legend>
-                            {methods
-                              .filter((method) => method.group === group)
-                              .map((method) => (
-                                <label
-                                  key={method.id}
-                                  className={
-                                    payment === method.id ? "selected" : ""
-                                  }
-                                >
-                                  <input
-                                    type="radio"
-                                    name="paymentMethod"
-                                    value={method.id}
-                                    checked={payment === method.id}
-                                    onChange={() => setPayment(method.id)}
-                                    required
-                                  />
-                                  <span className="ks-payment-mark">
-                                    {group === "Bank" ? "VA" : group === "E-Wallet" ? "QR" : group === "COD" ? "COD" : method.name.slice(0, 3).toUpperCase()}
-                                  </span>
-                                  <span>
-                                    <b>{method.name}</b>
-                                    <small>
-                                      {method.detail ||
-                                        (group === "COD"
-                                          ? "Bayar tunai kepada kurir saat pesanan sampai di alamat Anda."
-                                          : "Pilihan bank atau dompet digital akan dipilih langsung di halaman pembayaran Xendit.")}
-                                    </small>
-                                  </span>
-                                </label>
-                              ))}
-                          </fieldset>
-                        ))}
-                      {!methods.length && (
-                        <Notice>
-                          Metode pembayaran sedang dimuat atau belum tersedia. Silakan muat ulang halaman.
-                        </Notice>
-                      )}
-                    </div>
-                  </section>
+                  {shipping === "pickup" ? (
+                    <section className="ws-panel ws-form-panel ks-pickup-payment-box">
+                      <div className="ws-panel-heading">
+                        <h2>
+                          <Store size={20} /> Pembayaran dilakukan saat pengambilan di toko
+                        </h2>
+                        <p>
+                          Untuk layanan <b>Ambil Langsung di Toko</b>, Anda tidak perlu membayar online atau memilih COD kurir. Lakukan pembayaran langsung kepada petugas saat mengambil pesanan di toko.
+                        </p>
+                      </div>
+                      {(() => {
+                        const waDigits = String(config?.contactPhone || "").replace(/\D/g, "");
+                        const waHref = waDigits
+                          ? `https://wa.me/${waDigits.startsWith("0") ? "62" + waDigits.slice(1) : waDigits}`
+                          : "";
+                        return (
+                          <div className="ks-pickup-info-grid">
+                            <div className="ks-pickup-info-item">
+                              <MapPin size={18} />
+                              <div>
+                                <b>Alamat Toko</b>
+                                <p>{config?.storeAddress || "Alamat toko dapat dikonfirmasi melalui kontak WhatsApp toko sebelum pengambilan."}</p>
+                              </div>
+                            </div>
+                            <div className="ks-pickup-info-item">
+                              <Phone size={18} />
+                              <div>
+                                <b>Kontak WhatsApp Toko</b>
+                                <p>
+                                  {config?.contactPhone ? (
+                                    waHref ? (
+                                      <a href={waHref} target="_blank" rel="noreferrer" className="ws-link">
+                                        {config.contactPhone}
+                                      </a>
+                                    ) : (
+                                      config.contactPhone
+                                    )
+                                  ) : (
+                                    "Hubungi admin melalui informasi kontak toko untuk koordinasi pengambilan."
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="ks-pickup-info-item">
+                              <Clock size={18} />
+                              <div>
+                                <b>Informasi Pengambilan</b>
+                                <p>
+                                  {config?.pickupInfo ||
+                                    "Pembayaran dilakukan langsung saat pengambilan di toko. Tunjukkan nomor pesanan kepada petugas."}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </section>
+                  ) : (
+                    <section className="ws-panel ws-form-panel">
+                      <div className="ws-panel-heading">
+                        <h2>
+                          <CreditCard size={20} /> Pilih Metode Pembayaran
+                        </h2>
+                        <p>
+                          Pilih cara pembayaran yang diaktifkan toko untuk pesanan yang dikirim ke alamat Anda.
+                        </p>
+                      </div>
+                      <div className="ks-payment-methods">
+                        {["QRIS", "Bank", "E-Wallet", "COD", ...new Set(methods.map((method) => method.group))]
+                          .filter((group, index, arr) => arr.indexOf(group) === index && methods.some((m) => m.group === group))
+                          .map((group) => (
+                            <fieldset key={group}>
+                              <legend>
+                                {group === "QRIS"
+                                  ? "QRIS (Scan & Konfirmasi Manual)"
+                                  : group === "Bank"
+                                    ? "Transfer Bank (Virtual Account)"
+                                    : group === "E-Wallet"
+                                      ? "E-Wallet & QRIS Gateway"
+                                      : group === "COD"
+                                        ? "Bayar di Tempat (COD)"
+                                        : group}
+                              </legend>
+                              {methods
+                                .filter((method) => method.group === group)
+                                .map((method) => (
+                                  <label
+                                    key={method.id}
+                                    className={
+                                      payment === method.id ? "selected" : ""
+                                    }
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="paymentMethod"
+                                      value={method.id}
+                                      checked={payment === method.id}
+                                      onChange={() => setPayment(method.id)}
+                                      required
+                                    />
+                                    <span className="ks-payment-mark">
+                                      {group === "QRIS"
+                                        ? method.qrisProvider || "QRIS"
+                                        : group === "Bank"
+                                          ? "VA"
+                                          : group === "E-Wallet"
+                                            ? "QR"
+                                            : group === "COD"
+                                              ? "COD"
+                                              : method.name.slice(0, 3).toUpperCase()}
+                                    </span>
+                                    <span>
+                                      <b>{method.name}</b>
+                                      <small>
+                                        {method.detail ||
+                                          (group === "QRIS"
+                                            ? "Scan kode QR sesuai total tagihan, lalu unggah bukti transfer untuk diverifikasi Admin."
+                                            : group === "COD"
+                                              ? "Bayar tunai kepada kurir saat pesanan sampai di alamat Anda."
+                                              : "Pilihan bank atau dompet digital akan dipilih langsung di halaman pembayaran Xendit.")}
+                                      </small>
+                                    </span>
+                                  </label>
+                                ))}
+                            </fieldset>
+                          ))}
+                        {!methods.length && (
+                          <Notice>
+                            Metode pembayaran sedang dimuat atau belum tersedia. Silakan muat ulang halaman.
+                          </Notice>
+                        )}
+                      </div>
+                    </section>
+                  )}
                 </div>
               )}
 
@@ -771,7 +879,9 @@ export default function Checkout({
 
               {busy && (
                 <div className="ws-notice success" role="status">
-                  Pesanan sedang disiapkan. Menghubungkan ke pembayaran…
+                  {shipping === "pickup"
+                    ? "Pesanan Ambil di Toko sedang dicatat…"
+                    : "Pesanan sedang disiapkan. Menghubungkan ke pembayaran…"}
                 </div>
               )}
             </div>
@@ -779,23 +889,52 @@ export default function Checkout({
             <aside className="ws-panel checkout-summary">
               <h2>Ringkasan pesanan</h2>
               <p className="ws-muted">
-                {cart.reduce((n, i) => n + i.quantity, 0)} barang pilihan Anda
+                {cart.reduce((n, i) => n + Math.max(1, Math.trunc(Number(i.quantity) || 1)), 0)} barang pilihan Anda · {cart.length} jenis produk
               </p>
               <div className="checkout-products">
-                {cart.map((i) => (
-                  <div key={i.key}>
-                    <img src={i.image} alt={i.name} />
-                    <div>
-                      <b>{i.name}</b>
-                      <small>
-                        Ukuran {dimensionLabel(i.size)} ·{" "}
-                        {i.variationLabel || "Variasi"}: {colorLabel(i.color)} ·{" "}
-                        {i.quantity} barang
-                      </small>
-                      <strong>{money(i.price * i.quantity)}</strong>
+                {cart.map((i) => {
+                  const qty = Math.max(1, Math.min(99, Math.trunc(Number(i.quantity) || 1)));
+                  const maxStock = Number.isFinite(Number(i.stock)) && Number(i.stock) > 0
+                    ? Math.min(99, Math.trunc(Number(i.stock)))
+                    : 99;
+                  return (
+                    <div key={i.key}>
+                      <img src={i.image} alt={i.name} />
+                      <div>
+                        <b>{i.name}</b>
+                        <small>
+                          Ukuran {dimensionLabel(i.size)} ·{" "}
+                          {i.variationLabel || "Variasi"}: {colorLabel(i.color)} ·{" "}
+                          {qty} barang ({money(i.price)} / unit)
+                        </small>
+                        <div className="checkout-item-bottom">
+                          {onUpdateQuantity && step === "checkout" && (
+                            <div className="checkout-qty-stepper" aria-label={`Ubah jumlah ${i.name}`}>
+                              <button
+                                type="button"
+                                aria-label={`Kurangi jumlah ${i.name}`}
+                                disabled={busy || qty <= 1}
+                                onClick={() => onUpdateQuantity(i.key, qty - 1)}
+                              >
+                                −
+                              </button>
+                              <span>{qty}</span>
+                              <button
+                                type="button"
+                                aria-label={`Tambah jumlah ${i.name}`}
+                                disabled={busy || qty >= maxStock}
+                                onClick={() => onUpdateQuantity(i.key, qty + 1)}
+                              >
+                                +
+                              </button>
+                            </div>
+                          )}
+                          <strong>{money(i.price * qty)}</strong>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <dl className="checkout-totals">
                 <div>
@@ -825,35 +964,60 @@ export default function Checkout({
               )}
 
               {step === "checkout" ? (
-                /* TOMBOL TAHAP CHECKOUT: LANJUT KE PEMBAYARAN */
+                /* TOMBOL TAHAP CHECKOUT: LANJUT KE PEMBAYARAN / KONFIRMASI */
                 <button
                   className="ws-button primary ks-checkout-btn"
                   type="submit"
                   form="checkout-form"
                   disabled={busy || checking || !cart.length}
                 >
-                  Lanjut ke Pembayaran
+                  {shipping === "pickup"
+                    ? "Lanjut ke Konfirmasi"
+                    : "Lanjut ke Pembayaran"}
                   <ArrowRight size={17} />
                 </button>
               ) : (
-                /* TOMBOL TAHAP PEMBAYARAN: PROSES PEMBAYARAN */
-                !identity && (
-                  <button
-                    className="ws-button primary"
-                    type="button"
-                    disabled={
-                      busy || checking || !quote || !config.payments || !payment
-                    }
-                    onClick={submitPayment}
-                  >
-                    {busy
-                      ? "Menyiapkan pembayaran…"
-                      : payment
-                      ? "Bayar dengan " + paymentName(payment)
-                      : "Pilih metode pembayaran"}
-                    <ArrowUpRight size={17} />
-                  </button>
-                )
+                /* TOMBOL TAHAP PEMBAYARAN / KONFIRMASI PICKUP */
+                !identity &&
+                (() => {
+                  if (shipping === "pickup") {
+                    return (
+                      <button
+                        className="ws-button primary"
+                        type="button"
+                        disabled={busy || checking || !quote}
+                        onClick={submitPayment}
+                      >
+                        {busy
+                          ? "Memproses pesanan…"
+                          : "Konfirmasi Pesanan"}
+                        <ArrowUpRight size={17} />
+                      </button>
+                    );
+                  }
+                  const chosen = methods.find((m) => m.id === payment);
+                  const gatewayBlocked = chosen
+                    ? !isManualOfflineMethod(chosen) && !config.payments
+                    : !config.payments &&
+                      !methods.some((m) => isManualOfflineMethod(m));
+                  return (
+                    <button
+                      className="ws-button primary"
+                      type="button"
+                      disabled={
+                        busy || checking || !quote || !payment || gatewayBlocked
+                      }
+                      onClick={submitPayment}
+                    >
+                      {busy
+                        ? "Menyiapkan pembayaran…"
+                        : payment
+                          ? "Bayar dengan " + paymentName(payment, methods)
+                          : "Pilih metode pembayaran"}
+                      <ArrowUpRight size={17} />
+                    </button>
+                  );
+                })()
               )}
 
               {identity && !user && (
@@ -863,12 +1027,27 @@ export default function Checkout({
                 </p>
               )}
 
-              {!config.payments && (
-                <Notice>Pembayaran belum tersedia. Hubungi pengelola.</Notice>
-              )}
+              {shipping !== "pickup" &&
+                !config.payments &&
+                !methods.some((m) => isManualOfflineMethod(m)) && (
+                  <Notice>Pembayaran belum tersedia. Hubungi pengelola.</Notice>
+                )}
+              {shipping !== "pickup" &&
+                !config.payments &&
+                payment &&
+                !isManualOfflineMethod(
+                  methods.find((m) => m.id === payment),
+                ) && (
+                  <Notice>
+                    Pembayaran gateway online (Xendit) belum aktif. Pilih QRIS
+                    atau COD, atau hubungi pengelola.
+                  </Notice>
+                )}
               <p className="checkout-safe">
-                <ShieldCheck size={15} /> Pembayaran aman · Status dikonfirmasi
-                otomatis.
+                <ShieldCheck size={15} />{" "}
+                {shipping === "pickup"
+                  ? "Pembayaran dilakukan langsung saat mengambil pesanan di toko."
+                  : "Pembayaran aman · Status dikonfirmasi otomatis."}
               </p>
             </aside>
           </div>

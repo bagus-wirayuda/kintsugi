@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { pool, databaseConfig } from "./db.js";
-import { products } from "../src/data.js";
+import { products, colorLabel } from "../src/data.js";
 import { normalizePhone } from "./integrations.js";
 import { parseDimensions } from "../src/dimensions.js";
 import { catalogCategories } from "../src/catalog.js";
 import { paymentMethods } from "../src/payment-methods.js";
+import { SAMPLE_DANA_QRIS_META, SAMPLE_DANA_QRIS_PAYLOAD } from "../src/qris.js";
 
 const dimensionSize = (value) => {
   const d = parseDimensions(value);
@@ -79,13 +80,14 @@ async function syncSepraiCatalog(target) {
         const d = dimensionSize(size);
         for (const color of p.colors) {
           await client.query(
-            `INSERT INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,stock)
-             VALUES(?,?,?,?,?,?,?)
+            `INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,stock)
+             VALUES(?,?,?,?,?,?,?,?)
              ON DUPLICATE KEY UPDATE
+               id=COALESCE(NULLIF(id,''), VALUES(id)),
                length_cm=VALUES(length_cm),
                width_cm=VALUES(width_cm),
                height_cm=VALUES(height_cm)`,
-            [p.id, d.size, d.length, d.width, d.height, color, stableDemoStock(p.id, d.size, color)],
+            [randomUUID(), p.id, d.size, d.length, d.width, d.height, color, stableDemoStock(p.id, d.size, color)],
           );
         }
       }
@@ -158,7 +160,10 @@ export async function initialize(target = pool, seed = true) {
       brand: "Kintsugi",
       announcementText: "Ruang tidur yang tenang, dimulai dari tekstil yang baik.",
       contactEmail: process.env.STORE_CONTACT_EMAIL || "wirayuda101101@gmail.com",
+      contactPhone: process.env.STORE_CONTACT_PHONE || "",
       storeAddress: "",
+      pickupInfo:
+        "Pembayaran dilakukan langsung saat pengambilan di toko. Silakan konfirmasi jadwal kedatangan melalui WhatsApp toko dengan menunjukkan nomor pesanan.",
       logo: "/brand/kintsugi-logo-transparent-v2.png",
       heroImage: "/images/seprai/sprei-01.jpg",
       heroKicker: "KINTSUGI / BEDROOM COLLECTION",
@@ -1019,6 +1024,17 @@ export async function initialize(target = pool, seed = true) {
       "ALTER TABLE auth_challenges MODIFY email VARCHAR(254) NULL DEFAULT NULL",
     );
 
+  const ensureVariantColumn = async (table, name, sql) => {
+    const columns = (await target.query(`SHOW COLUMNS FROM ${table}`)).rows;
+    if (!columns.some((column) => column.Field === name)) {
+      await target.query(`ALTER TABLE ${table} ADD COLUMN ${sql}`);
+    }
+  };
+  await ensureVariantColumn("product_variants", "id", "id VARCHAR(80) NULL FIRST");
+  await ensureVariantColumn("product_variants", "price", "price INT NULL DEFAULT NULL");
+  await ensureVariantColumn("product_variants", "images_json", "images_json TEXT NULL");
+  await ensureVariantColumn("order_items", "variant_id", "variant_id VARCHAR(80) NULL DEFAULT NULL AFTER product_id");
+
   // Sinkronisasi katalog seprai
   await syncSepraiCatalog(target);
 
@@ -1109,6 +1125,174 @@ export async function initialize(target = pool, seed = true) {
     );
 
     await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_finalize_bedding_and_fashion_catalog"]);
+  }
+
+  // Migrasi fitur QRIS Dinamis/Manual + Verifikasi Pembayaran
+  const manualQrisMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_manual_qris_payments"],
+  )).rows[0];
+  if (!manualQrisMigration) {
+    const ensureColumn = async (table, name, sql) => {
+      const columns = (await target.query(`SHOW COLUMNS FROM ${table}`)).rows;
+      if (!columns.some((column) => column.Field === name)) {
+        await target.query(`ALTER TABLE ${table} ADD COLUMN ${sql}`);
+      }
+    };
+
+    await target.query(
+      "ALTER TABLE store_payment_methods MODIFY detail VARCHAR(500) NOT NULL DEFAULT ''",
+    );
+    await ensureColumn(
+      "store_payment_methods",
+      "payment_type",
+      "payment_type VARCHAR(30) NOT NULL DEFAULT 'gateway'",
+    );
+    await ensureColumn("store_payment_methods", "qris_payload", "qris_payload TEXT NULL");
+    await ensureColumn(
+      "store_payment_methods",
+      "qris_merchant_name",
+      "qris_merchant_name VARCHAR(120) NOT NULL DEFAULT ''",
+    );
+    await ensureColumn(
+      "store_payment_methods",
+      "qris_provider",
+      "qris_provider VARCHAR(80) NOT NULL DEFAULT ''",
+    );
+    await ensureColumn(
+      "store_payment_methods",
+      "qris_mode",
+      "qris_mode VARCHAR(20) NOT NULL DEFAULT 'dynamic'",
+    );
+    await target.query(
+      "UPDATE store_payment_methods SET payment_type='cod' WHERE (id='COD' OR group_name='COD') AND payment_type='gateway'",
+    );
+
+    await target.query(
+      "ALTER TABLE orders MODIFY payment_status ENUM('CREATING','PENDING','WAITING_VERIFICATION','PAID','FAILED','EXPIRED','CANCELLED') NOT NULL DEFAULT 'CREATING'",
+    );
+    await ensureColumn("orders", "payment_type", "payment_type VARCHAR(30) NOT NULL DEFAULT 'gateway'");
+    await ensureColumn(
+      "orders",
+      "payment_method_name",
+      "payment_method_name VARCHAR(120) NOT NULL DEFAULT ''",
+    );
+    await ensureColumn("orders", "qris_payload", "qris_payload TEXT NULL");
+    await ensureColumn("orders", "qris_static_payload", "qris_static_payload TEXT NULL");
+    await ensureColumn("orders", "qris_mode", "qris_mode VARCHAR(20) NOT NULL DEFAULT ''");
+    await ensureColumn(
+      "orders",
+      "qris_merchant_name",
+      "qris_merchant_name VARCHAR(120) NOT NULL DEFAULT ''",
+    );
+    await ensureColumn("orders", "qris_provider", "qris_provider VARCHAR(80) NOT NULL DEFAULT ''");
+    await ensureColumn("orders", "payment_proof_url", "payment_proof_url TEXT NULL");
+    await ensureColumn(
+      "orders",
+      "payment_proof_note",
+      "payment_proof_note VARCHAR(500) NOT NULL DEFAULT ''",
+    );
+    await ensureColumn("orders", "payment_submitted_at", "payment_submitted_at DATETIME(3) NULL");
+    await ensureColumn("orders", "payment_verified_at", "payment_verified_at DATETIME(3) NULL");
+    await ensureColumn("orders", "payment_verified_by", "payment_verified_by CHAR(36) NULL");
+    await ensureColumn(
+      "orders",
+      "payment_rejection_reason",
+      "payment_rejection_reason VARCHAR(300) NOT NULL DEFAULT ''",
+    );
+    await target.query("UPDATE orders SET payment_type='cod' WHERE payment='COD' AND payment_type='gateway'");
+
+    // Pastikan sampel awal QRIS DANA (BAGUS WIRAYUDA) tersedia & dapat diubah di Admin
+    await target.query(
+      `INSERT IGNORE INTO store_payment_methods
+         (id, name, group_name, detail, payment_type, qris_payload, qris_merchant_name, qris_provider, qris_mode, enabled, sort_order)
+       VALUES (?, ?, 'QRIS', ?, 'qris_manual', ?, ?, ?, 'dynamic', TRUE, 1)`,
+      [
+        SAMPLE_DANA_QRIS_META.id,
+        SAMPLE_DANA_QRIS_META.name,
+        "Scan QRIS nominal otomatis (DANA - BAGUS WIRAYUDA) lalu unggah bukti bayar untuk verifikasi Admin.",
+        SAMPLE_DANA_QRIS_PAYLOAD,
+        SAMPLE_DANA_QRIS_META.merchantName,
+        SAMPLE_DANA_QRIS_META.provider,
+      ],
+    );
+
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_manual_qris_payments"]);
+  }
+
+  // Migrasi konsistensi variasi: id per variasi, indeks & pembersihan warna heksadesimal duplikat
+  const variantSyncMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_normalize_variant_colors_images_ids"],
+  )).rows[0];
+  if (!variantSyncMigration) {
+    const indexes = (await target.query("SHOW INDEX FROM product_variants WHERE Key_name='idx_product_variants_id'")).rows;
+    if (!indexes.length) {
+      await target.query("CREATE INDEX idx_product_variants_id ON product_variants (id)");
+    }
+
+    await target.query("UPDATE product_variants SET id=UUID() WHERE id IS NULL OR id=''");
+
+    const hexVariants = (
+      await target.query(
+        "SELECT product_id, size, color, stock, image_url, images_json, price FROM product_variants WHERE color REGEXP '^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$'",
+      )
+    ).rows;
+    for (const row of hexVariants) {
+      const canonicalColor = colorLabel(row.color);
+      if (!canonicalColor || canonicalColor === row.color) continue;
+      const existing = (
+        await target.query(
+          "SELECT size, color, stock, image_url, images_json, price FROM product_variants WHERE product_id=? AND size=? AND color=?",
+          [row.product_id, row.size, canonicalColor],
+        )
+      ).rows[0];
+      if (existing) {
+        const mergedImage = existing.image_url || row.image_url || null;
+        const mergedImagesJson = existing.images_json || row.images_json || null;
+        const mergedPrice = existing.price || row.price || null;
+        await target.query(
+          "UPDATE product_variants SET stock=GREATEST(stock, ?), image_url=?, images_json=?, price=? WHERE product_id=? AND size=? AND color=?",
+          [row.stock, mergedImage, mergedImagesJson, mergedPrice, row.product_id, row.size, canonicalColor],
+        );
+        await target.query(
+          "DELETE FROM product_variants WHERE product_id=? AND size=? AND color=?",
+          [row.product_id, row.size, row.color],
+        );
+      } else {
+        await target.query(
+          "UPDATE product_variants SET color=? WHERE product_id=? AND size=? AND color=?",
+          [canonicalColor, row.product_id, row.size, row.color],
+        );
+      }
+    }
+
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_normalize_variant_colors_images_ids"]);
+  }
+
+  // Migrasi status Ambil Langsung di Toko (Store Pickup) & pengaturan informasi pickup
+  const storePickupMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_store_pickup_status_and_settings"],
+  )).rows[0];
+  if (!storePickupMigration) {
+    await target.query(
+      "ALTER TABLE orders MODIFY status ENUM('Menunggu pembayaran','Menunggu Pengambilan & Pembayaran','Diproses','Dikirim','Selesai','Dibatalkan') NOT NULL DEFAULT 'Menunggu pembayaran'",
+    );
+    await target.query(
+      "INSERT IGNORE INTO store_settings(setting_key,setting_value) VALUES(?,?)",
+      ["contactPhone", JSON.stringify(process.env.STORE_CONTACT_PHONE || "")],
+    );
+    await target.query(
+      "INSERT IGNORE INTO store_settings(setting_key,setting_value) VALUES(?,?)",
+      [
+        "pickupInfo",
+        JSON.stringify(
+          "Pembayaran dilakukan langsung saat pengambilan di toko. Silakan konfirmasi jadwal kedatangan melalui WhatsApp toko dengan menunjukkan nomor pesanan.",
+        ),
+      ],
+    );
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_store_pickup_status_and_settings"]);
   }
 
   if (!seed) return;

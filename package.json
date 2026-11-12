@@ -19,12 +19,15 @@
     "helmet": "^8.1.0",
     "lucide-react": "^0.468.0",
     "mysql2": "^3.24.6",
+    "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
     "vite": "^7.1.7"
   }
 }

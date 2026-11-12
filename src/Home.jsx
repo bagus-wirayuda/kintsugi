@@ -17,8 +17,9 @@ import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import { api } from "./store";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
+import { resolveActiveVariant, resolveVariationDisplayMode } from "./variant-utils.js";
 
-export default function Home({ shop, products = [], openProduct, config = {}, onAddToCart, onBuyDirect }) {
+export default function Home({ shop, products = [], openProduct, config = {}, onAddToCart, onBuyDirect, onSizeGuide }) {
   const mainNavItems = getMainCategories(config.categories || mainCategories);
 
   // Resolusi section produk beranda (dinamis dan full custom)
@@ -27,6 +28,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
     : [];
 
   const [extraProducts, setExtraProducts] = useState({});
+  const [cardColors, setCardColors] = useState({});
 
   useEffect(() => {
     const promoProductIds = (config.promotions || [])
@@ -209,39 +211,57 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
               </button>
             </div>
             <div className="ks-home-products">
-              {sectionProducts.map((p) => (
+              {sectionProducts.map((p) => {
+                const activeColor =
+                  cardColors[p.id] && p.colors?.includes(cardColors[p.id])
+                    ? cardColors[p.id]
+                    : p.colors?.[0] || "";
+                const activeVariant = resolveActiveVariant(p, activeColor, "");
+                const cardImage = activeVariant.image || p.image;
+                return (
                 <article key={p.id}>
                   <button
                     type="button"
                     className="ks-home-product-image"
-                    onClick={() => openProduct(p)}
+                    onClick={() => openProduct(p, "cart", activeColor)}
                   >
-                    <img src={p.image} alt={p.name} loading="lazy" />
+                    <img
+                      className="ks-variant-live-img"
+                      src={cardImage}
+                      alt={`${p.name}${activeColor ? ` - ${colorLabel(activeColor)}` : ""}`}
+                      loading="lazy"
+                    />
                     <span>
                       {p.oldPrice ? "PENAWARAN TERBATAS" : "PILIHAN KOLEKSI"}
                     </span>
                   </button>
                   <VariantSummary
                     colors={p.colors}
+                    variants={p.variants}
                     variationLabel={p.variationLabel || "Warna"}
+                    selectedColor={activeColor}
+                    onSelectColor={(nextColor) =>
+                      setCardColors((prev) => ({ ...prev, [p.id]: nextColor }))
+                    }
                   />
                   <small>{categoryLabel(p.category, config.categories).toUpperCase()}</small>
                   <SizeSummary sizes={p.sizes} />
                   <button
                     type="button"
                     className="ks-home-product-name"
-                    onClick={() => openProduct(p)}
+                    onClick={() => openProduct(p, "cart", activeColor)}
                   >
                     {p.name}
                   </button>
                   <strong>{money(p.price)}</strong>
                   {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
                   <div className="ks-product-actions">
-                    <button type="button" onClick={() => openProduct(p, 'cart')}>+ Keranjang</button>
-                    <button type="button" onClick={() => openProduct(p, 'buy')}>Beli langsung</button>
+                    <button type="button" onClick={() => openProduct(p, 'cart', activeColor)}>+ Keranjang</button>
+                    <button type="button" onClick={() => openProduct(p, 'buy', activeColor)}>Beli langsung</button>
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </section>
         );
@@ -272,6 +292,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
                   isActive={idx === activeSlide}
                   onBuyDirect={onBuyDirect}
                   onAddToCart={onAddToCart}
+                  onSizeGuide={onSizeGuide}
                 />
               ))}
             </div>
@@ -342,7 +363,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
   );
 }
 
-function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
+function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide }) {
   const product = slide.product;
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
@@ -360,13 +381,14 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
   }, [product]);
 
   // Compute selected variant and stock
-  const currentVariant = product?.variants?.find(
-    (v) => (v.color === selectedColor || !v.color) && (v.size === selectedSize || !v.size)
+  const activeVariantInfo = resolveActiveVariant(product, selectedColor, selectedSize);
+  const promoDisplay = resolveVariationDisplayMode(
+    product?.colors,
+    product?.variants,
+    product?.variationLabel,
   );
-
-  const currentStock = currentVariant
-    ? currentVariant.stock
-    : (product?.stock ?? 0);
+  const currentVariant = activeVariantInfo.variant;
+  const currentStock = activeVariantInfo.stock;
 
   // If quantity > stock, adjust
   useEffect(() => {
@@ -375,12 +397,15 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
     }
   }, [currentStock]);
 
-  const displayImage = slide.customImage
-    ? slide.customImage
-    : (currentVariant?.image_url || slide.image || product?.image || "/images/seprai/sprei-01.jpg");
+  const displayImage = activeVariantInfo.hasVariantImage
+    ? activeVariantInfo.image
+    : (slide.customImage || slide.image || product?.image || "/images/seprai/sprei-01.jpg");
 
-  const basePrice = slide.oldPrice > slide.price ? slide.oldPrice : (product?.price || 0);
-  const salePrice = slide.price;
+  const variantHasCustomPrice = Number(currentVariant?.price) >= 1000;
+  const basePrice = variantHasCustomPrice
+    ? (currentVariant.oldPrice || currentVariant.price)
+    : (slide.oldPrice > slide.price ? slide.oldPrice : (product?.price || 0));
+  const salePrice = variantHasCustomPrice ? Number(currentVariant.price) : slide.price;
   const discountPercent = slide.discountPercent || (basePrice > salePrice && basePrice > 0 ? Math.round((1 - salePrice / basePrice) * 100) : 0);
 
   return (
@@ -391,8 +416,9 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
       {/* Area Kiri: Gambar Utama Produk / Foto Promo */}
       <div className="ks-story-photo">
         <img
+          className="ks-variant-live-img"
           src={displayImage}
-          alt={product?.name || slide.title}
+          alt={product?.name ? `${product.name}${selectedColor ? ` - ${colorLabel(selectedColor)}` : ""}` : slide.title}
           loading="lazy"
         />
         {discountPercent > 0 && (
@@ -422,32 +448,37 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
 
         {/* Panel Pembelian Langsung Terintegrasi */}
         <div className="ks-promo-purchase-panel">
-          {/* Pilihan Warna / Variasi */}
-          {product?.colors?.length > 0 && (
+          {/* Pilihan Warna / Variasi (Mode Seragam) */}
+          {promoDisplay.items.length > 0 && (
             <div className="ks-promo-field-group">
               <div className="ks-promo-field-header">
                 <span>{product.variationLabel || "Pilihan Variasi"}:</span>
                 <strong>{colorLabel(selectedColor)}</strong>
               </div>
-              <div className="ks-promo-choices-wrap">
-                {product.colors.map((c) => {
-                  const v = product.variants?.find((item) => item.color === c && item.image_url);
-                  const isHex = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c);
-                  const isSel = selectedColor === c;
+              <div className={`ks-promo-choices-wrap mode-${promoDisplay.mode}`}>
+                {promoDisplay.items.map((item) => {
+                  const isSel = selectedColor === item.value;
+                  const modeClass =
+                    promoDisplay.mode === "swatch"
+                      ? "is-hex"
+                      : promoDisplay.mode === "thumbnail"
+                        ? "is-thumb"
+                        : "is-text";
                   return (
                     <button
-                      key={c}
+                      key={item.value}
                       type="button"
-                      className={`ks-promo-variant-btn ${isSel ? "selected" : ""} ${isHex ? "is-hex" : "is-text"}`}
-                      style={isHex ? { background: c } : undefined}
-                      title={colorLabel(c)}
-                      onClick={() => setSelectedColor(c)}
-                      aria-label={colorLabel(c)}
+                      className={`ks-promo-variant-btn ${isSel ? "selected" : ""} ${modeClass}`}
+                      style={promoDisplay.mode === "swatch" ? { background: item.hex } : undefined}
+                      title={item.label}
+                      onClick={() => setSelectedColor(item.value)}
+                      aria-label={item.label}
+                      aria-pressed={isSel}
                     >
-                      {v?.image_url && (
-                        <img src={v.image_url} alt="" className="ks-promo-variant-thumb" />
+                      {promoDisplay.mode === "thumbnail" && item.thumb && (
+                        <img src={item.thumb} alt={item.label} className="ks-promo-variant-thumb" />
                       )}
-                      {!isHex && <span>{c}</span>}
+                      {promoDisplay.mode !== "swatch" && <span>{item.label}</span>}
                     </button>
                   );
                 })}
@@ -461,6 +492,15 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
               <div className="ks-promo-field-header">
                 <span>Ukuran:</span>
                 <strong>{dimensionLabel(selectedSize)}</strong>
+                {onSizeGuide && (
+                  <button
+                    type="button"
+                    className="text-link ks-promo-size-guide-btn"
+                    onClick={() => onSizeGuide(product)}
+                  >
+                    Panduan ukuran
+                  </button>
+                )}
               </div>
               <div className="ks-promo-choices-wrap">
                 {product.sizes.map((s) => {
@@ -507,13 +547,18 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
                 <span className="ks-promo-qty-num">{quantity}</span>
                 <button
                   type="button"
-                  disabled={quantity >= Math.min(99, currentStock) || currentStock < 1}
-                  onClick={() => setQuantity(Math.min(99, currentStock, quantity + 1))}
+                  disabled={quantity >= Math.min(99, Math.max(0, Number(currentStock) || 0)) || currentStock < 1}
+                  onClick={() => setQuantity(Math.min(99, Math.max(1, Number(currentStock) || 1), quantity + 1))}
                   aria-label="Tambah jumlah"
                 >
                   <Plus size={14} />
                 </button>
               </div>
+              {currentStock > 0 && (
+                <span className="ks-promo-qty-subtotal">
+                  Subtotal: <b>{money(salePrice * quantity)}</b>
+                </span>
+              )}
             </div>
 
             <div className="ks-promo-stock-box">
@@ -541,6 +586,8 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
                 const key = `${product.id}:${selectedSize}:${selectedColor}`;
                 onBuyDirect?.({
                   ...product,
+                  variantId: activeVariantInfo.variantId,
+                  image: displayImage,
                   price: salePrice,
                   oldPrice: basePrice > salePrice ? basePrice : 0,
                   stock: currentStock,
@@ -564,6 +611,8 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart }) {
                 const key = `${product.id}:${selectedSize}:${selectedColor}`;
                 onAddToCart?.({
                   ...product,
+                  variantId: activeVariantInfo.variantId,
+                  image: displayImage,
                   price: salePrice,
                   oldPrice: basePrice > salePrice ? basePrice : 0,
                   stock: currentStock,

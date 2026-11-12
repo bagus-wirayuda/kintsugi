@@ -26,14 +26,18 @@ CREATE TABLE IF NOT EXISTS products (
  INDEX(category), INDEX(subcategory)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS product_variants (
+ id VARCHAR(80) NULL,
  product_id VARCHAR(40) NOT NULL, size VARCHAR(30) NOT NULL,
  length_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  width_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  height_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  variation_label VARCHAR(80) NOT NULL DEFAULT 'Variasi',
  color VARCHAR(100) NOT NULL,
+ price INT NULL DEFAULT NULL,
  image_url TEXT NULL,
+ images_json TEXT NULL,
  stock INT NOT NULL DEFAULT 30 CHECK(stock>=0), PRIMARY KEY(product_id,size,color),
+ INDEX idx_product_variants_id (id),
  FOREIGN KEY(product_id) REFERENCES products(id)
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS store_promotions (
@@ -53,9 +57,22 @@ CREATE TABLE IF NOT EXISTS orders (
  coupon VARCHAR(30) NOT NULL DEFAULT '', subtotal INT NOT NULL CHECK(subtotal>=0),
  discount INT NOT NULL DEFAULT 0 CHECK(discount>=0), delivery INT NOT NULL CHECK(delivery>=0),
  total INT NOT NULL CHECK(total>=0),
- status ENUM('Menunggu pembayaran','Diproses','Dikirim','Selesai','Dibatalkan') NOT NULL DEFAULT 'Menunggu pembayaran',
+ status ENUM('Menunggu pembayaran','Menunggu Pengambilan & Pembayaran','Diproses','Dikirim','Selesai','Dibatalkan') NOT NULL DEFAULT 'Menunggu pembayaran',
  tracking_number VARCHAR(100) NOT NULL DEFAULT '',
- payment_status ENUM('CREATING','PENDING','PAID','FAILED','EXPIRED','CANCELLED') NOT NULL DEFAULT 'CREATING',
+ payment_status ENUM('CREATING','PENDING','WAITING_VERIFICATION','PAID','FAILED','EXPIRED','CANCELLED') NOT NULL DEFAULT 'CREATING',
+ payment_type VARCHAR(30) NOT NULL DEFAULT 'gateway',
+ payment_method_name VARCHAR(120) NOT NULL DEFAULT '',
+ qris_payload TEXT NULL,
+ qris_static_payload TEXT NULL,
+ qris_mode VARCHAR(20) NOT NULL DEFAULT '',
+ qris_merchant_name VARCHAR(120) NOT NULL DEFAULT '',
+ qris_provider VARCHAR(80) NOT NULL DEFAULT '',
+ payment_proof_url TEXT NULL,
+ payment_proof_note VARCHAR(500) NOT NULL DEFAULT '',
+ payment_submitted_at DATETIME(3) NULL,
+ payment_verified_at DATETIME(3) NULL,
+ payment_verified_by CHAR(36) NULL,
+ payment_rejection_reason VARCHAR(300) NOT NULL DEFAULT '',
  invoice_id VARCHAR(100) UNIQUE, payment_url TEXT, expires_at DATETIME(3), paid_at DATETIME(3),
  stock_released BOOLEAN NOT NULL DEFAULT FALSE, checkout_key VARCHAR(80) NOT NULL,
  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -64,6 +81,7 @@ CREATE TABLE IF NOT EXISTS orders (
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS order_items (
  id CHAR(36) PRIMARY KEY, order_id VARCHAR(50) NOT NULL, product_id VARCHAR(40) NOT NULL,
+ variant_id VARCHAR(80) NULL DEFAULT NULL,
  name VARCHAR(200) NOT NULL, image TEXT NOT NULL, size VARCHAR(30) NOT NULL,
  length_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
  width_cm SMALLINT UNSIGNED NOT NULL DEFAULT 0,
@@ -106,7 +124,10 @@ CREATE TABLE IF NOT EXISTS product_categories (
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS store_payment_methods (
  id VARCHAR(60) PRIMARY KEY, name VARCHAR(100) NOT NULL, group_name VARCHAR(100) NOT NULL DEFAULT '',
- detail VARCHAR(250) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL DEFAULT TRUE,
+ detail VARCHAR(500) NOT NULL DEFAULT '', payment_type VARCHAR(30) NOT NULL DEFAULT 'gateway',
+ qris_payload TEXT NULL, qris_merchant_name VARCHAR(120) NOT NULL DEFAULT '',
+ qris_provider VARCHAR(80) NOT NULL DEFAULT '', qris_mode VARCHAR(20) NOT NULL DEFAULT 'dynamic',
+ enabled BOOLEAN NOT NULL DEFAULT TRUE,
  sort_order INT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS store_expenses (

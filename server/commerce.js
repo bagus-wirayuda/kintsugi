@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { parseDimensions } from "../src/dimensions.js";
+import { normalizeSizeToken } from "../src/size-guide.js";
 export const addressSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.email().max(254),
   phone: z.string().regex(/^[0-9+ ()-]{8,20}$/),
-  street: z.string().trim().min(1).max(500),
-  city: z.string().trim().min(1).max(100),
+  street: z.string().trim().max(500).optional().default(""),
+  city: z.string().trim().max(100).optional().default(""),
   postal: z.string().trim().max(10).optional().default("").refine((value) => !value || /^\d{5}$/.test(value), "Kode pos harus 5 digit."),
 });
 export const orderSchema = z.object({
@@ -13,6 +14,7 @@ export const orderSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1).max(40),
+        variantId: z.string().trim().max(80).optional(),
         size: z.string().min(1).max(30).transform((value) => {
           const dimensions = parseDimensions(value);
           return dimensions
@@ -66,10 +68,13 @@ export function calculateTotals(items, coupon, shipping, deliveryOverride, manua
 export function aggregateItems(items) {
   const result = new Map();
   for (const i of items) {
-    const key = [i.id, i.size, i.color].join(":");
+    const normalizedSize = normalizeSizeToken(i.size) || i.size;
+    const key = [i.id, normalizedSize, i.color].join(":");
     const existing = result.get(key);
-    if (existing) existing.quantity += i.quantity;
-    else result.set(key, { ...i });
+    if (existing) {
+      existing.quantity += i.quantity;
+      if (i.variantId && !existing.variantId) existing.variantId = i.variantId;
+    } else result.set(key, { ...i, size: normalizedSize });
   }
   const rows = [...result.values()].sort((a, b) =>
     [a.id, a.size, a.color]
@@ -84,6 +89,7 @@ export function aggregateItems(items) {
 }
 export const transitions = {
   "Menunggu pembayaran": ["Dibatalkan"],
+  "Menunggu Pengambilan & Pembayaran": ["Diproses", "Dibatalkan"],
   Diproses: ["Dikirim"],
   Dikirim: ["Selesai"],
   Selesai: [],

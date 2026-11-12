@@ -12,9 +12,11 @@ import { colorLabel, money } from "./data";
 import { paymentName } from './payment-methods';
 import { Notice, Status } from "./Workspace";
 import { dimensionLabel } from "./dimensions.js";
+import QrisPanel from "./QrisPanel.jsx";
 export const paymentLabel = {
   CREATING: "Menyiapkan pembayaran",
   PENDING: "Belum dibayar",
+  WAITING_VERIFICATION: "Menunggu Verifikasi",
   PAID: "Lunas",
   FAILED: "Pembayaran gagal",
   EXPIRED: "Kedaluwarsa",
@@ -44,7 +46,18 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
     }
   }
   const pending = o.status === "Menunggu pembayaran",
-    cancelled = o.status === "Dibatalkan";
+    awaitingPickup = o.status === "Menunggu Pengambilan & Pembayaran",
+    cancelled = o.status === "Dibatalkan",
+    isStorePickup = o.payment_type === "store_pickup" || o.payment === "store_pickup",
+    isCod = !isStorePickup && (o.payment_type === "cod" || o.payment === "COD"),
+    isQrisManual =
+      !isStorePickup &&
+      (o.payment_type === "qris_manual" ||
+        Boolean(o.qris_payload || o.qris_static_payload));
+  const waDigits = String(config?.contactPhone || "").replace(/\D/g, "");
+  const waHref = waDigits
+    ? `https://wa.me/${waDigits.startsWith("0") ? "62" + waDigits.slice(1) : waDigits}`
+    : "";
   return (
     <article className="ws-order">
       <div className="ws-order-heading">
@@ -88,17 +101,17 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
       </div>
       <div className="ws-order-total">
         <div>
-          <span>{paymentName(o.payment)}</span>
+          <span>{o.payment_method_name || paymentName(o.payment, config?.paymentMethods)}</span>
           <Status
             tone={
               o.payment_status === "PAID"
                 ? "success"
-                : pending
+                : pending || awaitingPickup
                   ? "warning"
                   : "neutral"
             }
           >
-            {paymentLabel[o.payment_status]}
+            {paymentLabel[o.payment_status] || o.payment_status}
           </Status>
         </div>
         <div>
@@ -107,13 +120,52 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
         </div>
       </div>
       <Notice>{error}</Notice>
-      {pending && (
+      {isStorePickup && !cancelled && o.payment_status !== "PAID" && (
+        <div className="ks-pickup-instruction-card ks-pickup-order-card">
+          <p className="ks-pickup-highlight">
+            Pembayaran dilakukan saat pengambilan di toko
+          </p>
+          <p className="ws-muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+            <b>Alamat Toko:</b> {config?.storeAddress || "Hubungi admin WhatsApp untuk detail alamat toko."}
+            {config?.contactPhone && (
+              <>
+                {" · "}
+                <b>WhatsApp:</b>{" "}
+                {waHref ? (
+                  <a href={waHref} target="_blank" rel="noreferrer" className="ws-link">
+                    {config.contactPhone}
+                  </a>
+                ) : (
+                  config.contactPhone
+                )}
+              </>
+            )}
+          </p>
+          {config?.pickupInfo && (
+            <p className="ws-muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+              {config.pickupInfo}
+            </p>
+          )}
+        </div>
+      )}
+      {isQrisManual && (pending || o.payment_proof_url) && (
+        <QrisPanel
+          order={o}
+          onUpdated={() => onRefresh?.()}
+          notify={notify}
+        />
+      )}
+      {(pending || (isStorePickup && awaitingPickup && o.payment_status !== "PAID")) && (
         <div className="ws-payment-actions">
-          {o.payment === "COD" ? (
+          {isStorePickup ? (
+            <p className="ws-payment-expiry" style={{ width: "100%", margin: "4px 0" }}>
+              Status: <b>{o.status}</b>. Selesaikan pembayaran langsung di kasir saat mengambil pesanan.
+            </p>
+          ) : isCod ? (
             <p className="ws-payment-expiry" style={{ width: "100%", margin: "4px 0" }}>
               Metode Bayar di Tempat (COD). Siapkan uang pas kepada kurir saat pesanan sampai.
             </p>
-          ) : (
+          ) : isQrisManual ? null : (
             <>
               {o.payment_url && /^https?:\/\//i.test(o.payment_url) && (
                 <a className="ws-button primary" href={o.payment_url}>

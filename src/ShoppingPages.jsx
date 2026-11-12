@@ -17,6 +17,8 @@ import { colorLabel, money } from "./data";
 import { categoryLabel } from "./catalog";
 import { StoreHeader, StoreFooter } from "./StoreChrome";
 import { dimensionLabel } from "./dimensions.js";
+import { getCartItemCount } from "./checkout-state.js";
+import QrisPanel from "./QrisPanel.jsx";
 function Shell({
   user,
   config,
@@ -72,6 +74,9 @@ function Shell({
 export function CartView({
   cart = [],
   setCart,
+  selectedKeys = null,
+  onToggleSelect,
+  onToggleSelectAll,
   coupon = "",
   setCoupon,
   config,
@@ -79,48 +84,156 @@ export function CartView({
 }) {
   const [input, setInput] = useState(coupon || ""),
     [error, setError] = useState(""),
+    [quote, setQuote] = useState(null),
+    [quoteError, setQuoteError] = useState(""),
     [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setInput(coupon || "");
   }, [coupon]);
 
+  const selectedSet = new Set(
+    Array.isArray(selectedKeys) ? selectedKeys : cart.map((i) => i.key),
+  );
+  const selectedItems = cart.filter((i) => selectedSet.has(i.key));
+  const totalCartUnits = getCartItemCount(cart);
+  const selectedUnits = getCartItemCount(selectedItems);
+  const allSelected = cart.length > 0 && selectedItems.length === cart.length;
+  const someSelected = selectedItems.length > 0 && selectedItems.length < cart.length;
+
   const manualShippingFee = Number(config?.shipping?.manualShippingFee ?? config?.shipping?.localDeliveryFee ?? 15000);
-  const total = totals(cart, coupon, "standard", manualShippingFee);
+  const optimisticTotal = selectedItems.length
+    ? totals(selectedItems, coupon, "standard", manualShippingFee)
+    : { subtotal: 0, discount: 0, delivery: 0, total: 0 };
+
+  const selectedSignature = selectedItems
+    .map((i) => `${i.key}:${Math.max(1, Math.trunc(Number(i.quantity) || 1))}`)
+    .join("|");
+
+  useEffect(() => {
+    if (!selectedItems.length) {
+      setQuote(null);
+      setQuoteError("");
+      return;
+    }
+    const controller = new AbortController();
+    setQuoteError("");
+    const timer = setTimeout(() => {
+      api("/checkout/quote", {
+        method: "POST",
+        signal: controller.signal,
+        body: {
+          items: selectedItems.map(({ id, variantId, size, color, quantity }) => ({
+            id,
+            ...(variantId ? { variantId } : {}),
+            size,
+            color,
+            quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
+          })),
+          coupon,
+          shipping: "local",
+        },
+      })
+        .then(setQuote)
+        .catch((e) => {
+          if (e.name !== "AbortError") setQuoteError(e.message);
+        });
+    }, 150);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [selectedSignature, coupon]);
+
+  const total = selectedItems.length ? quote || optimisticTotal : optimisticTotal;
+
+  const maxStockFor = (item) => {
+    const s = Number(item?.stock);
+    return Number.isFinite(s) && s > 0 ? Math.min(99, Math.trunc(s)) : 99;
+  };
 
   function quantity(key, value) {
     if (!setCart) return;
+    const numeric = Math.trunc(Number(value));
+    const safeNext = Number.isFinite(numeric) ? numeric : 1;
     setCart((c) =>
-      c.map((i) =>
-        i.key === key
-          ? { ...i, quantity: Math.min(99, i.stock, Math.max(1, value)) }
-          : i,
-      ),
+      c.map((i) => {
+        if (i.key !== key) return i;
+        const cap = maxStockFor(i);
+        return { ...i, stock: cap, quantity: Math.min(cap, Math.max(1, safeNext)) };
+      }),
     );
   }
 
   async function apply(e) {
     e.preventDefault();
+    if (!selectedItems.length) {
+      setError("Pilih minimal 1 produk sebelum menggunakan kode voucher.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const code = input.trim().toUpperCase();
-      await api("/checkout/quote", {
+      const q = await api("/checkout/quote", {
         method: "POST",
         body: {
-          items: cart.map(({ id, size, color, quantity }) => ({
+          items: selectedItems.map(({ id, variantId, size, color, quantity }) => ({
             id,
+            ...(variantId ? { variantId } : {}),
             size,
             color,
-            quantity,
+            quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
           })),
           coupon: code,
-          shipping: "regular",
+          shipping: "local",
         },
       });
+      setQuote(q);
       if (setCoupon) setCoupon(code);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function proceedToCheckout() {
+    if (!selectedItems.length || busy) return;
+    setBusy(true);
+    setQuoteError("");
+    try {
+      const q = await api("/checkout/quote", {
+        method: "POST",
+        body: {
+          items: selectedItems.map(({ id, variantId, size, color, quantity }) => ({
+            id,
+            ...(variantId ? { variantId } : {}),
+            size,
+            color,
+            quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
+          })),
+          coupon,
+          shipping: "local",
+        },
+      });
+      setQuote(q);
+      if (setCart && Array.isArray(q?.items)) {
+        setCart((prev) =>
+          prev.map((row) => {
+            const matched = q.items.find(
+              (srv) =>
+                srv.id === row.id &&
+                srv.color === row.color &&
+                String(srv.size) === String(row.size),
+            );
+            return matched ? { ...row, price: matched.price } : row;
+          }),
+        );
+      }
+      nav("checkout");
+    } catch (e) {
+      setQuoteError(e.message);
     } finally {
       setBusy(false);
     }
@@ -154,17 +267,53 @@ export function CartView({
     <div className="ks-cart-page-layout ws-cart-layout">
       <section className="ks-cart-main">
         <div className="ks-cart-header">
-          <h2>Produk Pilihan Anda</h2>
+          <h2>Produk di Keranjang</h2>
           <span className="ks-cart-count-badge">
-            {cart.reduce((n, i) => n + i.quantity, 0)} barang
+            {totalCartUnits} barang · {cart.length} jenis produk
           </span>
         </div>
+
+        <div className="ks-cart-select-bar">
+          <label className="ks-cart-select-all" htmlFor="cart-select-all">
+            <input
+              id="cart-select-all"
+              ref={(el) => {
+                if (el) el.indeterminate = someSelected;
+              }}
+              type="checkbox"
+              checked={allSelected}
+              onChange={(e) => onToggleSelectAll?.(e.target.checked)}
+            />
+            <span>
+              Pilih Semua <strong>({cart.length} produk · {totalCartUnits} barang)</strong>
+            </span>
+          </label>
+          <span className="ks-cart-selected-summary">
+            Dipilih: <strong>{selectedUnits} barang</strong> ({selectedItems.length} produk)
+          </span>
+        </div>
+
         <div className="ks-cart-items-list">
-          {cart.map((i) => (
-            <article className="ks-cart-card" key={i.key}>
-              <div className="ks-cart-img-wrap">
-                <img src={i.image} alt={i.name} loading="lazy" />
-              </div>
+          {cart.map((i) => {
+            const isChecked = selectedSet.has(i.key);
+            return (
+              <article
+                className={"ks-cart-card " + (isChecked ? "is-selected" : "")}
+                key={i.key}
+              >
+                <label
+                  className="ks-cart-check"
+                  aria-label={`Pilih ${i.name} untuk checkout`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleSelect?.(i.key)}
+                  />
+                </label>
+                <div className="ks-cart-img-wrap">
+                  <img src={i.image} alt={i.name} loading="lazy" />
+                </div>
               <div className="ks-cart-detail">
                 <div className="ks-cart-meta-top">
                   <h3 className="ks-cart-name">{i.name}</h3>
@@ -196,13 +345,13 @@ export function CartView({
                     >
                       <Minus size={14} />
                     </button>
-                    <span className="ks-stepper-val">{i.quantity}</span>
+                    <span className="ks-stepper-val">{Number(i.quantity) || 1}</span>
                     <button
                       type="button"
                       className="ks-stepper-btn"
                       aria-label={"Tambah " + i.name}
-                      disabled={i.quantity >= Math.min(99, i.stock)}
-                      onClick={() => quantity(i.key, i.quantity + 1)}
+                      disabled={(Number(i.quantity) || 1) >= maxStockFor(i)}
+                      onClick={() => quantity(i.key, (Number(i.quantity) || 1) + 1)}
                     >
                       <Plus size={14} />
                     </button>
@@ -210,8 +359,12 @@ export function CartView({
 
                   <div className="ks-cart-price-action-group">
                     <div className="ks-cart-item-pricing">
-                      <span className="ks-cart-total-label">Subtotal</span>
-                      <strong className="ks-cart-total-val">{money(i.price * i.quantity)}</strong>
+                      <span className="ks-cart-total-label">
+                        {money(i.price)} × {Number(i.quantity) || 1}
+                      </span>
+                      <strong className="ks-cart-total-val">
+                        {money(i.price * (Number(i.quantity) || 1))}
+                      </strong>
                     </div>
 
                     <button
@@ -229,7 +382,8 @@ export function CartView({
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -290,7 +444,12 @@ export function CartView({
 
           <div className="ks-summary-rows">
             <div className="ks-summary-row">
-              <span>Total Harga ({cart.reduce((n, i) => n + i.quantity, 0)} barang)</span>
+              <span>Produk Dipilih</span>
+              <span>{selectedItems.length} jenis ({selectedUnits} barang)</span>
+            </div>
+
+            <div className="ks-summary-row">
+              <span>Total Harga ({selectedUnits} barang)</span>
               <span>{money(total.subtotal)}</span>
             </div>
 
@@ -303,7 +462,13 @@ export function CartView({
 
             <div className="ks-summary-row">
               <span>Estimasi Ongkir</span>
-              <span>{total.delivery === 0 ? "Gratis" : money(total.delivery)}</span>
+              <span>
+                {!selectedItems.length
+                  ? "—"
+                  : total.delivery === 0
+                    ? "Gratis"
+                    : money(total.delivery)}
+              </span>
             </div>
 
             <div className="ks-summary-divider" />
@@ -314,12 +479,31 @@ export function CartView({
             </div>
           </div>
 
+          {quoteError && (
+            <div className="ks-voucher-error" role="alert" style={{ marginBottom: "12px" }}>
+              {quoteError}
+            </div>
+          )}
+
+          {!selectedItems.length && (
+            <p className="ks-cart-selection-hint">
+              Pilih minimal 1 produk di keranjang untuk melanjutkan checkout.
+            </p>
+          )}
+
           <button
             type="button"
             className="btn black ks-checkout-btn"
-            onClick={() => nav("checkout")}
+            disabled={!selectedItems.length || busy}
+            onClick={proceedToCheckout}
           >
-            <span>Lanjut ke Checkout</span>
+            <span>
+              {busy
+                ? "Memvalidasi pesanan…"
+                : selectedUnits > 0
+                  ? `Lanjut ke Checkout (${selectedUnits} barang)`
+                  : "Lanjut ke Checkout"}
+            </span>
             <ArrowRight size={17} />
           </button>
 
@@ -355,7 +539,7 @@ export function CartPage(props) {
       onSearch={onSearch}
       shop={shop}
       activeCategory={activeCategory}
-      cartCount={cart.reduce((sum, row) => sum + row.quantity, 0)}
+      cartCount={getCartItemCount(cart)}
       wishCount={wishCount}
       title="Keranjang belanja"
       subtitle="Periksa barang pilihan Anda sebelum checkout."
@@ -491,15 +675,29 @@ export function PaymentPage({
   onLogout,
   nav,
   order,
+  onOrderUpdated,
+  notify,
   shop,
   activeCategory,
   cartCount,
   wishCount,
   onSearch,
 }) {
-  const isCod = order?.payment === "COD" || !order?.invoice_id;
+  const isStorePickup =
+    order?.payment_type === "store_pickup" ||
+    order?.payment === "store_pickup";
+  const isCod = !isStorePickup && (order?.payment_type === "cod" || order?.payment === "COD");
+  const isQrisManual =
+    !isStorePickup &&
+    (order?.payment_type === "qris_manual" ||
+      Boolean(order?.qris_payload || order?.qris_static_payload));
   const isExternalUrl = order?.payment_url && /^https?:\/\//i.test(order.payment_url);
   const pending = order?.payment_status === "PENDING";
+  const waitingVerify = order?.payment_status === "WAITING_VERIFICATION";
+  const waDigits = String(config?.contactPhone || "").replace(/\D/g, "");
+  const waHref = waDigits
+    ? `https://wa.me/${waDigits.startsWith("0") ? "62" + waDigits.slice(1) : waDigits}`
+    : "";
   return (
     <Shell
       user={user}
@@ -512,11 +710,21 @@ export function PaymentPage({
       cartCount={cartCount}
       wishCount={wishCount}
       onSearch={onSearch}
-      title={isCod ? "Pesanan Berhasil Dibuat" : "Pembayaran Pesanan"}
+      title={
+        isStorePickup
+          ? "Pesanan Ambil di Toko Dikonfirmasi"
+          : isCod
+            ? "Pesanan Berhasil Dibuat"
+            : "Pembayaran Pesanan"
+      }
       subtitle={
-        isCod
-          ? "Pesanan Anda berhasil dikonfirmasi dan segera diproses oleh toko."
-          : "Pesanan Anda tersimpan dan dapat dilanjutkan dari halaman pesanan."
+        isStorePickup
+          ? "Pembayaran dilakukan langsung saat pengambilan di toko."
+          : isCod
+            ? "Pesanan Anda berhasil dikonfirmasi dan segera diproses oleh toko."
+            : isQrisManual
+              ? "Scan kode QRIS di bawah lalu unggah bukti transfer untuk diverifikasi Admin."
+              : "Pesanan Anda tersimpan dan dapat dilanjutkan dari halaman pesanan."
       }
     >
       <section className="ws-panel ws-payment-result">
@@ -524,23 +732,85 @@ export function PaymentPage({
           <CheckCircle2 size={32} />
         </span>
         <h2>
-          {isCod
-            ? "Pesanan Berhasil Dibuat (COD)"
-            : pending
-              ? "Lanjutkan Pembayaran"
-              : order?.payment_status === "FAILED"
-                ? "Pembayaran belum berhasil disiapkan"
-                : "Pesanan telah tersimpan"}
+          {isStorePickup
+            ? order?.payment_status === "PAID"
+              ? "Pesanan Selesai (Sudah Diambil & Dibayar)"
+              : "Menunggu Pengambilan & Pembayaran"
+            : isCod
+              ? "Pesanan Berhasil Dibuat (COD)"
+              : isQrisManual
+                ? waitingVerify
+                  ? "Menunggu Verifikasi Pembayaran"
+                  : order?.payment_status === "PAID"
+                    ? "Pembayaran QRIS Diterima (Lunas)"
+                    : "Selesaikan Pembayaran QRIS"
+                : pending
+                  ? "Lanjutkan Pembayaran"
+                  : order?.payment_status === "FAILED"
+                    ? "Pembayaran belum berhasil disiapkan"
+                    : "Pesanan telah tersimpan"}
         </h2>
         <p>
-          Nomor pesanan <b>#{order?.id?.slice(-8).toUpperCase()}</b>
+          Nomor pesanan <b>#{order?.id?.slice(-8).toUpperCase()}</b>{" "}
+          <span className="ws-mono">({order?.id})</span>
         </p>
         <h3>{money(order?.total || 0)}</h3>
         {order?.paymentError && <Notice>{order.paymentError}</Notice>}
-        {isCod ? (
+        {isStorePickup ? (
+          <div className="ks-pickup-instruction-card">
+            <p className="ks-pickup-highlight">
+              Pembayaran dilakukan saat pengambilan di toko
+            </p>
+            <dl className="ks-pickup-details">
+              <div>
+                <dt>Status Pesanan</dt>
+                <dd>{order?.status || "Menunggu Pengambilan & Pembayaran"}</dd>
+              </div>
+              <div>
+                <dt>Status Pembayaran</dt>
+                <dd>{order?.payment_status === "PAID" ? "Lunas" : "Belum dibayar (Bayar di Toko)"}</dd>
+              </div>
+              <div>
+                <dt>Alamat Toko</dt>
+                <dd>{config?.storeAddress || "Hubungi admin WhatsApp untuk alamat lengkap pengambilan di toko."}</dd>
+              </div>
+              <div>
+                <dt>Kontak WhatsApp</dt>
+                <dd>
+                  {config?.contactPhone ? (
+                    waHref ? (
+                      <a href={waHref} target="_blank" rel="noreferrer" className="ws-link">
+                        {config.contactPhone}
+                      </a>
+                    ) : (
+                      config.contactPhone
+                    )
+                  ) : (
+                    "Gunakan kontak admin pada halaman Informasi Toko"
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Informasi Pengambilan</dt>
+                <dd>
+                  {config?.pickupInfo ||
+                    "Tunjukkan nomor pesanan Anda kepada petugas toko saat melakukan pengambilan dan pembayaran."}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        ) : isCod ? (
           <p style={{ maxWidth: 460, margin: "12px auto", color: "var(--ws-muted)", lineHeight: 1.6 }}>
             Pesanan Anda menggunakan metode <b>Bayar di Tempat (COD)</b>. Siapkan uang tunai sebesar <b>{money(order?.total || 0)}</b> saat kurir mengantarkan pesanan ke alamat Anda.
           </p>
+        ) : isQrisManual ? (
+          <div style={{ textAlign: "left", marginTop: "18px", width: "100%" }}>
+            <QrisPanel
+              order={order}
+              onUpdated={onOrderUpdated}
+              notify={notify}
+            />
+          </div>
         ) : (
           pending && isExternalUrl && (
             <a className="ws-button primary" href={order.payment_url}>
@@ -553,9 +823,13 @@ export function PaymentPage({
           Lihat Status Pesanan
         </button>
         <p>
-          {isCod
-            ? "Status pesanan dapat dipantau berkala pada halaman riwayat pesanan."
-            : "Status pesanan diperbarui setelah pembayaran berhasil dikonfirmasi."}
+          {isStorePickup
+            ? "Pesanan berstatus Lunas & Selesai setelah pembayaran dan pengambilan dikonfirmasi petugas toko."
+            : isCod
+              ? "Status pesanan dapat dipantau berkala pada halaman riwayat pesanan."
+              : isQrisManual
+                ? "Pembayaran menjadi Lunas setelah Admin memeriksa mutasi akun DANA Anda."
+                : "Status pesanan diperbarui setelah pembayaran berhasil dikonfirmasi."}
         </p>
       </section>
     </Shell>

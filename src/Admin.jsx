@@ -35,6 +35,10 @@ import {
   Wallet,
   Landmark,
   Banknote,
+  QrCode,
+  ShieldAlert,
+  Clock3,
+  Store,
 } from "lucide-react";
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import { api } from "./store";
@@ -42,7 +46,9 @@ import { colorLabel, money, formatRupiah, parseRupiah } from "./data";
 import RupiahInput from "./RupiahInput.jsx";
 import { paymentLabel } from "./Orders";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
-import { PAYMENT_GROUPS } from "./payment-methods.js";
+import { PAYMENT_GROUPS, paymentName, isStorePickupMethod } from "./payment-methods.js";
+import { SAMPLE_DANA_QRIS_PAYLOAD, validateQrisPayload } from "./qris.js";
+import { collectVariantImages } from "./variant-utils.js";
 
 export default function Admin({ user, notify, onLogout, config, reloadConfig }) {
   const isAdmin = user.role === "admin";
@@ -80,7 +86,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     [productSort, setProductSort] = useState("newest"),
     [edit, setEdit] = useState(null),
     [sizeMode, setSizeMode] = useState("dimensions"),
-    [sizeRows, setSizeRows] = useState([{ id: "default", size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30", imageUrl: "" }]),
+    [sizeRows, setSizeRows] = useState([{ id: "default", variantId: "", size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30", imageUrl: "", images: [], variantPrice: "" }]),
     [selected, setSelected] = useState(null),
     [selectedProduct, setSelectedProduct] = useState(null),
     [trackingNumber, setTrackingNumber] = useState("");
@@ -180,28 +186,105 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
 
   const [paymentFormOpen, setPaymentFormOpen] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState(null);
-  const [paymentForm, setPaymentForm] = useState({ name: "", group: "Bank", detail: "", enabled: true });
+  const [paymentForm, setPaymentForm] = useState({
+    name: "",
+    group: "QRIS",
+    detail: "",
+    paymentType: "qris_manual",
+    qrisPayload: "",
+    qrisMerchantName: "",
+    qrisProvider: "",
+    qrisMode: "dynamic",
+    enabled: true,
+  });
+  const [qrisInspect, setQrisInspect] = useState(null);
+  const [inspectingQris, setInspectingQris] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showRejectBox, setShowRejectBox] = useState(false);
+  const [pickupPayConfirmed, setPickupPayConfirmed] = useState(false);
+  const [pickupGoodsConfirmed, setPickupGoodsConfirmed] = useState(false);
+  const [pickupPaymentNote, setPickupPaymentNote] = useState("");
+
+  const inspectQrisPayload = async (payloadToInspect) => {
+    const clean = String(payloadToInspect || "").trim();
+    if (!clean) {
+      setQrisInspect(null);
+      return;
+    }
+    setInspectingQris(true);
+    try {
+      const result = await api("/admin/qris/inspect", {
+        method: "POST",
+        body: { payload: clean, sampleAmount: 123000 },
+      });
+      setQrisInspect(result);
+      if (result?.valid && result.parsed) {
+        setPaymentForm((prev) => ({
+          ...prev,
+          qrisMerchantName: prev.qrisMerchantName || result.parsed.merchantName || "",
+          qrisProvider: prev.qrisProvider || result.parsed.provider || "",
+        }));
+      }
+    } catch (e) {
+      setQrisInspect({
+        valid: false,
+        errors: [e.message || "Gagal memeriksa payload QRIS."],
+        parsed: null,
+        compatibility: null,
+      });
+    } finally {
+      setInspectingQris(false);
+    }
+  };
 
   const openAddPayment = () => {
-    setPaymentForm({ name: "", group: "Bank", detail: "", enabled: true });
+    setPaymentForm({
+      name: "",
+      group: "QRIS",
+      detail: "",
+      paymentType: "qris_manual",
+      qrisPayload: "",
+      qrisMerchantName: "",
+      qrisProvider: "",
+      qrisMode: "dynamic",
+      enabled: true,
+    });
+    setQrisInspect(null);
     setEditingPaymentId(null);
     setPaymentFormOpen(true);
   };
 
   const openEditPayment = (method) => {
+    const group = method.group || method.group_name || "Bank";
+    const paymentType =
+      method.paymentType ||
+      method.payment_type ||
+      (group === "COD" ? "cod" : group === "QRIS" ? "qris_manual" : "gateway");
+    const qrisPayload = method.qrisPayload || method.qris_payload || "";
     setPaymentForm({
       name: method.name || "",
-      group: method.group || method.group_name || "Bank",
+      group,
       detail: method.detail || "",
+      paymentType,
+      qrisPayload,
+      qrisMerchantName: method.qrisMerchantName || method.qris_merchant_name || "",
+      qrisProvider: method.qrisProvider || method.qris_provider || "",
+      qrisMode: method.qrisMode || method.qris_mode || "dynamic",
       enabled: Boolean(method.enabled),
     });
     setEditingPaymentId(method.id);
     setPaymentFormOpen(true);
+    if (group === "QRIS" && qrisPayload) {
+      inspectQrisPayload(qrisPayload);
+    } else {
+      setQrisInspect(null);
+    }
   };
 
   const closePaymentForm = () => {
     setPaymentFormOpen(false);
     setEditingPaymentId(null);
+    setQrisInspect(null);
   };
 
   const togglePaymentMethod = async (method) => {
@@ -237,35 +320,43 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   const handleSavePaymentForm = async (e) => {
     e.preventDefault();
     if (!paymentForm.name.trim()) return notify("Nama metode pembayaran wajib diisi.");
+    if (paymentForm.group === "QRIS") {
+      const check = validateQrisPayload(paymentForm.qrisPayload);
+      if (!check.valid) {
+        return notify(`Payload QRIS tidak valid: ${check.errors.join(" ")}`);
+      }
+    }
+
+    const payloadBody = {
+      name: paymentForm.name.trim(),
+      group: paymentForm.group,
+      detail: paymentForm.detail.trim(),
+      enabled: paymentForm.enabled,
+      ...(paymentForm.group === "QRIS"
+        ? {
+            paymentType: "qris_manual",
+            qrisPayload: paymentForm.qrisPayload.trim(),
+            qrisMerchantName: paymentForm.qrisMerchantName.trim(),
+            qrisProvider: paymentForm.qrisProvider.trim(),
+            qrisMode: paymentForm.qrisMode === "static" ? "static" : "dynamic",
+          }
+        : {
+            paymentType: paymentForm.group === "COD" ? "cod" : "gateway",
+          }),
+    };
+
     if (editingPaymentId) {
       const ok = await perform(
         () =>
           api(`/admin/payment-methods/${encodeURIComponent(editingPaymentId)}`, {
             method: "PATCH",
-            body: {
-              name: paymentForm.name.trim(),
-              group: paymentForm.group,
-              detail: paymentForm.detail.trim(),
-              enabled: paymentForm.enabled,
-            },
+            body: payloadBody,
           }),
         "Metode pembayaran berhasil diperbarui."
       );
       if (ok) {
-        setPaymentMethods((list) =>
-          list.map((m) =>
-            m.id === editingPaymentId
-              ? {
-                  ...m,
-                  name: paymentForm.name.trim(),
-                  group: paymentForm.group,
-                  group_name: paymentForm.group,
-                  detail: paymentForm.detail.trim(),
-                  enabled: paymentForm.enabled,
-                }
-              : m
-          )
-        );
+        const s = await api("/admin/settings");
+        if (s?.paymentMethods) setPaymentMethods(s.paymentMethods);
         closePaymentForm();
         if (reloadConfig) reloadConfig();
       }
@@ -274,12 +365,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         () =>
           api("/admin/payment-methods", {
             method: "POST",
-            body: {
-              name: paymentForm.name.trim(),
-              group: paymentForm.group,
-              detail: paymentForm.detail.trim(),
-              enabled: paymentForm.enabled,
-            },
+            body: payloadBody,
           }),
         "Metode pembayaran baru berhasil ditambahkan."
       );
@@ -656,6 +742,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   function viewOrder(o) {
     setSelected(o);
     setTrackingNumber(o.tracking_number || "");
+    setPickupPayConfirmed(false);
+    setPickupGoodsConfirmed(false);
+    setPickupPaymentNote("");
+    setShowRejectBox(false);
+    setRejectReason("");
     navigate(`#admin/orders/${o.id}`);
   }
   async function perform(fn, msg) {
@@ -695,6 +786,38 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     );
   };
 
+  const addVariantImages = (rowId, incomingUrls = []) => {
+    const cleanIncoming = incomingUrls.map((u) => String(u || "").trim()).filter(Boolean);
+    if (!cleanIncoming.length) return;
+    setSizeRows((rows) =>
+      rows.map((r) => {
+        if (r.id !== rowId) return r;
+        const existing = Array.isArray(r.images) && r.images.length ? r.images : (r.imageUrl ? [r.imageUrl] : []);
+        const nextImages = [...new Set([...existing, ...cleanIncoming])].slice(0, 10);
+        return {
+          ...r,
+          images: nextImages,
+          imageUrl: nextImages[0] || "",
+        };
+      })
+    );
+  };
+
+  const removeVariantImage = (rowId, imageIndex) => {
+    setSizeRows((rows) =>
+      rows.map((r) => {
+        if (r.id !== rowId) return r;
+        const existing = Array.isArray(r.images) && r.images.length ? r.images : (r.imageUrl ? [r.imageUrl] : []);
+        const nextImages = existing.filter((_, idx) => idx !== imageIndex);
+        return {
+          ...r,
+          images: nextImages,
+          imageUrl: nextImages[0] || "",
+        };
+      })
+    );
+  };
+
   const handleSwitchSizeMode = (newMode) => {
     setSizeMode(newMode);
     setSizeRows((rows) =>
@@ -724,33 +847,43 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   };
 
   const applyPreset = (presetType) => {
+    const stamp = Date.now();
+    const rowBase = {
+      variantId: "",
+      length: "",
+      width: "",
+      height: "",
+      imageUrl: "",
+      images: [],
+      variantPrice: "",
+    };
     if (presetType === "fashion-standard") {
       setSizeMode("text");
       setSizeRows([
-        { id: "s-" + Date.now(), size: "S", variation: "Standar", stock: 20, length: "", width: "", height: "", imageUrl: "" },
-        { id: "m-" + Date.now(), size: "M", variation: "Standar", stock: 30, length: "", width: "", height: "", imageUrl: "" },
-        { id: "l-" + Date.now(), size: "L", variation: "Standar", stock: 35, length: "", width: "", height: "", imageUrl: "" },
-        { id: "xl-" + Date.now(), size: "XL", variation: "Standar", stock: 25, length: "", width: "", height: "", imageUrl: "" },
-        { id: "xxl-" + Date.now(), size: "XXL", variation: "Standar", stock: 15, length: "", width: "", height: "", imageUrl: "" },
+        { ...rowBase, id: "s-" + stamp, size: "S", variation: "Standar", stock: 20 },
+        { ...rowBase, id: "m-" + stamp, size: "M", variation: "Standar", stock: 30 },
+        { ...rowBase, id: "l-" + stamp, size: "L", variation: "Standar", stock: 35 },
+        { ...rowBase, id: "xl-" + stamp, size: "XL", variation: "Standar", stock: 25 },
+        { ...rowBase, id: "xxl-" + stamp, size: "XXL", variation: "Standar", stock: 15 },
       ]);
     } else if (presetType === "all-size") {
       setSizeMode("text");
       setSizeRows([
-        { id: "all-" + Date.now(), size: "All Size", variation: "Standar", stock: 40, length: "", width: "", height: "", imageUrl: "" },
+        { ...rowBase, id: "all-" + stamp, size: "All Size", variation: "Standar", stock: 40 },
       ]);
     } else if (presetType === "bedding-complete") {
       setSizeMode("dimensions");
       setSizeRows([
-        { id: "sp100-" + Date.now(), size: "100×200×30", variation: "Putih", stock: 20, length: "100", width: "200", height: "30", imageUrl: "" },
-        { id: "sp120-" + Date.now(), size: "120×200×30", variation: "Putih", stock: 25, length: "120", width: "200", height: "30", imageUrl: "" },
-        { id: "sp160-" + Date.now(), size: "160×200×30", variation: "Putih", stock: 35, length: "160", width: "200", height: "30", imageUrl: "" },
-        { id: "sp180-" + Date.now(), size: "180×200×30", variation: "Putih", stock: 30, length: "180", width: "200", height: "30", imageUrl: "" },
-        { id: "sp200-" + Date.now(), size: "200×200×30", variation: "Putih", stock: 15, length: "200", width: "200", height: "30", imageUrl: "" },
+        { ...rowBase, id: "sp100-" + stamp, size: "100×200×30", variation: "Putih", stock: 20, length: "100", width: "200", height: "30" },
+        { ...rowBase, id: "sp120-" + stamp, size: "120×200×30", variation: "Putih", stock: 25, length: "120", width: "200", height: "30" },
+        { ...rowBase, id: "sp160-" + stamp, size: "160×200×30", variation: "Putih", stock: 35, length: "160", width: "200", height: "30" },
+        { ...rowBase, id: "sp180-" + stamp, size: "180×200×30", variation: "Putih", stock: 30, length: "180", width: "200", height: "30" },
+        { ...rowBase, id: "sp200-" + stamp, size: "200×200×30", variation: "Putih", stock: 15, length: "200", width: "200", height: "30" },
       ]);
     } else if (presetType === "bedding-queen") {
       setSizeMode("dimensions");
       setSizeRows([
-        { id: "queen-" + Date.now(), size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30", imageUrl: "" },
+        { ...rowBase, id: "queen-" + stamp, size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30" },
       ]);
     }
   };
@@ -765,6 +898,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       ...rows,
       {
         id: newId,
+        variantId: "",
         size: defaultSize,
         variation: "",
         stock: 10,
@@ -772,6 +906,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         width: defaultWidth,
         height: defaultHeight,
         imageUrl: "",
+        images: [],
+        variantPrice: "",
       },
     ]);
   };
@@ -779,7 +915,19 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   function initCreateProductData(cats = categoriesRef.current) {
     setSizeMode("dimensions");
     setSizeRows([
-      { id: "default", size: "160×200×30", variation: "Putih", stock: 30, length: "160", width: "200", height: "30", imageUrl: "" },
+      {
+        id: "default",
+        variantId: "",
+        size: "160×200×30",
+        variation: "Putih",
+        stock: 30,
+        length: "160",
+        width: "200",
+        height: "30",
+        imageUrl: "",
+        images: [],
+        variantPrice: "",
+      },
     ]);
     const firstCat = cats.find((c) => (!c.parent_id && !c.parentId) && c.active)?.id || "bedding";
     const firstSub = cats.find((c) => ((c.parent_id || c.parentId) === firstCat) && c.active)?.id || "";
@@ -808,15 +956,19 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       const length = v.length_cm || d?.length || "";
       const width = v.width_cm || d?.width || "";
       const height = v.height_cm || d?.height || "";
+      const gallery = collectVariantImages(v);
       return {
         id: `v-${i}-${Date.now()}`,
+        variantId: v.id || "",
         size: v.size || "",
         variation: v.color || "",
         stock: v.stock ?? 0,
         length: length ? String(length) : "",
         width: width ? String(width) : "",
         height: height ? String(height) : "",
-        imageUrl: v.image_url || v.imageUrl || "",
+        imageUrl: gallery[0] || "",
+        images: gallery,
+        variantPrice: v.price ? String(v.price) : "",
       };
     });
     const hasDimensions =
@@ -826,7 +978,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     setSizeRows(
       initialRows.length
         ? initialRows
-        : [{ id: "default", size: "", variation: "", stock: 30, length: "", width: "", height: "", imageUrl: "" }]
+        : [{ id: "default", variantId: "", size: "", variation: "", stock: 30, length: "", width: "", height: "", imageUrl: "", images: [], variantPrice: "" }]
     );
     const catMatch = cats.find((c) => (!c.parent_id && !c.parentId) && (c.id === p.category || c.name.toLowerCase() === (p.category || "").toLowerCase()));
     const catId = catMatch ? catMatch.id : (p.category || "bedding");
@@ -921,11 +1073,27 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         return;
       }
 
+      const gallery = Array.isArray(row.images) && row.images.length
+        ? row.images.map((u) => String(u || "").trim()).filter(Boolean).slice(0, 10)
+        : (row.imageUrl ? [row.imageUrl.trim()] : []);
+      const rawVarPrice = String(row.variantPrice ?? "").trim();
+      let parsedVarPrice = null;
+      if (rawVarPrice !== "") {
+        parsedVarPrice = parseRupiah(rawVarPrice);
+        if (!Number.isFinite(parsedVarPrice) || parsedVarPrice < 1000 || parsedVarPrice > 10000000) {
+          setError(`Harga variasi untuk Paket Variasi #${i + 1} (${color}) harus antara Rp 1.000 - Rp 10.000.000 atau dikosongkan.`);
+          return;
+        }
+      }
+
       variants.push({
+        ...(row.variantId ? { id: row.variantId } : {}),
         size,
         color,
         stock,
-        imageUrl: row.imageUrl ? row.imageUrl.trim() : undefined,
+        price: parsedVarPrice,
+        imageUrl: gallery[0] || null,
+        images: gallery,
         lengthCm,
         widthCm,
         heightCm,
@@ -1216,7 +1384,12 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   }, [products, filter, productCategory, productSubcategory, productStock, search, productSort, categories]);
   const orderRows = orders.filter(
     (o) =>
-      (filter === "all" || o.status === filter) &&
+      (filter === "all" ||
+        (filter === "WAITING_VERIFICATION"
+          ? o.payment_status === "WAITING_VERIFICATION"
+          : filter === "STORE_PICKUP"
+            ? isStorePickupMethod(o) || o.shipping === "pickup"
+            : o.status === filter)) &&
       [o.id, o.address.name, o.address.email]
         .join(" ")
         .toLowerCase()
@@ -1255,13 +1428,16 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     tone={
                       o.payment_status === "PAID"
                         ? "success"
-                        : o.payment_status === "PENDING"
+                        : ["PENDING", "WAITING_VERIFICATION"].includes(o.payment_status)
                           ? "warning"
                           : "neutral"
                     }
                   >
-                    {paymentLabel[o.payment_status]}
+                    {paymentLabel[o.payment_status] || o.payment_status}
                   </Status>
+                  {(isStorePickupMethod(o) || o.shipping === "pickup") && (
+                    <small className="ws-muted">Ambil &amp; Bayar di Toko</small>
+                  )}
                 </td>
                 <td>{o.status}</td>
                 <td>
@@ -3201,46 +3377,88 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             />
                           </label>
 
-                          {/* Gambar Variasi (Opsional) */}
+                          {/* Harga Khusus Variasi (Opsional) */}
+                          <label>
+                            Harga Variasi (Rp, Opsional)
+                            <input
+                              type="number"
+                              min="1000"
+                              max="10000000"
+                              step="1000"
+                              value={row.variantPrice ?? ""}
+                              onChange={(e) => updateVariantField(row.id, "variantPrice", e.target.value)}
+                              placeholder="Ikuti harga utama"
+                            />
+                          </label>
+
+                          {/* Gambar Variasi (Opsional, multi-gambar) */}
                           <div className="ws-variant-image-field">
                             <label>
-                              Gambar Variasi (Opsional)
+                              Gambar Variasi (Opsional, bisa lebih dari 1)
                               <div className="ws-variant-image-controls">
-                                {row.imageUrl && (
-                                  <img
-                                    src={row.imageUrl}
-                                    alt={row.variation || "Preview"}
-                                    className="ws-variant-thumb-preview"
-                                  />
-                                )}
                                 <input
                                   type="file"
+                                  multiple
                                   accept="image/png,image/jpeg,image/webp"
-                                  onChange={(event) => {
-                                    const file = event.target.files?.[0];
-                                    if (!file) return;
-                                    if (file.size > 5000000) {
-                                      setError("Ukuran gambar variasi maksimal 5 MB.");
-                                      return;
-                                    }
-                                    const reader = new FileReader();
-                                    reader.onload = async () => {
+                                  onChange={async (event) => {
+                                    const files = Array.from(event.target.files || []);
+                                    event.target.value = "";
+                                    if (!files.length) return;
+                                    const uploadedUrls = [];
+                                    for (const file of files) {
+                                      if (file.size > 5000000) {
+                                        setError(`Ukuran gambar ${file.name} melebihi batas 5 MB.`);
+                                        continue;
+                                      }
                                       try {
+                                        const dataUrl = await new Promise((resolve, reject) => {
+                                          const reader = new FileReader();
+                                          reader.onload = () => resolve(reader.result);
+                                          reader.onerror = () => reject(new Error("Gagal membaca file gambar."));
+                                          reader.readAsDataURL(file);
+                                        });
                                         const { url } = await api("/admin/uploads", {
                                           method: "POST",
-                                          body: { data: reader.result },
+                                          body: { data: dataUrl },
                                         });
-                                        updateVariantField(row.id, "imageUrl", url);
-                                        setMessage("Gambar variasi berhasil diunggah.");
+                                        if (url) uploadedUrls.push(url);
                                       } catch (err) {
                                         setError(err.message);
                                       }
-                                    };
-                                    reader.readAsDataURL(file);
+                                    }
+                                    if (uploadedUrls.length) {
+                                      addVariantImages(row.id, uploadedUrls);
+                                      setMessage(`${uploadedUrls.length} gambar variasi berhasil diunggah.`);
+                                    }
                                   }}
                                 />
                               </div>
                             </label>
+                            <div className="ws-variant-gallery-admin">
+                              {(Array.isArray(row.images) && row.images.length
+                                ? row.images
+                                : row.imageUrl
+                                  ? [row.imageUrl]
+                                  : []
+                              ).map((imgUrl, imgIdx) => (
+                                <div className="ws-variant-thumb-item" key={`${row.id}-img-${imgIdx}`}>
+                                  <img
+                                    src={imgUrl}
+                                    alt={`${row.variation || "Variasi"} ${imgIdx + 1}`}
+                                    className="ws-variant-thumb-preview"
+                                  />
+                                  <button
+                                    type="button"
+                                    className="ws-variant-thumb-remove"
+                                    title="Hapus gambar variasi"
+                                    aria-label="Hapus gambar variasi"
+                                    onClick={() => removeVariantImage(row.id, imgIdx)}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -3290,7 +3508,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   onChange={(e) => setFilter(e.target.value)}
                 >
                   <option value="all">Semua status</option>
+                  <option value="STORE_PICKUP">
+                    Ambil di Toko (Store Pickup)
+                  </option>
+                  <option value="WAITING_VERIFICATION">
+                    Menunggu Verifikasi Pembayaran (QRIS)
+                  </option>
                   {[
+                    "Menunggu Pengambilan & Pembayaran",
                     "Menunggu pembayaran",
                     "Diproses",
                     "Dikirim",
@@ -3345,15 +3570,326 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 <div>
                   <h3>Pembayaran</h3>
                   <p>
-                    {paymentLabel[selected.payment_status]}
+                    <b>
+                      {selected.payment_method_name ||
+                        paymentName(selected.payment, paymentMethods)}
+                    </b>
                     <br />
-                    Metode pengiriman: {selected.shipping}
+                    Status: {paymentLabel[selected.payment_status] || selected.payment_status}
+                    <br />
+                    Metode pengiriman:{" "}
+                    {isStorePickupMethod(selected) || selected.shipping === "pickup"
+                      ? "Ambil Langsung di Toko"
+                      : selected.shipping}
                   </p>
                   <small className="ws-mono">
-                    {selected.invoice_id || "Invoice belum tersedia"}
+                    {isStorePickupMethod(selected) || selected.shipping === "pickup"
+                      ? "Bayar Langsung di Toko (Store Pickup)"
+                      : selected.payment_type === "qris_manual"
+                        ? `QRIS ${selected.qris_provider || "Manual"} (${selected.qris_mode === "dynamic" ? "Dinamis" : "Statis Fallback"})`
+                        : selected.payment_type === "cod"
+                          ? "Bayar Tunai di Tempat (COD)"
+                          : selected.invoice_id || "Invoice belum tersedia"}
                   </small>
                 </div>
               </div>
+              {(isStorePickupMethod(selected) || selected.shipping === "pickup") && (
+                <div className="ks-admin-pickup-verify">
+                  <div className="ks-admin-qris-verify-head">
+                    <div>
+                      <h4>
+                        <Store size={17} /> Pengambilan &amp; Pembayaran di Toko
+                      </h4>
+                      <p>
+                        Total Tagihan di Kasir: <b>{money(selected.total)}</b> ·{" "}
+                        Status Pembayaran:{" "}
+                        <b>
+                          {paymentLabel[selected.payment_status] ||
+                            selected.payment_status}
+                        </b>
+                      </p>
+                    </div>
+                  </div>
+                  {selected.status === "Dibatalkan" ? (
+                    <div className="ks-admin-qris-alert">
+                      <AlertCircle size={18} />
+                      <div>
+                        Pesanan ambil di toko ini telah <b>dibatalkan</b>.
+                      </div>
+                    </div>
+                  ) : selected.payment_status === "PAID" &&
+                    selected.status === "Selesai" ? (
+                    <div className="ks-admin-qris-alert is-ok">
+                      <CheckCircle2 size={18} />
+                      <div>
+                        <b>Pembayaran &amp; Pengambilan Terkonfirmasi.</b>{" "}
+                        Pesanan telah diambil dan dibayar lunas di toko
+                        {selected.payment_proof_note
+                          ? ` (${selected.payment_proof_note})`
+                          : ""}
+                        .
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ks-admin-pickup-form">
+                      <div className="ks-admin-qris-alert">
+                        <Clock3 size={18} />
+                        <div>
+                          Pelanggan akan membayar dan mengambil pesanan langsung
+                          di toko. Tandai <b>Selesai &amp; Lunas</b> hanya setelah
+                          pembayaran dan penyerahan barang benar-benar selesai.
+                        </div>
+                      </div>
+                      <label className="ks-admin-pickup-check">
+                        <input
+                          type="checkbox"
+                          checked={pickupPayConfirmed}
+                          onChange={(e) =>
+                            setPickupPayConfirmed(e.target.checked)
+                          }
+                        />
+                        <span>
+                          Pembayaran sebesar <b>{money(selected.total)}</b>{" "}
+                          sudah diterima langsung di toko
+                        </span>
+                      </label>
+                      <label className="ks-admin-pickup-check">
+                        <input
+                          type="checkbox"
+                          checked={pickupGoodsConfirmed}
+                          onChange={(e) =>
+                            setPickupGoodsConfirmed(e.target.checked)
+                          }
+                        />
+                        <span>
+                          Barang pesanan sudah diambil oleh pelanggan /
+                          perwakilannya
+                        </span>
+                      </label>
+                      <label>
+                        Catatan kasir / bukti pembayaran (opsional)
+                        <input
+                          type="text"
+                          maxLength={240}
+                          value={pickupPaymentNote}
+                          onChange={(e) =>
+                            setPickupPaymentNote(e.target.value)
+                          }
+                          placeholder="Contoh: Bayar tunai / QRIS kasir, diambil oleh pelanggan"
+                        />
+                      </label>
+                      <div className="ws-form-actions">
+                        <button
+                          type="button"
+                          className="ws-button primary"
+                          disabled={
+                            busy || !pickupPayConfirmed || !pickupGoodsConfirmed
+                          }
+                          onClick={async () => {
+                            const ok = await perform(
+                              () =>
+                                api(
+                                  `/admin/orders/${selected.id}/confirm-pickup`,
+                                  {
+                                    method: "POST",
+                                    body: {
+                                      paymentConfirmed: pickupPayConfirmed,
+                                      pickupConfirmed: pickupGoodsConfirmed,
+                                      paymentNote: pickupPaymentNote.trim(),
+                                    },
+                                  },
+                                ),
+                              "Pengambilan dan pembayaran di toko dikonfirmasi selesai & lunas.",
+                            );
+                            if (ok) {
+                              setPickupPayConfirmed(false);
+                              setPickupGoodsConfirmed(false);
+                              setPickupPaymentNote("");
+                            }
+                          }}
+                        >
+                          <CheckCircle2 size={16} /> Konfirmasi Pengambilan &amp;
+                          Pembayaran Lunas
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {(selected.payment_type === "qris_manual" ||
+                Boolean(selected.qris_payload || selected.payment_proof_url)) && (
+                <div className="ks-admin-qris-verify">
+                  <div className="ks-admin-qris-verify-head">
+                    <div>
+                      <h4>
+                        <QrCode size={17} /> Verifikasi Pembayaran QRIS Manual
+                      </h4>
+                      <p>
+                        Merchant: <b>{selected.qris_merchant_name || "-"}</b> ·
+                        Penyedia: <b>{selected.qris_provider || "QRIS"}</b> ·
+                        Total Wajib Masuk: <b>{money(selected.total)}</b>
+                      </p>
+                    </div>
+                    <Status
+                      tone={
+                        selected.payment_status === "PAID"
+                          ? "success"
+                          : selected.payment_status === "WAITING_VERIFICATION"
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
+                      {paymentLabel[selected.payment_status] || selected.payment_status}
+                    </Status>
+                  </div>
+
+                  {selected.payment_rejection_reason && (
+                    <Notice>
+                      Alasan penolakan terakhir: {selected.payment_rejection_reason}
+                    </Notice>
+                  )}
+
+                  {selected.payment_proof_url ? (
+                    <div className="ks-admin-proof-box">
+                      <a
+                        href={selected.payment_proof_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ks-admin-proof-img"
+                      >
+                        <img
+                          src={selected.payment_proof_url}
+                          alt="Bukti transfer pelanggan"
+                        />
+                      </a>
+                      <div>
+                        <p>
+                          <b>Bukti Pembayaran Pelanggan</b>
+                        </p>
+                        {selected.payment_submitted_at && (
+                          <p>
+                            Diunggah:{" "}
+                            {new Date(selected.payment_submitted_at).toLocaleString("id-ID")}
+                          </p>
+                        )}
+                        {selected.payment_proof_note && (
+                          <p>Catatan pelanggan: {selected.payment_proof_note}</p>
+                        )}
+                        {selected.payment_verified_at && (
+                          <p>
+                            Diverifikasi:{" "}
+                            {new Date(selected.payment_verified_at).toLocaleString("id-ID")}
+                          </p>
+                        )}
+                        <a
+                          href={selected.payment_proof_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ws-link"
+                        >
+                          Buka gambar bukti ukuran penuh
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ks-admin-proof-empty">
+                      <Clock3 size={16} /> Pelanggan belum mengunggah bukti pembayaran QRIS.
+                    </div>
+                  )}
+
+                  {selected.status === "Menunggu pembayaran" &&
+                    selected.payment_status === "WAITING_VERIFICATION" && (
+                      <div className="ks-admin-verify-actions">
+                        <div className="ks-qris-caution">
+                          <ShieldAlert size={16} />
+                          <div>
+                            <b>Pengecekan Mutasi DANA:</b> Pastikan saldo /
+                            mutasi masuk di akun{" "}
+                            <b>{selected.qris_provider || "DANA"}</b> Anda
+                            benar-benar bertambah sebesar{" "}
+                            <b>{money(selected.total)}</b> sebelum menyetujui
+                            transaksi menjadi <b>Lunas</b>.
+                          </div>
+                        </div>
+
+                        <div className="ws-form-actions" style={{ marginTop: 12 }}>
+                          <button
+                            type="button"
+                            className="ws-button primary"
+                            disabled={busy}
+                            onClick={() =>
+                              perform(
+                                () =>
+                                  api(
+                                    `/admin/orders/${selected.id}/verify-payment`,
+                                    {
+                                      method: "POST",
+                                      body: { action: "approve" },
+                                    },
+                                  ),
+                                "Pembayaran QRIS disetujui dan pesanan ditandai Lunas.",
+                              )
+                            }
+                          >
+                            <CheckCircle2 size={16} /> Setujui & Tandai Lunas
+                          </button>
+                          <button
+                            type="button"
+                            className="ws-button"
+                            disabled={busy}
+                            onClick={() => setShowRejectBox((v) => !v)}
+                          >
+                            Tolak / Minta Unggah Ulang
+                          </button>
+                        </div>
+
+                        {showRejectBox && (
+                          <div className="ks-admin-reject-box">
+                            <label>
+                              Alasan penolakan (dikirim ke pelanggan via WhatsApp)
+                              <input
+                                type="text"
+                                maxLength={300}
+                                placeholder="Contoh: Nominal transfer belum sesuai atau bukti tidak terbaca"
+                                value={rejectReason}
+                                onChange={(e) => setRejectReason(e.target.value)}
+                              />
+                            </label>
+                            <div className="ws-form-actions">
+                              <button
+                                type="button"
+                                className="ws-button danger-button"
+                                disabled={busy}
+                                onClick={async () => {
+                                  const ok = await perform(
+                                    () =>
+                                      api(
+                                        `/admin/orders/${selected.id}/verify-payment`,
+                                        {
+                                          method: "POST",
+                                          body: {
+                                            action: "reject",
+                                            reason: rejectReason.trim(),
+                                          },
+                                        },
+                                      ),
+                                    "Bukti pembayaran ditolak. Pelanggan diminta mengunggah ulang.",
+                                  );
+                                  if (ok) {
+                                    setShowRejectBox(false);
+                                    setRejectReason("");
+                                  }
+                                }}
+                              >
+                                Konfirmasi Tolak Bukti
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                </div>
+              )}
               <div className="ws-table-scroll">
                 <table className="ws-table">
                   <thead>
@@ -3396,71 +3932,152 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   Total <strong>{money(selected.total)}</strong>
                 </p>
               </div>
-              {selected.tracking_number && <p>Nomor resi: <b>{selected.tracking_number}</b></p>}
-              {selected.status === "Diproses" && <label>Nomor resi untuk notifikasi<input value={trackingNumber} onChange={(event)=>setTrackingNumber(event.target.value)} maxLength="100" placeholder="Masukkan nomor resi"/></label>}
-              <div className="ws-form-actions">
-                {selected.status === "Menunggu pembayaran" && (
+              {(() => {
+                const selectedIsPickup =
+                  isStorePickupMethod(selected) ||
+                  selected.shipping === "pickup";
+                return (
                   <>
-                    <button
-                      className="ws-button primary"
-                      disabled={busy}
-                      onClick={() =>
-                        perform(
-                          () =>
-                            api("/admin/orders/" + selected.id + "/payment", {
-                              method: "POST",
-                            }),
-                          "Pembayaran telah diperiksa.",
-                        )
-                      }
-                    >
-                      Periksa pembayaran
-                    </button>
-                    <button
-                      className="ws-button"
-                      disabled={busy}
-                      onClick={() =>
-                        perform(
-                          () =>
-                            api("/admin/orders/" + selected.id, {
-                              method: "PATCH",
-                              body: { status: "Dibatalkan" },
-                            }),
-                          "Pesanan dibatalkan.",
-                        )
-                      }
-                    >
-                      Batalkan pesanan
-                    </button>
+                    {selected.tracking_number && !selectedIsPickup && (
+                      <p>
+                        Nomor resi: <b>{selected.tracking_number}</b>
+                      </p>
+                    )}
+                    {selected.status === "Diproses" && !selectedIsPickup && (
+                      <label>
+                        Nomor resi untuk notifikasi
+                        <input
+                          value={trackingNumber}
+                          onChange={(event) =>
+                            setTrackingNumber(event.target.value)
+                          }
+                          maxLength="100"
+                          placeholder="Masukkan nomor resi"
+                        />
+                      </label>
+                    )}
+                    <div className="ws-form-actions">
+                      {selectedIsPickup ? (
+                        <>
+                          {selected.status ===
+                            "Menunggu Pengambilan & Pembayaran" && (
+                            <button
+                              className="ws-button"
+                              disabled={busy}
+                              onClick={() =>
+                                perform(
+                                  () =>
+                                    api("/admin/orders/" + selected.id, {
+                                      method: "PATCH",
+                                      body: { status: "Diproses" },
+                                    }),
+                                  "Pesanan ditandai sedang disiapkan untuk diambil.",
+                                )
+                              }
+                            >
+                              Tandai Barang Sedang Disiapkan
+                            </button>
+                          )}
+                          {(selected.status ===
+                            "Menunggu Pengambilan & Pembayaran" ||
+                            (selected.status === "Diproses" &&
+                              selected.payment_status !== "PAID")) && (
+                            <button
+                              className="ws-button"
+                              disabled={busy}
+                              onClick={() =>
+                                perform(
+                                  () =>
+                                    api("/admin/orders/" + selected.id, {
+                                      method: "PATCH",
+                                      body: { status: "Dibatalkan" },
+                                    }),
+                                  "Pesanan ambil di toko dibatalkan.",
+                                )
+                              }
+                            >
+                              Batalkan pesanan
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {selected.status === "Menunggu pembayaran" && (
+                            <>
+                              {selected.payment_type !== "qris_manual" &&
+                                selected.payment_type !== "cod" &&
+                                selected.payment !== "COD" && (
+                                  <button
+                                    className="ws-button primary"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      perform(
+                                        () =>
+                                          api(
+                                            "/admin/orders/" +
+                                              selected.id +
+                                              "/payment",
+                                            {
+                                              method: "POST",
+                                            },
+                                          ),
+                                        "Pembayaran telah diperiksa.",
+                                      )
+                                    }
+                                  >
+                                    Periksa pembayaran
+                                  </button>
+                                )}
+                              <button
+                                className="ws-button"
+                                disabled={busy}
+                                onClick={() =>
+                                  perform(
+                                    () =>
+                                      api("/admin/orders/" + selected.id, {
+                                        method: "PATCH",
+                                        body: { status: "Dibatalkan" },
+                                      }),
+                                    "Pesanan dibatalkan.",
+                                  )
+                                }
+                              >
+                                Batalkan pesanan
+                              </button>
+                            </>
+                          )}
+                          {["Diproses", "Dikirim"].includes(selected.status) && (
+                            <button
+                              className="ws-button primary"
+                              disabled={busy}
+                              onClick={() =>
+                                perform(
+                                  () =>
+                                    api("/admin/orders/" + selected.id, {
+                                      method: "PATCH",
+                                      body: {
+                                        status:
+                                          selected.status === "Diproses"
+                                            ? "Dikirim"
+                                            : "Selesai",
+                                        trackingNumber,
+                                      },
+                                    }),
+                                  "Status pesanan diperbarui.",
+                                )
+                              }
+                            >
+                              {selected.status === "Diproses"
+                                ? "Tandai dikirim & kirim notifikasi"
+                                : "Tandai selesai"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </>
-                )}
-                {["Diproses", "Dikirim"].includes(selected.status) && (
-                  <button
-                    className="ws-button primary"
-                    disabled={busy}
-                    onClick={() =>
-                      perform(
-                        () =>
-                          api("/admin/orders/" + selected.id, {
-                            method: "PATCH",
-                            body: {
-                              status:
-                                selected.status === "Diproses"
-                                  ? "Dikirim"
-                                  : "Selesai",
-                              trackingNumber,
-                            },
-                          }),
-                        "Status pesanan diperbarui.",
-                      )
-                    }
-                  >
-                    {selected.status === "Diproses"
-                      ? "Tandai dikirim & kirim notifikasi"
-                      : "Tandai selesai"}
-                  </button>
-                )}
-              </div>
+                );
+              })()}
               <small className="ws-mono ws-muted">
                 Referensi: {selected.id}
               </small>
@@ -3785,7 +4402,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             brand: String(f.brand || "").trim(),
                             logo: String(f.logo || "").trim(),
                             contactEmail: String(f.contactEmail || "").trim(),
+                            contactPhone: String(f.contactPhone || "").trim(),
                             storeAddress: String(f.storeAddress || "").trim(),
+                            pickupInfo: String(f.pickupInfo || "").trim(),
                             announcementText: String(f.announcementText || "").trim(),
                           },
                         },
@@ -3800,6 +4419,15 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     <label>
                       Email Kontak Toko
                       <input name="contactEmail" type="email" defaultValue={settings?.contactEmail || ""} required />
+                    </label>
+                    <label className="ws-wide">
+                      Nomor WhatsApp / Telepon Toko
+                      <input
+                        name="contactPhone"
+                        defaultValue={settings?.contactPhone ?? config?.contactPhone ?? ""}
+                        placeholder="Contoh: 081234567890"
+                      />
+                      <small>Ditampilkan kepada pelanggan pada informasi pengambilan langsung di toko.</small>
                     </label>
                     <label className="ws-wide">
                       Logo Toko (URL atau Berkas)
@@ -3826,7 +4454,16 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                         name="storeAddress"
                         rows="3"
                         defaultValue={settings?.storeAddress || ""}
-                        placeholder="Alamat kantor / gudang toko untuk faktur dan informasi kontak"
+                        placeholder="Alamat kantor / gudang toko untuk faktur dan informasi pengambilan di toko"
+                      />
+                    </label>
+                    <label className="ws-wide">
+                      Informasi Pengambilan di Toko (Jam Operasional &amp; Instruksi)
+                      <textarea
+                        name="pickupInfo"
+                        rows="3"
+                        defaultValue={settings?.pickupInfo ?? config?.pickupInfo ?? ""}
+                        placeholder="Contoh: Pengambilan tersedia setiap hari pukul 09.00–20.00 WIB. Tunjukkan nomor pesanan kepada petugas kasir."
                       />
                     </label>
                     <div className="ws-wide ws-form-actions">
@@ -4263,7 +4900,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             <input
                               type="text"
                               required
-                              placeholder="Contoh: Transfer Bank / E-Wallet & QRIS / Bayar di Tempat"
+                              placeholder="Contoh: QRIS (DANA - BAGUS WIRAYUDA) / Bank / COD"
                               value={paymentForm.name}
                               onChange={(e) => setPaymentForm((f) => ({ ...f, name: e.target.value }))}
                             />
@@ -4272,21 +4909,177 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             Kategori / Jenis Pembayaran
                             <select
                               value={paymentForm.group}
-                              onChange={(e) => setPaymentForm((f) => ({ ...f, group: e.target.value }))}
+                              onChange={(e) => {
+                                const nextGroup = e.target.value;
+                                setPaymentForm((f) => ({
+                                  ...f,
+                                  group: nextGroup,
+                                  paymentType:
+                                    nextGroup === "QRIS"
+                                      ? "qris_manual"
+                                      : nextGroup === "COD"
+                                        ? "cod"
+                                        : "gateway",
+                                }));
+                                if (nextGroup !== "QRIS") setQrisInspect(null);
+                              }}
                             >
+                              <option value="QRIS">QRIS (Konversi Statis ke Dinamis + Verifikasi Manual)</option>
                               <option value="Bank">Bank (Transfer Bank Virtual Account via Xendit)</option>
-                              <option value="E-Wallet">E-Wallet (QRIS & Dompet Digital via Xendit)</option>
+                              <option value="E-Wallet">E-Wallet (Dompet Digital via Xendit)</option>
                               <option value="COD">COD (Bayar Tunai di Tempat ke Kurir)</option>
                             </select>
                           </label>
+
+                          {paymentForm.group === "QRIS" && (
+                            <div className="ws-wide ks-admin-qris-editor">
+                              <div className="ks-admin-qris-editor-head">
+                                <b>Konfigurasi Payload QRIS Statis (EMVCo/QRIS)</b>
+                                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                  <button
+                                    type="button"
+                                    className="ws-button small"
+                                    onClick={() => {
+                                      setPaymentForm((f) => ({
+                                        ...f,
+                                        qrisPayload: SAMPLE_DANA_QRIS_PAYLOAD,
+                                        name: f.name || "QRIS (DANA - BAGUS WIRAYUDA)",
+                                        qrisMerchantName: f.qrisMerchantName || "BAGUS WIRAYUDA",
+                                        qrisProvider: f.qrisProvider || "DANA",
+                                      }));
+                                      inspectQrisPayload(SAMPLE_DANA_QRIS_PAYLOAD);
+                                    }}
+                                  >
+                                    Muat Sampel DANA (BAGUS WIRAYUDA)
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ws-button small"
+                                    disabled={inspectingQris || !paymentForm.qrisPayload.trim()}
+                                    onClick={() => inspectQrisPayload(paymentForm.qrisPayload)}
+                                  >
+                                    {inspectingQris ? "Memeriksa…" : "Periksa TLV & Pratinjau QR"}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <label className="ws-wide">
+                                Payload String QRIS Asli
+                                <textarea
+                                  rows={3}
+                                  required={paymentForm.group === "QRIS"}
+                                  className="ws-mono"
+                                  placeholder="Tempel payload string QRIS EMVCo yang dimulai dengan 000201..."
+                                  value={paymentForm.qrisPayload}
+                                  onChange={(e) =>
+                                    setPaymentForm((f) => ({ ...f, qrisPayload: e.target.value }))
+                                  }
+                                />
+                              </label>
+
+                              <div className="ws-form-grid" style={{ marginTop: "10px" }}>
+                                <label>
+                                  Mode Konversi QRIS
+                                  <select
+                                    value={paymentForm.qrisMode}
+                                    onChange={(e) =>
+                                      setPaymentForm((f) => ({ ...f, qrisMode: e.target.value }))
+                                    }
+                                  >
+                                    <option value="dynamic">
+                                      QRIS Dinamis Otomatis (Tag 01→12, Tag 54=Total) + Fallback Statis
+                                    </option>
+                                    <option value="static">
+                                      QRIS Statis Fallback Saja (Pelanggan ketik nominal manual)
+                                    </option>
+                                  </select>
+                                </label>
+                                <label>
+                                  Nama Pemilik / Merchant (Tag 59)
+                                  <input
+                                    type="text"
+                                    placeholder="Otomatis dari payload QRIS, mis. BAGUS WIRAYUDA"
+                                    value={paymentForm.qrisMerchantName}
+                                    onChange={(e) =>
+                                      setPaymentForm((f) => ({
+                                        ...f,
+                                        qrisMerchantName: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Penyedia / Acquirer (mis. DANA)
+                                  <input
+                                    type="text"
+                                    placeholder="Otomatis dari payload QRIS, mis. DANA"
+                                    value={paymentForm.qrisProvider}
+                                    onChange={(e) =>
+                                      setPaymentForm((f) => ({
+                                        ...f,
+                                        qrisProvider: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                </label>
+                              </div>
+
+                              {qrisInspect && (
+                                <div className={`ks-admin-qris-inspect ${qrisInspect.valid ? "valid" : "invalid"}`}>
+                                  {!qrisInspect.valid ? (
+                                    <Notice>
+                                      Validasi TLV/CRC QRIS gagal: {(qrisInspect.errors || []).join(" ")}
+                                    </Notice>
+                                  ) : (
+                                    <div className="ks-admin-qris-inspect-body">
+                                      <div>
+                                        <p>
+                                          <b>Struktur EMVCo/TLV Valid</b> (CRC16:{" "}
+                                          <code className="ws-mono">{qrisInspect.parsed?.actualCrc}</code>)
+                                        </p>
+                                        <p>
+                                          Merchant: <b>{qrisInspect.parsed?.merchantName}</b> ({qrisInspect.parsed?.merchantCity}) ·
+                                          Penyedia: <b>{qrisInspect.parsed?.provider || "-"}</b> ·
+                                          Kriteria: <b>{qrisInspect.parsed?.merchantCriteria || "-"}</b>
+                                        </p>
+                                        <p>
+                                          Acquirer:{" "}
+                                          <code className="ws-mono">
+                                            {(qrisInspect.parsed?.acquirerDomains || []).join(", ")}
+                                          </code>
+                                        </p>
+                                        {qrisInspect.compatibility?.summary && (
+                                          <p className="ks-admin-qris-compat-note">
+                                            <ShieldAlert size={14} /> {qrisInspect.compatibility.summary}
+                                          </p>
+                                        )}
+                                      </div>
+                                      {qrisInspect.sampleQrDataUrl && (
+                                        <div className="ks-admin-qris-preview">
+                                          <img
+                                            src={qrisInspect.sampleQrDataUrl}
+                                            alt="Pratinjau QRIS Dinamis Rp123.000"
+                                          />
+                                          <small>Uji QR Dinamis ({money(qrisInspect.sampleAmount || 123000)})</small>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           <label className="ws-wide">
                             Informasi / Petunjuk Pembayaran untuk Pelanggan
                             <input
                               type="text"
                               placeholder={
-                                paymentForm.group === "COD"
-                                  ? "Contoh: Bayar tunai langsung kepada kurir saat pesanan sampai."
-                                  : "Contoh: Pilihan bank / e-wallet dipilih langsung di halaman pembayaran Xendit."
+                                paymentForm.group === "QRIS"
+                                  ? "Contoh: Scan QRIS nominal otomatis (DANA - BAGUS WIRAYUDA) lalu unggah bukti bayar."
+                                  : paymentForm.group === "COD"
+                                    ? "Contoh: Bayar tunai langsung kepada kurir saat pesanan sampai."
+                                    : "Contoh: Pilihan bank / e-wallet dipilih langsung di halaman pembayaran Xendit."
                               }
                               value={paymentForm.detail}
                               onChange={(e) => setPaymentForm((f) => ({ ...f, detail: e.target.value }))}
@@ -4319,12 +5112,28 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   <div className="ws-payment-groups-container" style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
                     {PAYMENT_GROUPS.map((group) => {
                       const groupMethods = paymentMethods.filter((m) => (m.group || m.group_name) === group);
-                      const groupLabel = group === "Bank" ? "Transfer Bank" : group === "E-Wallet" ? "E-Wallet & QRIS" : "Bayar di Tempat (COD)";
+                      const groupLabel =
+                        group === "QRIS"
+                          ? "QRIS (Statis → Dinamis & Verifikasi Manual)"
+                          : group === "Bank"
+                            ? "Transfer Bank"
+                            : group === "E-Wallet"
+                              ? "E-Wallet (Gateway)"
+                              : "Bayar di Tempat (COD)";
                       const groupDesc =
-                        group === "COD"
-                          ? "Pelanggan membayar tunai kepada kurir saat pesanan tiba. Pesanan langsung masuk status Diproses tanpa memanggil Xendit."
-                          : "Pelanggan memilih bank atau dompet digital spesifik langsung di halaman pembayaran resmi Xendit.";
-                      const GroupIcon = group === "Bank" ? Landmark : group === "E-Wallet" ? Wallet : Banknote;
+                        group === "QRIS"
+                          ? "Menghasilkan QRIS dengan nominal otomatis dari total checkout (atau fallback statis). Pelanggan mengunggah bukti bayar untuk diverifikasi Admin via mutasi akun DANA/QRIS."
+                          : group === "COD"
+                            ? "Pelanggan membayar tunai kepada kurir saat pesanan tiba. Pesanan langsung masuk status Diproses tanpa memanggil Xendit."
+                            : "Pelanggan memilih bank atau dompet digital spesifik langsung di halaman pembayaran resmi Xendit.";
+                      const GroupIcon =
+                        group === "QRIS"
+                          ? QrCode
+                          : group === "Bank"
+                            ? Landmark
+                            : group === "E-Wallet"
+                              ? Wallet
+                              : Banknote;
 
                       return (
                         <div key={group} className="ws-payment-category-block" style={{ border: "1px solid var(--ws-border)", borderRadius: "10px", padding: "18px 20px", background: "var(--ws-panel-bg, #fff)" }}>
@@ -4361,7 +5170,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                   }}
                                 >
                                   <div style={{ flex: "1 1 240px" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", flexWrap: "wrap" }}>
                                       <b style={{ fontSize: "14px" }}>{method.name}</b>
                                       <span
                                         style={{
@@ -4375,7 +5184,26 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                       >
                                         {method.enabled ? "Aktif" : "Nonaktif"}
                                       </span>
+                                      {(method.paymentType === "qris_manual" || method.group === "QRIS") && (
+                                        <span
+                                          style={{
+                                            fontSize: "11px",
+                                            fontWeight: 600,
+                                            padding: "2px 7px",
+                                            borderRadius: "4px",
+                                            background: "#eef4ff",
+                                            color: "#1e40af",
+                                          }}
+                                        >
+                                          {method.qrisProvider || "QRIS"} · {method.qrisMode === "static" ? "Statis Fallback" : "Dinamis Otomatis"}
+                                        </span>
+                                      )}
                                     </div>
+                                    {(method.qrisMerchantName || method.qris_merchant_name) && (
+                                      <div style={{ fontSize: "12px", color: "#333", marginBottom: "2px" }}>
+                                        Merchant: <b>{method.qrisMerchantName || method.qris_merchant_name}</b>
+                                      </div>
+                                    )}
                                     <small style={{ color: "var(--ws-muted, #666)", fontSize: "12px" }}>
                                       {method.detail || "(Tidak ada informasi tambahan)"}
                                     </small>

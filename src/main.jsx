@@ -41,13 +41,19 @@ import Home from "./Home.jsx";
 import { CartPage, WishlistPage, PaymentPage } from "./ShoppingPages.jsx";
 import "./workspace.css";
 import { policy } from "./policies.js";
-import { dimensionLabel, parseDimensions } from "./dimensions.js";
+import { dimensionLabel, dimensionValue, parseDimensions } from "./dimensions.js";
+import { SizeGuideContent } from "./SizeGuide.jsx";
+import { sizesMatch } from "./size-guide.js";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
+import { resolveActiveVariant, resolveVariationDisplayMode } from "./variant-utils.js";
 import { StoreHeader, StoreFooter } from "./StoreChrome.jsx";
 import {
+  getCartItemCount,
   mergeGuestCart,
+  mergeGuestSelection,
   moveGuestCheckout,
+  reconcileSelectedKeys,
   subtractPurchased,
 } from "./checkout-state.js";
 import "./kintsugi.css";
@@ -140,6 +146,7 @@ function App() {
     [color, setColor] = useState(""),
     [quantity, setQuantity] = useState(1),
     [cart, setCart] = useState([]),
+    [selectedCartKeys, setSelectedCartKeys] = useState([]),
     [directPurchase, setDirectPurchase] = useState(null),
     [purchaseIntent, setPurchaseIntent] = useState('cart'),
     [wish, setWish] = useState([]),
@@ -175,8 +182,15 @@ function App() {
     [minPrice, setMinPrice] = useState(""),
     [maxPrice, setMaxPrice] = useState(""),
     [productLoading, setProductLoading] = useState(false),
+    [sizeGuideProduct, setSizeGuideProduct] = useState(null),
+    [cardColors, setCardColors] = useState({}),
+    [detailPhotoIndex, setDetailPhotoIndex] = useState(0),
     [crossCategoryMatches, setCrossCategoryMatches] = useState([]),
     [crossCategoryLoading, setCrossCategoryLoading] = useState(false);
+  const closeInfoDialog = () => {
+    setInfo(null);
+    setSizeGuideProduct(null);
+  };
   const toastTimer = useRef();
   function notify(t) {
     setToast(t);
@@ -188,10 +202,28 @@ function App() {
     const owner = user?.id || "guest";
     const savedCart = storage.read("cart:" + owner, []);
     const restoreDimensions = (row) => {
-      const d = parseDimensions(row?.size);
-      return d ? { ...row, size: `${d.length}×${d.width}×${d.height}` } : row;
+      if (!row || typeof row !== "object") return row;
+      const qty = Math.max(1, Math.min(99, Math.trunc(Number(row.quantity) || 1)));
+      const stockNum = Number(row.stock);
+      const safeStock =
+        Number.isFinite(stockNum) && stockNum > 0
+          ? Math.min(99, Math.trunc(stockNum))
+          : 99;
+      const parts = String(row?.size ?? "")
+        .trim()
+        .split(/[×xX]/)
+        .map((part) => Number(part.trim()));
+      const normalizedSize =
+        parts.length === 3 &&
+        parts.every((n) => Number.isInteger(n) && n >= 1 && n <= 500)
+          ? dimensionValue(parts[0], parts[1], parts[2])
+          : row.size;
+      return { ...row, size: normalizedSize, quantity: qty, stock: safeStock };
     };
-    setCart(savedCart.map(restoreDimensions));
+    const normalizedCart = savedCart.map(restoreDimensions);
+    setCart(normalizedCart);
+    const savedSelected = storage.read("cart-selected:" + owner, null);
+    setSelectedCartKeys(reconcileSelectedKeys(normalizedCart, savedSelected));
     const savedDirect = storage.read('direct:' + owner, null);
     setDirectPurchase(savedDirect ? restoreDimensions(savedDirect) : null);
     setWish(storage.read("wish:" + owner, []));
@@ -203,6 +235,17 @@ function App() {
     if (authReady && cartOwner === (user?.id || "guest"))
       storage.write("cart:" + cartOwner, cart);
   }, [cart, cartOwner, user?.id, authReady]);
+  useEffect(() => {
+    setSelectedCartKeys((prev) => {
+      const valid = new Set(cart.map((item) => item.key));
+      const next = prev.filter((k) => valid.has(k));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [cart]);
+  useEffect(() => {
+    if (authReady && cartOwner === (user?.id || "guest"))
+      storage.write("cart-selected:" + cartOwner, selectedCartKeys);
+  }, [selectedCartKeys, cartOwner, user?.id, authReady]);
   useEffect(() => {
     if (authReady && cartOwner === (user?.id || "guest"))
       storage.write("wish:" + cartOwner, wish);
@@ -248,7 +291,7 @@ function App() {
         setDetail(null);
         setMenu(false);
         setSearchOpen(false);
-        setInfo(null);
+        closeInfoDialog();
       }
     };
     window.addEventListener("keydown", key);
@@ -330,6 +373,14 @@ function App() {
     setSearchOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  const selectCategoryFilter = (nextCat = "Semua", nextSub = "Semua") => {
+    setActiveCategory(nextCat);
+    setSubcategory(nextSub);
+    setFilterSize("");
+    setFilterColor("");
+    setCrossCategoryMatches([]);
+    setPage(1);
+  };
   const shop = (cat = "Semua", g = "Semua") => {
     const catsPool = config?.categories?.length ? config.categories : catalogCategories;
     const isMainCat = (val) => {
@@ -351,8 +402,7 @@ function App() {
             c.name?.toLowerCase() === String(cat).toLowerCase() ||
             c.label?.toLowerCase() === String(cat).toLowerCase())
       );
-      setActiveCategory(match?.id || cat);
-      setSubcategory(g);
+      selectCategoryFilter(match?.id || cat, g);
     } else if (isMainCat(g)) {
       const match = catsPool.find(
         (c) =>
@@ -361,23 +411,27 @@ function App() {
             c.name?.toLowerCase() === String(g).toLowerCase() ||
             c.label?.toLowerCase() === String(g).toLowerCase())
       );
-      setActiveCategory(match?.id || g);
-      setSubcategory(cat);
+      selectCategoryFilter(match?.id || g, cat);
     } else {
-      setActiveCategory(cat);
-      setSubcategory(g);
+      selectCategoryFilter(cat, g);
     }
     setSearch("");
     nav("catalog");
   };
-  const openProduct = async (p, intent = 'cart') => {
+  const openProduct = async (p, intent = 'cart', preferredColor = "") => {
     setPurchaseIntent(intent);
     setProductLoading(true);
     try {
       const product = await api("/products/" + encodeURIComponent(p.id));
+      const initialColor =
+        preferredColor && product.colors?.includes(preferredColor)
+          ? preferredColor
+          : product.colors?.[0] || "";
+      const singleSize = product.sizes?.length === 1 ? product.sizes[0] : "";
       setDetail(product);
-      setSize("");
-      setColor(product.colors[0]);
+      setSize(singleSize);
+      setColor(initialColor);
+      setDetailPhotoIndex(0);
       setQuantity(1);
     } catch (e) {
       notify(e.message);
@@ -385,13 +439,66 @@ function App() {
       setProductLoading(false);
     }
   };
+  const activeVariantInfo = detail
+    ? resolveActiveVariant(detail, color, size)
+    : null;
+  const detailDisplay = detail
+    ? resolveVariationDisplayMode(detail.colors, detail.variants, detail.variationLabel)
+    : { mode: "text", items: [] };
+  const activeGallery = activeVariantInfo?.gallery?.length
+    ? activeVariantInfo.gallery
+    : detail?.image
+      ? [detail.image]
+      : ["/images/seprai/sprei-01.jpg"];
+  const activeMainPhoto =
+    activeGallery[Math.min(detailPhotoIndex, activeGallery.length - 1)] ||
+    activeVariantInfo?.image ||
+    detail?.image;
+  const activeUnitPrice = activeVariantInfo?.unitPrice || detail?.price || 0;
+  const activeOldPrice = activeVariantInfo?.oldPrice ?? detail?.oldPrice ?? 0;
+
   const selectedStock = detail?.variants
-    ? detail.variants.find((v) => v.size === size && v.color === color)
+    ? detail.variants.find((v) => sizesMatch(v.size, size) && v.color === color)
         ?.stock || 0
     : detail?.stock || 0;
+  const effectiveMaxStock = !detail
+    ? 0
+    : size
+      ? selectedStock
+      : detail.variants?.length
+        ? Math.max(
+            0,
+            ...detail.variants
+              .filter((v) => !color || v.color === color)
+              .map((v) => Number(v.stock) || 0),
+          ) || Math.min(99, Number(detail.stock) || 0)
+        : Number(detail.stock) || 0;
   useEffect(() => {
-    setQuantity(1);
-  }, [size, color]);
+    setDetailPhotoIndex(0);
+  }, [detail?.id, color]);
+  useEffect(() => {
+    if (!detail || !size) return;
+    if (selectedStock > 0) {
+      setQuantity((q) => Math.max(1, Math.min(99, selectedStock, q)));
+    }
+  }, [detail?.id, size, color, selectedStock]);
+  useEffect(() => {
+    if (catalogLoading) return;
+    if (
+      filterSize &&
+      Array.isArray(catalog.facets?.sizes) &&
+      !catalog.facets.sizes.some((s) => sizesMatch(s, filterSize))
+    ) {
+      setFilterSize("");
+    }
+    if (
+      filterColor &&
+      Array.isArray(catalog.facets?.colors) &&
+      !catalog.facets.colors.includes(filterColor)
+    ) {
+      setFilterColor("");
+    }
+  }, [catalogLoading, catalog.facets, filterSize, filterColor]);
   useEffect(() => {
     setPage(1);
   }, [
@@ -510,10 +617,28 @@ function App() {
       notify("Pilih ukuran terlebih dahulu.");
       return;
     }
-    const key = `${detail.id}:${size}:${color}`;
+    const safeQty = Math.max(1, Math.min(99, Math.trunc(Number(quantity) || 1)));
+    const safeStock = Math.max(0, Math.trunc(Number(selectedStock) || 0));
+    const resolvedVariant = activeVariantInfo?.variant;
+    const canonicalSize = resolvedVariant?.size || size;
+    const resolvedVariantId = activeVariantInfo?.variantId || "";
+    const resolvedImage = activeVariantInfo?.image || activeMainPhoto || detail.image;
+    const resolvedPrice = activeUnitPrice;
+    const key = `${detail.id}:${canonicalSize}:${color}`;
     if (buyNow) {
-      if (quantity > Math.min(99, selectedStock)) return notify('Jumlah melebihi stok tersedia.');
-      const item = { ...detail, stock: selectedStock, key, size, color, quantity };
+      if (safeQty > Math.min(99, safeStock)) return notify('Jumlah melebihi stok tersedia.');
+      const item = {
+        ...detail,
+        variantId: resolvedVariantId,
+        image: resolvedImage,
+        price: resolvedPrice,
+        variationLabel: detail.variationLabel || "Variasi",
+        stock: safeStock,
+        key,
+        size: canonicalSize,
+        color,
+        quantity: safeQty,
+      };
       setDirectPurchase(item);
       storage.write('direct:' + (user?.id || 'guest'), item);
       setDetail(null);
@@ -521,25 +646,54 @@ function App() {
       return;
     }
     const old = cart.find((i) => i.key === key);
-    if ((old?.quantity || 0) + quantity > Math.min(99, selectedStock)) {
+    if ((old?.quantity || 0) + safeQty > Math.min(99, safeStock)) {
       notify("Jumlah melebihi stok tersedia.");
       return;
     }
     setCart((c) =>
       old
         ? c.map((i) =>
-            i.key === key ? { ...i, quantity: i.quantity + quantity } : i,
+            i.key === key
+              ? {
+                  ...i,
+                  variantId: resolvedVariantId || i.variantId,
+                  image: resolvedImage,
+                  price: resolvedPrice,
+                  stock: safeStock,
+                  quantity: i.quantity + safeQty,
+                }
+              : i,
           )
         : [
             ...c,
-            { ...detail, stock: selectedStock, key, size, color, quantity },
+            {
+              ...detail,
+              variantId: resolvedVariantId,
+              image: resolvedImage,
+              price: resolvedPrice,
+              variationLabel: detail.variationLabel || "Variasi",
+              stock: safeStock,
+              key,
+              size: canonicalSize,
+              color,
+              quantity: safeQty,
+            },
           ],
     );
-    flyToCart(detail.image, event.currentTarget);
+    setSelectedCartKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    flyToCart(resolvedImage, event.currentTarget);
     setDetail(null);
     notify("Produk ditambahkan ke keranjang");
   };
-  const count = cart.reduce((n, i) => n + i.quantity, 0);
+  const toggleCartSelect = (key) => {
+    setSelectedCartKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
+  const toggleCartSelectAll = (checked) => {
+    setSelectedCartKeys(checked ? cart.map((item) => item.key) : []);
+  };
+  const count = getCartItemCount(cart);
   function flyToCart(image, button) {
     const target = [...document.querySelectorAll('[data-cart-target]')].find((el) => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
     const source = document.querySelector('.product-dialog img') || button;
@@ -559,15 +713,26 @@ function App() {
     flight.oncancel = () => ghost.remove();
   }
   function card(p) {
+    const activeCardColor =
+      cardColors[p.id] && p.colors?.includes(cardColors[p.id])
+        ? cardColors[p.id]
+        : p.colors?.[0] || "";
+    const cardVariant = resolveActiveVariant(p, activeCardColor, "");
+    const cardImage = cardVariant.image || p.image;
     return (
       <article className="product" key={p.id}>
         <div className="product-image">
           <button
             className="image-button"
-            onClick={() => openProduct(p)}
+            onClick={() => openProduct(p, "cart", activeCardColor)}
             aria-label={`Lihat ${p.name}`}
           >
-            <img src={p.image} alt={p.name} loading="lazy" />
+            <img
+              className="ks-variant-live-img"
+              src={cardImage}
+              alt={`${p.name}${activeCardColor ? ` - ${colorLabel(activeCardColor)}` : ""}`}
+              loading="lazy"
+            />
           </button>
           <span className={"product-tag " + (p.oldPrice ? "red" : "")}>
             {p.oldPrice
@@ -589,21 +754,26 @@ function App() {
         </div>
         <VariantSummary
           colors={p.colors}
+          variants={p.variants}
           variationLabel={p.variationLabel || "Warna"}
+          selectedColor={activeCardColor}
+          onSelectColor={(nextColor) =>
+            setCardColors((prev) => ({ ...prev, [p.id]: nextColor }))
+          }
         />
         <div className="product-meta">
           {categoryLabel(p.category, config.categories).toUpperCase()}
         </div>
         <SizeSummary sizes={p.sizes} />
-        <button className="product-name" onClick={() => openProduct(p)}>
+        <button className="product-name" onClick={() => openProduct(p, "cart", activeCardColor)}>
           {p.name}
         </button>
         <div className={"price " + (p.oldPrice ? "sale" : "")}>
           {money(p.price)} {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
         </div>
         <div className="ks-product-actions">
-          <button aria-label={'Tambah ke keranjang ' + p.name} onClick={() => openProduct(p, 'cart')}><ShoppingBag size={15}/><span>Keranjang</span></button>
-          <button onClick={() => openProduct(p, 'buy')} aria-label={'Beli langsung ' + p.name}>Beli langsung</button>
+          <button aria-label={'Tambah ke keranjang ' + p.name} onClick={() => openProduct(p, 'cart', activeCardColor)}><ShoppingBag size={15}/><span>Keranjang</span></button>
+          <button onClick={() => openProduct(p, 'buy', activeCardColor)} aria-label={'Beli langsung ' + p.name}>Beli langsung</button>
         </div>
       </article>
     );
@@ -621,12 +791,14 @@ function App() {
       setDirectPurchase(null);
       setPlaced(null);
       setCart([]);
+      setSelectedCartKeys([]);
       setWish([]);
       setCoupon("");
       setCartOwner("guest");
 
       storage.clearUserSession(prevUserId);
       storage.write("cart:guest", []);
+      storage.write("cart-selected:guest", null);
       storage.write("wish:guest", []);
       storage.write("coupon:guest", "");
       storage.write("direct:guest", null);
@@ -641,13 +813,25 @@ function App() {
     if (u.role === "customer" && cartOwner === "guest" && cart.length) {
       const saved = storage.read("cart:" + u.id, []),
         merged = mergeGuestCart(saved, cart);
+      const mergedSelected = mergeGuestSelection(
+        storage.read("cart-selected:" + u.id, null),
+        selectedCartKeys,
+        merged,
+      );
       storage.write("cart:" + u.id, merged);
+      storage.write("cart-selected:" + u.id, mergedSelected);
       storage.write("cart:guest", []);
+      storage.write("cart-selected:guest", null);
+    } else if (u.role === "customer" && cartOwner === "guest") {
+      storage.write("cart-selected:guest", null);
     }
     if (u.role === "customer" && cartOwner === "guest") {
-      if (directPurchase) storage.write('direct:' + u.id, directPurchase);
+      if (directPurchase) {
+        storage.write('direct:' + u.id, directPurchase);
+        storage.write('direct:guest', null);
+      }
       moveGuestCheckout(storage, u.id);
-      storage.write("coupon:" + u.id, coupon);
+      if (coupon) storage.write("coupon:" + u.id, coupon);
       storage.write("coupon:guest", "");
     }
     if (u.role === "customer" && cartOwner === "guest" && wish.length) {
@@ -658,6 +842,7 @@ function App() {
     }
     if (["admin", "manager", "staff"].includes(u.role)) {
       setCart([]);
+      setSelectedCartKeys([]);
       setWish([]);
       setCoupon("");
       setDirectPurchase(null);
@@ -687,8 +872,30 @@ function App() {
         >
           <X />
         </button>
-        <div className="detail-image">
-          <img src={detail.image} alt={detail.name} />
+        <div className="ks-detail-media">
+          <div className="detail-image">
+            <img
+              className="ks-variant-live-img"
+              src={activeMainPhoto}
+              alt={`${detail.name}${color ? ` - ${colorLabel(color)}` : ""}`}
+            />
+          </div>
+          {activeGallery.length > 1 && (
+            <div className="ks-detail-gallery" role="list" aria-label={`Galeri ${colorLabel(color) || detail.name}`}>
+              {activeGallery.map((imgUrl, idx) => (
+                <button
+                  key={`${imgUrl}-${idx}`}
+                  type="button"
+                  className={"ks-detail-gallery-thumb " + (idx === detailPhotoIndex ? "active" : "")}
+                  aria-label={`Lihat gambar ${idx + 1} dari ${colorLabel(color) || detail.name}`}
+                  aria-pressed={idx === detailPhotoIndex}
+                  onClick={() => setDetailPhotoIndex(idx)}
+                >
+                  <img src={imgUrl} alt="" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="detail-info">
           <span className="eyebrow">
@@ -700,46 +907,73 @@ function App() {
             Pilihan tekstil Kintsugi
           </div>
           <div className="detail-price">
-            {money(detail.price)}
-            {detail.oldPrice > 0 && <del>{money(detail.oldPrice)}</del>}
+            {money(activeUnitPrice)}
+            {activeOldPrice > activeUnitPrice && <del>{money(activeOldPrice)}</del>}
           </div>
           <p>{detail.description}</p>
           <label>
             {detail.variationLabel || "Variasi"}{" "}
             <span>
-              {colorLabel(color)} · {detail.colors.indexOf(color) + 1} / {detail.colors.length}
+              {colorLabel(color)} · {Math.max(1, detail.colors.indexOf(color) + 1)} / {Math.max(1, detail.colors.length)}
             </span>
           </label>
-          <div className="color-choices">
-            {detail.colors.map((c) => (
-              (() => {
-                const variant = detail.variants?.find((item) => item.color === c && item.image_url);
-                const isHex = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c);
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-label={`${detail.variationLabel || "Variasi"} ${colorLabel(c)}`}
-                    title={colorLabel(c)}
-                    className={"ks-variant-choice " + (color === c ? "selected" : "") + (isHex ? " is-hex" : " is-text")}
-                    style={isHex ? { background: c } : undefined}
-                    onClick={() => {
-                      setColor(c);
-                      if (variant?.image_url) setDetail((current) => ({ ...current, image: variant.image_url }));
-                    }}
-                  >
-                    {variant?.image_url && <img src={variant.image_url} alt="" className="ks-variant-thumb" />}
-                    {!isHex && <span className="ks-variant-text">{c}</span>}
-                  </button>
-                );
-              })()
-            ))}
+          <div className={`color-choices mode-${detailDisplay.mode}`}>
+            {detailDisplay.items.map((item) => {
+              const isSelected = color === item.value;
+              const modeClass =
+                detailDisplay.mode === "swatch"
+                  ? "is-hex"
+                  : detailDisplay.mode === "thumbnail"
+                    ? "is-thumb"
+                    : "is-text";
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  aria-label={`${detail.variationLabel || "Variasi"} ${item.label}`}
+                  aria-pressed={isSelected}
+                  title={item.label}
+                  className={`ks-variant-choice ${isSelected ? "selected" : ""} ${modeClass}`}
+                  style={detailDisplay.mode === "swatch" ? { background: item.hex } : undefined}
+                  onClick={() => {
+                    setColor(item.value);
+                    setDetailPhotoIndex(0);
+                    if (
+                      size &&
+                      detail.variants &&
+                      !detail.variants.some(
+                        (v) =>
+                          sizesMatch(v.size, size) &&
+                          v.color === item.value &&
+                          Number(v.stock) > 0,
+                      )
+                    ) {
+                      const availableSizes = detail.variants.filter(
+                        (v) => v.color === item.value && Number(v.stock) > 0,
+                      );
+                      setSize(availableSizes.length === 1 ? availableSizes[0].size : "");
+                    }
+                  }}
+                >
+                  {detailDisplay.mode === "thumbnail" && item.thumb && (
+                    <img src={item.thumb} alt={item.label} className="ks-variant-thumb" />
+                  )}
+                  {detailDisplay.mode !== "swatch" && (
+                    <span className="ks-variant-text">{item.label}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <label className="product-size-label">
             <span>Ukuran</span>
             <button
+              type="button"
               className="text-link"
-              onClick={() => setInfo("Panduan ukuran")}
+              onClick={() => {
+                setSizeGuideProduct(detail);
+                setInfo("Panduan ukuran");
+              }}
             >
               Panduan ukuran
             </button>
@@ -777,30 +1011,42 @@ function App() {
           <label>
             Jumlah{" "}
             <span>
-              {size ? selectedStock + " tersedia" : "Pilih varian"}
+              {size
+                ? `${selectedStock} tersedia`
+                : `Maks. ${effectiveMaxStock} unit (pilih ukuran)`}
             </span>
           </label>
-          <div className="qty">
-            <button
-              aria-label="Kurangi jumlah"
-              onClick={() => setQuantity(Math.max(1, quantity - 1))}
-            >
-              <Minus size={15} />
-            </button>
-            <span>{quantity}</span>
-            <button
-              aria-label="Tambah jumlah"
-              disabled={
-                !size ||
-                selectedStock < 1 ||
-                quantity >= Math.min(99, selectedStock)
-              }
-              onClick={() =>
-                setQuantity(Math.min(99, selectedStock, quantity + 1))
-              }
-            >
-              <Plus size={15} />
-            </button>
+          <div className="detail-qty-row">
+            <div className="qty">
+              <button
+                type="button"
+                aria-label="Kurangi jumlah"
+                disabled={quantity <= 1}
+                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+              >
+                <Minus size={15} />
+              </button>
+              <span>{quantity}</span>
+              <button
+                type="button"
+                aria-label="Tambah jumlah"
+                disabled={
+                  effectiveMaxStock < 1 ||
+                  quantity >= Math.min(99, effectiveMaxStock)
+                }
+                onClick={() =>
+                  setQuantity((q) =>
+                    Math.min(99, Math.max(1, effectiveMaxStock), q + 1),
+                  )
+                }
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+            <div className="detail-qty-subtotal">
+              <small>Subtotal ({quantity} barang)</small>
+              <strong>{money(activeUnitPrice * quantity)}</strong>
+            </div>
           </div>
           <button
             className="btn black full"
@@ -946,10 +1192,14 @@ function App() {
       setSearchOpen(true);
     },
   };
+  const selectedCartItems = cart.filter((item) => selectedCartKeys.includes(item.key));
   const customerAccountProps = {
     ...accountProps,
     cart,
     setCart,
+    selectedKeys: selectedCartKeys,
+    onToggleSelect: toggleCartSelect,
+    onToggleSelectAll: toggleCartSelectAll,
     coupon,
     setCoupon,
     wish,
@@ -988,6 +1238,9 @@ function App() {
           {...accountProps}
           cart={cart}
           setCart={setCart}
+          selectedKeys={selectedCartKeys}
+          onToggleSelect={toggleCartSelect}
+          onToggleSelectAll={toggleCartSelectAll}
           coupon={coupon}
           setCoupon={setCoupon}
         />
@@ -1022,31 +1275,62 @@ function App() {
       </>
     );
   }
+  const updateCheckoutQuantity = (key, nextQty) => {
+    const cleanQty = Math.max(1, Math.min(99, Math.trunc(Number(nextQty) || 1)));
+    if (directPurchase && directPurchase.key === key) {
+      const cap =
+        Number.isFinite(Number(directPurchase.stock)) && Number(directPurchase.stock) > 0
+          ? Math.min(99, Math.trunc(Number(directPurchase.stock)))
+          : 99;
+      const updated = { ...directPurchase, stock: cap, quantity: Math.min(cap, cleanQty) };
+      setDirectPurchase(updated);
+      storage.write("direct:" + (user?.id || "guest"), updated);
+      return;
+    }
+    setCart((prev) =>
+      prev.map((row) => {
+        if (row.key !== key) return row;
+        const cap =
+          Number.isFinite(Number(row.stock)) && Number(row.stock) > 0
+            ? Math.min(99, Math.trunc(Number(row.stock)))
+            : 99;
+        return { ...row, stock: cap, quantity: Math.min(cap, cleanQty) };
+      }),
+    );
+  };
   if (view === "checkout" || view === "payment")
     return (
       <>
         <Checkout
           {...accountProps}
           user={user}
-          cart={directPurchase ? [directPurchase] : cart}
+          cart={directPurchase ? [directPurchase] : selectedCartItems}
           key={directPurchase?.key || 'cart-checkout'}
           coupon={coupon}
           config={config}
           nav={nav}
+          onUpdateQuantity={updateCheckoutQuantity}
           currentView={view}
           onAuthenticated={(u) => authenticated(u, true)}
           onPlaced={(order, buyer, items) => {
-            const remaining = directPurchase ? storage.read('cart:' + buyer.id, []) : subtractPurchased(
-              storage.read("cart:" + buyer.id, []),
-              items,
-            );
+            const existingCart = storage.read("cart:" + buyer.id, []);
+            const remaining = directPurchase
+              ? existingCart
+              : subtractPurchased(existingCart, items);
+            const remainingKeys = new Set(remaining.map((row) => row.key));
+            const savedSel = storage.read("cart-selected:" + buyer.id, null);
+            const nextSelected = Array.isArray(savedSel)
+              ? savedSel.filter((k) => remainingKeys.has(k))
+              : remaining.map((row) => row.key);
             storage.write("cart:" + buyer.id, remaining);
+            storage.write("cart-selected:" + buyer.id, nextSelected);
             storage.write("coupon:" + buyer.id, "");
             setPlaced(order);
             setDirectPurchase(null);
             storage.write('direct:' + buyer.id, null);
             storage.write('direct:guest', null);
             setCart(remaining);
+            setSelectedCartKeys(nextSelected);
             setCoupon("");
             nav("success");
           }}
@@ -1057,7 +1341,12 @@ function App() {
   if (view === "success")
     return (
       <>
-        <PaymentPage {...accountProps} order={placed} />
+        <PaymentPage
+          {...accountProps}
+          order={placed}
+          onOrderUpdated={setPlaced}
+          notify={notify}
+        />
         {feedback}
       </>
     );
@@ -1088,29 +1377,48 @@ function App() {
           products={products}
           openProduct={openProduct}
           config={config}
+          onSizeGuide={(prod) => {
+            setSizeGuideProduct(prod || null);
+            setInfo("Panduan ukuran");
+          }}
           onAddToCart={(item, buttonEl) => {
             if (user && user.role !== "customer") return notify("Akun admin tidak dapat berbelanja.");
             if (!authReady) return notify("Sedang memuat akun. Coba sesaat lagi.");
+            const qty = Math.max(1, Math.min(99, Math.trunc(Number(item.quantity) || 1)));
+            const cap =
+              Number.isFinite(Number(item.stock)) && Number(item.stock) > 0
+                ? Math.min(99, Math.trunc(Number(item.stock)))
+                : 99;
             const old = cart.find((i) => i.key === item.key);
-            if ((old?.quantity || 0) + item.quantity > Math.min(99, item.stock)) {
+            if ((old?.quantity || 0) + qty > cap) {
               return notify("Jumlah melebihi stok tersedia.");
             }
+            const cleanItem = { ...item, stock: cap, quantity: qty };
             setCart((c) =>
               old
                 ? c.map((i) =>
-                    i.key === item.key ? { ...i, quantity: i.quantity + item.quantity } : i,
+                    i.key === cleanItem.key ? { ...i, stock: cap, quantity: i.quantity + qty } : i,
                   )
-                : [...c, item],
+                : [...c, cleanItem],
             );
-            if (buttonEl) flyToCart(item.image, buttonEl);
+            setSelectedCartKeys((prev) =>
+              prev.includes(cleanItem.key) ? prev : [...prev, cleanItem.key],
+            );
+            if (buttonEl) flyToCart(cleanItem.image, buttonEl);
             notify("Produk promo berhasil ditambahkan ke keranjang");
           }}
           onBuyDirect={(item) => {
             if (user && user.role !== "customer") return notify("Akun admin tidak dapat berbelanja.");
             if (!authReady) return notify("Sedang memuat akun. Coba sesaat lagi.");
-            if (item.quantity > Math.min(99, item.stock)) return notify("Jumlah melebihi stok tersedia.");
-            setDirectPurchase(item);
-            storage.write("direct:" + (user?.id || "guest"), item);
+            const qty = Math.max(1, Math.min(99, Math.trunc(Number(item.quantity) || 1)));
+            const cap =
+              Number.isFinite(Number(item.stock)) && Number(item.stock) > 0
+                ? Math.min(99, Math.trunc(Number(item.stock)))
+                : 99;
+            if (qty > cap) return notify("Jumlah melebihi stok tersedia.");
+            const cleanItem = { ...item, stock: cap, quantity: qty };
+            setDirectPurchase(cleanItem);
+            storage.write("direct:" + (user?.id || "guest"), cleanItem);
             nav("checkout", true);
           }}
         />
@@ -1124,13 +1432,13 @@ function App() {
               <span>Wishlist Anda</span>
             ) : (
               <>
-                <button onClick={() => { setActiveCategory("Semua"); setSubcategory("Semua"); }}>
+                <button type="button" onClick={() => selectCategoryFilter("Semua", "Semua")}>
                   Katalog
                 </button>
                 {activeCategory !== "Semua" && (
                   <>
                     <ChevronRight size={12} />
-                    <button onClick={() => setSubcategory("Semua")}>
+                    <button type="button" onClick={() => selectCategoryFilter(activeCategory, "Semua")}>
                       {mainCategoryLabel(activeCategory, allCategories)}
                     </button>
                   </>
@@ -1218,7 +1526,7 @@ function App() {
                           "catalog-sub-btn " +
                           (subcategory === "Semua" ? "active is-active" : "")
                         }
-                        onClick={() => setSubcategory("Semua")}
+                        onClick={() => selectCategoryFilter(activeCategory, "Semua")}
                         style={{ marginBottom: "6px" }}
                       >
                         <span>
@@ -1237,7 +1545,7 @@ function App() {
                               "catalog-sub-btn " +
                               (subcategory === s.id ? "active is-active" : "")
                             }
-                            onClick={() => setSubcategory(s.id)}
+                            onClick={() => selectCategoryFilter(activeCategory, s.id)}
                           >
                             <span>{s.label || s.name}</span>
                             <ChevronRight size={13} />
@@ -1265,10 +1573,7 @@ function App() {
                       <button
                         type="button"
                         className="ws-link"
-                        onClick={() => {
-                          setActiveCategory("Semua");
-                          setSubcategory("Semua");
-                        }}
+                        onClick={() => selectCategoryFilter("Semua", "Semua")}
                         style={{
                           marginTop: "14px",
                           display: "inline-flex",
@@ -1300,10 +1605,7 @@ function App() {
                               cursor: "pointer",
                               textAlign: "left",
                             }}
-                            onClick={() => {
-                              setActiveCategory(m.id);
-                              setSubcategory("Semua");
-                            }}
+                            onClick={() => selectCategoryFilter(m.id, "Semua")}
                           >
                             <strong>{m.label || m.name}</strong>
                             <ChevronRight size={12} />
@@ -1316,10 +1618,7 @@ function App() {
                                 "catalog-sub-btn " +
                                 (subcategory === s.id ? "active is-active" : "")
                               }
-                              onClick={() => {
-                                setActiveCategory(m.id);
-                                setSubcategory(s.id);
-                              }}
+                              onClick={() => selectCategoryFilter(m.id, s.id)}
                             >
                               <span>{s.label || s.name}</span>
                               <ChevronRight size={12} />
@@ -1380,7 +1679,7 @@ function App() {
                           (subcategory === "Semua" ? "active is-active" : "")
                         }
                         onClick={(e) => {
-                          setSubcategory("Semua");
+                          selectCategoryFilter(activeCategory, "Semua");
                           e.currentTarget
                             .closest("details")
                             ?.removeAttribute("open");
@@ -1408,7 +1707,7 @@ function App() {
                               (subcategory === s.id ? "active is-active" : "")
                             }
                             onClick={(e) => {
-                              setSubcategory(s.id);
+                              selectCategoryFilter(activeCategory, s.id);
                               e.currentTarget
                                 .closest("details")
                                 ?.removeAttribute("open");
@@ -1445,8 +1744,7 @@ function App() {
                         type="button"
                         className="ws-link"
                         onClick={(e) => {
-                          setActiveCategory("Semua");
-                          setSubcategory("Semua");
+                          selectCategoryFilter("Semua", "Semua");
                           e.currentTarget
                             .closest("details")
                             ?.removeAttribute("open");
@@ -1483,8 +1781,7 @@ function App() {
                               textAlign: "left",
                             }}
                             onClick={(e) => {
-                              setActiveCategory(m.id);
-                              setSubcategory("Semua");
+                              selectCategoryFilter(m.id, "Semua");
                               e.currentTarget
                                 .closest("details")
                                 ?.removeAttribute("open");
@@ -1502,8 +1799,7 @@ function App() {
                                 (subcategory === s.id ? "active is-active" : "")
                               }
                               onClick={(e) => {
-                                setActiveCategory(m.id);
-                                setSubcategory(s.id);
+                                selectCategoryFilter(m.id, s.id);
                                 e.currentTarget
                                   .closest("details")
                                   ?.removeAttribute("open");
@@ -1520,8 +1816,16 @@ function App() {
                 </div>
               </details>
 
-              <details className="advanced-filters">
-                <summary>Ukuran, variasi & harga</summary>
+              <details className="advanced-filters catalog-filter-details">
+                <summary>
+                  Ukuran, variasi & harga
+                  {(filterSize || filterColor || minPrice || maxPrice) && (
+                    <span className="catalog-summary-selection">
+                      {" "}
+                      ({[filterSize, filterColor, minPrice, maxPrice].filter(Boolean).length} aktif)
+                    </span>
+                  )}
+                </summary>
                 <div className="filter-fields">
                   <label>
                     Ukuran
@@ -1533,7 +1837,7 @@ function App() {
                       <option value="">Semua ukuran</option>
                       {catalog.facets.sizes.map((s) => (
                         <option key={s} value={s}>
-                          {s.includes("×") || s.includes("x") ? dimensionLabel(s) : s}
+                          {parseDimensions(s) ? dimensionLabel(s) : s}
                         </option>
                       ))}
                     </select>
@@ -1624,7 +1928,7 @@ function App() {
                   search && "Cari: " + search,
                   activeCategory !== "Semua" && "Kategori: " + mainCategoryLabel(activeCategory, allCategories),
                   subcategory !== "Semua" && "Kategori: " + categoryLabel(subcategory, allCategories),
-                  filterSize && "Ukuran: " + (filterSize.includes("×") || filterSize.includes("x") ? dimensionLabel(filterSize) : filterSize),
+                  filterSize && "Ukuran: " + (parseDimensions(filterSize) ? dimensionLabel(filterSize) : filterSize),
                   filterColor && "Variasi: " + colorLabel(filterColor),
                   minPrice && "Min: " + money(parseRupiah(minPrice)),
                   maxPrice && "Maks: " + money(parseRupiah(maxPrice)),
@@ -1675,12 +1979,7 @@ function App() {
                         <button
                           type="button"
                           className="btn black ks-cross-btn-main"
-                          onClick={() => {
-                            setActiveCategory(crossCategoryMatches[0].category);
-                            setSubcategory("Semua");
-                            setPage(1);
-                            setCrossCategoryMatches([]);
-                          }}
+                          onClick={() => selectCategoryFilter(crossCategoryMatches[0].category, "Semua")}
                         >
                           <span>Beralih ke Kategori {mainCategoryLabel(crossCategoryMatches[0].category, allCategories)}</span>
                           <ArrowRight size={16} />
@@ -1688,12 +1987,7 @@ function App() {
                         <button
                           type="button"
                           className="btn outline"
-                          onClick={() => {
-                            setActiveCategory("Semua");
-                            setSubcategory("Semua");
-                            setPage(1);
-                            setCrossCategoryMatches([]);
-                          }}
+                          onClick={() => selectCategoryFilter("Semua", "Semua")}
                         >
                           Cari di Semua Kategori
                         </button>
@@ -1721,12 +2015,7 @@ function App() {
                               key={m.category + (m.isCurrentCategoryAll ? "-all" : "")}
                               type="button"
                               className="ks-cross-option-card"
-                              onClick={() => {
-                                setActiveCategory(m.category);
-                                setSubcategory("Semua");
-                                setPage(1);
-                                setCrossCategoryMatches([]);
-                              }}
+                              onClick={() => selectCategoryFilter(m.category, "Semua")}
                             >
                               <div className="ks-cross-option-body">
                                 <span className="ks-cross-option-name">Beralih ke {catLabel}</span>
@@ -1741,12 +2030,7 @@ function App() {
                         <button
                           type="button"
                           className="btn outline"
-                          onClick={() => {
-                            setActiveCategory("Semua");
-                            setSubcategory("Semua");
-                            setPage(1);
-                            setCrossCategoryMatches([]);
-                          }}
+                          onClick={() => selectCategoryFilter("Semua", "Semua")}
                         >
                           Cari di Semua Kategori ({crossCategoryMatches.reduce((acc, c) => acc + c.count, 0)} produk)
                         </button>
@@ -1825,7 +2109,7 @@ function App() {
           </button>
         </form>
       </section>
-      <StoreFooter nav={nav} onInfo={setInfo} contact={config.contact} storeAddress={config.storeAddress} brand={config.brand} />
+      <StoreFooter nav={nav} onInfo={(topic) => { setSizeGuideProduct(null); setInfo(topic); }} contact={config.contact} storeAddress={config.storeAddress} brand={config.brand} />
       {productDialog}
       {searchOpen && (
         <div
@@ -1851,7 +2135,8 @@ function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                setCategory("Semua");
+                selectCategoryFilter("Semua", "Semua");
+                setSearchOpen(false);
                 nav("catalog");
               }}
             >
@@ -1873,7 +2158,8 @@ function App() {
                   key={t}
                   onClick={() => {
                     setSearch(t);
-                    setCategory("Semua");
+                    selectCategoryFilter("Semua", "Semua");
+                    setSearchOpen(false);
                     nav("catalog");
                   }}
                 >
@@ -1908,7 +2194,7 @@ function App() {
             ))}
             <button
               onClick={() => {
-                setCategory("Semua");
+                selectCategoryFilter("Semua", "Semua");
                 setSearch("");
                 nav("wishlist");
               }}
@@ -1919,45 +2205,29 @@ function App() {
         </div>
       )}
       {info && (
-        <div className="overlay" onClick={() => setInfo(null)}>
+        <div className="overlay info-overlay" onClick={closeInfoDialog}>
           <section
-            className="info-dialog"
+            className={"info-dialog " + (info === "Panduan ukuran" ? "size-guide-dialog" : "")}
             role="dialog"
             aria-modal="true"
             aria-label={info}
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              type="button"
               className="close"
               aria-label="Tutup informasi"
-              onClick={() => setInfo(null)}
+              onClick={closeInfoDialog}
             >
               <X />
             </button>
             <span className="eyebrow">KINTSUGI / INFORMASI</span>
             <h2>{info}</h2>
             {info === "Panduan ukuran" ? (
-              <>
-                <p>Pilih ukuran yang sama dengan ukuran spring bed Anda. Semua angka dalam sentimeter.</p>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Ukuran</th>
-                      <th>Lebar</th>
-                      <th>Panjang</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[["90×200", 90], ["100×200", 100], ["120×200", 120], ["160×200", 160], ["180×200", 180], ["200×200", 200]].map(([s, width]) => (
-                      <tr key={s}>
-                        <td>{s}</td>
-                        <td>{width} cm</td>
-                        <td>200 cm</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
+              <SizeGuideContent
+                product={sizeGuideProduct || detail}
+                activeCategory={activeCategory}
+              />
             ) : (
               <>
                 <p>{policy(info, config.contact)}</p>

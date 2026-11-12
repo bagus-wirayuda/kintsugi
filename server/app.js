@@ -24,9 +24,28 @@ import {
   flushWhatsApp,
   normalizePhone,
 } from "./integrations.js";
-import { createPayments, orderRow, validateInvoice } from "./payments.js";
+import {
+  createPayments,
+  enrichQrisOrders,
+  orderRow,
+  renderQrDataUrl,
+  validateInvoice,
+} from "./payments.js";
 import { createOtp, passwordSchema } from "./otp.js";
 import { parseDimensions } from "../src/dimensions.js";
+import { sizeQueryCandidates, sortCategorySizes } from "../src/size-guide.js";
+import { collectVariantImages } from "../src/variant-utils.js";
+import {
+  PAYMENT_TYPES,
+  isCodMethod,
+  isManualQrisMethod,
+  isStorePickupMethod,
+} from "../src/payment-methods.js";
+import {
+  assessQrisCompatibility,
+  convertStaticQrisToDynamic,
+  validateQrisPayload,
+} from "../src/qris.js";
 
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 const safeUser = (u) => ({
@@ -36,6 +55,60 @@ const safeUser = (u) => ({
   phone: u.phone || "",
   role: u.role,
 });
+
+function mapPaymentMethodRow(row) {
+  if (!row) return row;
+  const group = row.group ?? row.group_name ?? "";
+  const paymentType =
+    row.payment_type ||
+    (group === "COD" || row.id === "COD"
+      ? PAYMENT_TYPES.COD
+      : group === "QRIS" && row.qris_payload
+        ? PAYMENT_TYPES.QRIS_MANUAL
+        : PAYMENT_TYPES.GATEWAY);
+  return {
+    id: row.id,
+    name: row.name,
+    group,
+    group_name: row.group_name || group,
+    detail: row.detail || "",
+    paymentType,
+    payment_type: paymentType,
+    qrisPayload: row.qris_payload || "",
+    qris_payload: row.qris_payload || "",
+    qrisMerchantName: row.qris_merchant_name || "",
+    qris_merchant_name: row.qris_merchant_name || "",
+    qrisProvider: row.qris_provider || "",
+    qris_provider: row.qris_provider || "",
+    qrisMode: row.qris_mode || "dynamic",
+    qris_mode: row.qris_mode || "dynamic",
+    enabled: Boolean(row.enabled),
+    sort_order: row.sort_order ?? 0,
+  };
+}
+
+async function saveBase64ImageUpload(dataUrl, subdir = "") {
+  const match = String(dataUrl || "").match(
+    /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/,
+  );
+  if (!match) throw fail(400, "Gunakan gambar PNG, JPG, atau WebP.");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > 5_000_000) {
+    throw fail(400, "Ukuran gambar maksimal 5 MB.");
+  }
+  const extension = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+  }[match[1]];
+  const cleanSubdir = subdir ? subdir.replace(/[^a-z0-9_-]/gi, "") : "";
+  const baseDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
+  const targetDir = cleanSubdir ? path.join(baseDir, cleanSubdir) : baseDir;
+  await mkdir(targetDir, { recursive: true });
+  const name = `${randomUUID()}.${extension}`;
+  await writeFile(path.join(targetDir, name), bytes, { flag: "wx" });
+  return cleanSubdir ? `/uploads/${cleanSubdir}/${name}` : `/uploads/${name}`;
+}
 const imageSchema = z
   .string()
   .max(1000)
@@ -53,26 +126,44 @@ const parseMoneyInt = (v, fallback = 0) => {
   return clean ? parseInt(clean, 10) : fallback;
 };
 
-const productFields = {
+const productBaseFields = {
   name: z.string().trim().min(2).max(200),
   price: z.preprocess((v) => parseMoneyInt(v, v), z.number().int().min(1000).max(10000000)),
   sku: z.string().regex(/^[A-Za-z0-9-]{2,40}$/),
   category: z.string().trim().min(1).max(100),
-  subcategory: z.string().trim().max(100).default(""),
+  subcategory: z.string().trim().max(100),
   image: imageSchema,
-  motif: z.string().trim().max(100).default(""),
+  motif: z.string().trim().max(100),
   description: z.string().trim().min(10).max(2000),
-  oldPrice: z.preprocess((v) => parseMoneyInt(v, 0), z.number().int().min(0).max(10000000).default(0)),
-  costPrice: z.preprocess((v) => parseMoneyInt(v, 0), z.number().int().min(0).max(10000000).default(0)),
-  weightGrams: z.number().int().min(1).max(500000).default(1000),
-  variationLabel: z.string().trim().min(1).max(80).default("Warna"),
+  oldPrice: z.preprocess((v) => parseMoneyInt(v, 0), z.number().int().min(0).max(10000000)),
+  costPrice: z.preprocess((v) => parseMoneyInt(v, 0), z.number().int().min(0).max(10000000)),
+  weightGrams: z.number().int().min(1).max(500000),
+  variationLabel: z.string().trim().min(1).max(80),
   isNew: z.boolean(),
 };
+const productFields = {
+  ...productBaseFields,
+  subcategory: productBaseFields.subcategory.default(""),
+  motif: productBaseFields.motif.default(""),
+  oldPrice: productBaseFields.oldPrice.default(0),
+  costPrice: productBaseFields.costPrice.default(0),
+  weightGrams: productBaseFields.weightGrams.default(1000),
+  variationLabel: productBaseFields.variationLabel.default("Warna"),
+};
 const variantSchema = z.object({
+  id: z.string().trim().max(80).optional(),
   size: z.string().trim().min(1).max(30),
   color: colorSchema,
   stock: z.number().int().min(0).max(100000),
-  imageUrl: imageSchema.optional(),
+  price: z.preprocess(
+    (v) => (v === "" || v == null ? null : parseMoneyInt(v, null)),
+    z.number().int().min(1000).max(10000000).nullable(),
+  ).optional(),
+  imageUrl: z.preprocess(
+    (v) => (v === "" ? null : v),
+    imageSchema.nullable(),
+  ).optional(),
+  images: z.array(imageSchema).max(10).optional(),
   lengthCm: z.number().int().min(0).max(500).optional(),
   widthCm: z.number().int().min(0).max(500).optional(),
   heightCm: z.number().int().min(0).max(500).optional(),
@@ -401,7 +492,9 @@ export function createApp(pool, options = {}) {
     const [settings, categories, methods, promotions] = await Promise.all([
       readStoreSettings(),
       pool.query("SELECT id,name,parent_id,active,sort_order FROM product_categories WHERE active=TRUE ORDER BY sort_order,name"),
-      pool.query("SELECT id,name,group_name AS `group`,detail FROM store_payment_methods WHERE enabled=TRUE ORDER BY sort_order,name"),
+      pool.query(
+        "SELECT id,name,group_name AS `group`,group_name,detail,payment_type,qris_merchant_name,qris_provider,qris_mode,enabled,sort_order FROM store_payment_methods WHERE enabled=TRUE ORDER BY sort_order,name",
+      ),
       readPublicPromotions(),
     ]);
     const publicSettings=Object.fromEntries(Object.entries(settings).filter(([key])=>!["waTemplates","rajaOriginId"].includes(key)));
@@ -410,9 +503,21 @@ export function createApp(pool, options = {}) {
       brand: settings.brand || "Kintsugi",
       registrationRequiresOtp: true,
       contact: settings.contactEmail || env.STORE_CONTACT_EMAIL || "",
-      contactPhone: env.STORE_CONTACT_PHONE || "",
+      contactPhone: settings.contactPhone || env.STORE_CONTACT_PHONE || "",
+      pickupInfo:
+        settings.pickupInfo ||
+        "Pembayaran dilakukan langsung saat pengambilan di toko. Silakan konfirmasi jadwal kedatangan melalui WhatsApp toko dengan menunjukkan nomor pesanan.",
       payments: gateway.configured,
-      paymentMethods: methods.rows,
+      paymentMethods: methods.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        group: row.group,
+        detail: row.detail || "",
+        paymentType: row.payment_type || PAYMENT_TYPES.GATEWAY,
+        qrisMerchantName: row.qris_merchant_name || "",
+        qrisProvider: row.qris_provider || "",
+        qrisMode: row.qris_mode || "dynamic",
+      })),
       categories: categories.rows.map(({ id, name, parent_id }) => ({ id, label: name, name, parentId: parent_id, parent_id })),
       promotions,
       shipping: {
@@ -429,14 +534,16 @@ export function createApp(pool, options = {}) {
     const [settings, categories, methods, promotions] = await Promise.all([
       readStoreSettings(),
       pool.query("SELECT id,name,parent_id,active,sort_order FROM product_categories ORDER BY sort_order,name"),
-      pool.query("SELECT id,name,group_name AS `group`,group_name,detail,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name"),
+      pool.query(
+        "SELECT id,name,group_name AS `group`,group_name,detail,payment_type,qris_payload,qris_merchant_name,qris_provider,qris_mode,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name",
+      ),
       pool.query("SELECT sp.*,p.name AS product_name,p.price AS product_price,p.image AS product_image FROM store_promotions sp JOIN products p ON p.id=sp.product_id ORDER BY sp.sort_order,sp.created_at DESC"),
     ]);
     res.json({
       settings,
       defaultWaTemplates: DEFAULT_WA_TEMPLATES,
       categories: categories.rows.map((c) => ({ ...c, parentId: c.parent_id })),
-      paymentMethods: methods.rows,
+      paymentMethods: methods.rows.map(mapPaymentMethodRow),
       promotions: promotions.rows,
     });
   });
@@ -454,7 +561,7 @@ export function createApp(pool, options = {}) {
       paymentMethods: z.array(z.object({ id: z.string().trim().min(2).max(60), enabled: z.boolean(), sortOrder: z.number().int().min(0).max(10000) })).max(40).optional(),
     }).strict().parse(req.body);
     if (f.settings) {
-      const allowed = new Set(["brand","announcementText","contactEmail","storeAddress","logo","heroImage","heroKicker","heroTitle","heroText","homeSections","departmentKicker","departmentTitle","departmentProducts","essentialsKicker","essentialsTitle","essentialsProducts","promoKicker","promoTitle","promoText","promoImage","promoProductId","promoPrice","promoOldPrice","localDeliveryFee","manualShippingFee","packageWeightGrams","rajaOriginId","waTemplates"]);
+      const allowed = new Set(["brand","announcementText","contactEmail","contactPhone","storeAddress","pickupInfo","logo","heroImage","heroKicker","heroTitle","heroText","homeSections","departmentKicker","departmentTitle","departmentProducts","essentialsKicker","essentialsTitle","essentialsProducts","promoKicker","promoTitle","promoText","promoImage","promoProductId","promoPrice","promoOldPrice","localDeliveryFee","manualShippingFee","packageWeightGrams","rajaOriginId","waTemplates"]);
       for (const [key, value] of Object.entries(f.settings)) {
         if (!allowed.has(key)) throw fail(400, "Pengaturan tidak dikenal.");
         if (key === "waTemplates") {
@@ -702,41 +809,178 @@ export function createApp(pool, options = {}) {
     }
     res.json({ok:true});
   });
-  app.get("/api/admin/payment-methods", auth, admin, async (req, res) => {
-    const rows = (await pool.query(
-      "SELECT id,name,group_name AS `group`,group_name,detail,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name"
-    )).rows;
-    res.json(rows);
-  });
-  app.post("/api/admin/payment-methods", auth, admin, async (req, res) => {
-    const f = z.object({
-      id: z.string().trim().min(2).max(60).optional(),
-      name: z.string().trim().min(2).max(100),
-      group: z.enum(["Bank", "E-Wallet", "COD"]),
-      detail: z.string().trim().max(250).default(""),
-      enabled: z.boolean().default(true),
-    }).strict().parse(req.body);
+  app.post("/api/admin/qris/inspect", auth, admin, async (req, res) => {
+    const f = z
+      .object({
+        payload: z.string().trim().min(1).max(2000),
+        sampleAmount: z.number().int().positive().max(1_000_000_000).optional().default(123000),
+      })
+      .parse(req.body);
 
-    const generatedId = f.id || (f.group === "COD" ? "COD" : `${f.group.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${randomBytes(4).toString("hex")}`);
-    const nextOrder = Number((await pool.query("SELECT COALESCE(MAX(sort_order)+1,0) AS n FROM store_payment_methods")).rows[0].n);
+    const validation = validateQrisPayload(f.payload);
+    if (!validation.valid || !validation.parsed) {
+      return res.json({
+        valid: false,
+        errors: validation.errors,
+        parsed: null,
+        compatibility: assessQrisCompatibility(null),
+      });
+    }
+
+    let sampleDynamic = null;
+    try {
+      sampleDynamic = convertStaticQrisToDynamic(validation.parsed.normalized, f.sampleAmount);
+    } catch {
+      sampleDynamic = null;
+    }
+
+    const [staticQrDataUrl, sampleQrDataUrl] = await Promise.all([
+      renderQrDataUrl(validation.parsed.normalized),
+      sampleDynamic ? renderQrDataUrl(sampleDynamic.payload) : Promise.resolve(""),
+    ]);
+
+    res.json({
+      valid: true,
+      errors: [],
+      parsed: {
+        merchantName: validation.parsed.merchantName,
+        merchantCity: validation.parsed.merchantCity,
+        postalCode: validation.parsed.postalCode,
+        provider: validation.parsed.provider,
+        acquirerDomains: validation.parsed.acquirerDomains,
+        nmid: validation.parsed.nmid,
+        merchantCriteria: validation.parsed.merchantCriteria,
+        pointOfInitiation: validation.parsed.pointOfInitiation,
+        currency: validation.parsed.currency,
+        amount: validation.parsed.amount,
+        crcValid: validation.parsed.crcValid,
+        actualCrc: validation.parsed.actualCrc,
+      },
+      compatibility: assessQrisCompatibility(validation.parsed),
+      sampleAmount: f.sampleAmount,
+      sampleDynamicPayload: sampleDynamic?.payload || "",
+      sampleQrDataUrl,
+      staticQrDataUrl,
+    });
+  });
+
+  app.get("/api/admin/payment-methods", auth, admin, async (req, res) => {
+    const rows = (
+      await pool.query(
+        "SELECT id,name,group_name AS `group`,group_name,detail,payment_type,qris_payload,qris_merchant_name,qris_provider,qris_mode,enabled,sort_order FROM store_payment_methods ORDER BY sort_order,name",
+      )
+    ).rows;
+    res.json(rows.map(mapPaymentMethodRow));
+  });
+
+  function resolveQrisFieldsForAdmin({ group, paymentType, qrisPayload, qrisMerchantName, qrisProvider, qrisMode }) {
+    const effectiveType =
+      paymentType ||
+      (group === "COD"
+        ? PAYMENT_TYPES.COD
+        : group === "QRIS" || String(qrisPayload || "").trim()
+          ? PAYMENT_TYPES.QRIS_MANUAL
+          : PAYMENT_TYPES.GATEWAY);
+
+    if (effectiveType !== PAYMENT_TYPES.QRIS_MANUAL) {
+      return {
+        paymentType: effectiveType,
+        qrisPayload: null,
+        qrisMerchantName: "",
+        qrisProvider: "",
+        qrisMode: "dynamic",
+      };
+    }
+
+    const cleanPayload = String(qrisPayload || "").trim();
+    const validation = validateQrisPayload(cleanPayload);
+    if (!validation.valid || !validation.parsed) {
+      throw fail(400, `Payload QRIS tidak valid: ${validation.errors.join(" ")}`);
+    }
+
+    return {
+      paymentType: PAYMENT_TYPES.QRIS_MANUAL,
+      qrisPayload: validation.parsed.normalized,
+      qrisMerchantName: String(qrisMerchantName || "").trim() || validation.parsed.merchantName || "",
+      qrisProvider: String(qrisProvider || "").trim() || validation.parsed.provider || "QRIS",
+      qrisMode: qrisMode === "static" ? "static" : "dynamic",
+    };
+  }
+
+  app.post("/api/admin/payment-methods", auth, admin, async (req, res) => {
+    const f = z
+      .object({
+        id: z.string().trim().min(2).max(60).optional(),
+        name: z.string().trim().min(2).max(100),
+        group: z.enum(["QRIS", "Bank", "E-Wallet", "COD"]),
+        detail: z.string().trim().max(500).default(""),
+        paymentType: z.enum(["gateway", "cod", "qris_manual"]).optional(),
+        qrisPayload: z.string().trim().max(2000).optional().default(""),
+        qrisMerchantName: z.string().trim().max(120).optional().default(""),
+        qrisProvider: z.string().trim().max(80).optional().default(""),
+        qrisMode: z.enum(["dynamic", "static"]).optional().default("dynamic"),
+        enabled: z.boolean().default(true),
+      })
+      .strict()
+      .parse(req.body);
+
+    const qrisFields = resolveQrisFieldsForAdmin(f);
+    const generatedId =
+      f.id ||
+      (qrisFields.paymentType === PAYMENT_TYPES.COD
+        ? "COD"
+        : qrisFields.paymentType === PAYMENT_TYPES.QRIS_MANUAL
+          ? `QRIS_${randomBytes(4).toString("hex").toUpperCase()}`
+          : `${f.group.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${randomBytes(4).toString("hex")}`);
+    const nextOrder = Number(
+      (await pool.query("SELECT COALESCE(MAX(sort_order)+1,0) AS n FROM store_payment_methods")).rows[0].n,
+    );
     await pool.query(
-      `INSERT INTO store_payment_methods(id,name,group_name,detail,enabled,sort_order)
-       VALUES(?,?,?,?,?,?)
-       ON DUPLICATE KEY UPDATE name=VALUES(name),group_name=VALUES(group_name),detail=VALUES(detail),enabled=VALUES(enabled)`,
-      [generatedId, f.name, f.group, f.detail, f.enabled, nextOrder]
+      `INSERT INTO store_payment_methods
+         (id,name,group_name,detail,payment_type,qris_payload,qris_merchant_name,qris_provider,qris_mode,enabled,sort_order)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE
+         name=VALUES(name),group_name=VALUES(group_name),detail=VALUES(detail),
+         payment_type=VALUES(payment_type),qris_payload=VALUES(qris_payload),
+         qris_merchant_name=VALUES(qris_merchant_name),qris_provider=VALUES(qris_provider),
+         qris_mode=VALUES(qris_mode),enabled=VALUES(enabled)`,
+      [
+        generatedId,
+        f.name,
+        f.group,
+        f.detail,
+        qrisFields.paymentType,
+        qrisFields.qrisPayload,
+        qrisFields.qrisMerchantName,
+        qrisFields.qrisProvider,
+        qrisFields.qrisMode,
+        f.enabled,
+        nextOrder,
+      ],
     );
     res.status(201).json({ ok: true, id: generatedId });
   });
-  app.patch("/api/admin/payment-methods/:id", auth, admin, async (req, res) => {
-    const f = z.object({
-      name: z.string().trim().min(2).max(100).optional(),
-      group: z.enum(["Bank", "E-Wallet", "COD"]).optional(),
-      detail: z.string().trim().max(250).optional(),
-      enabled: z.boolean().optional(),
-      sortOrder: z.number().int().min(0).max(10000).optional(),
-    }).strict().parse(req.body);
 
-    const row = (await pool.query("SELECT * FROM store_payment_methods WHERE id=?", [req.params.id])).rows[0];
+  app.patch("/api/admin/payment-methods/:id", auth, admin, async (req, res) => {
+    const f = z
+      .object({
+        name: z.string().trim().min(2).max(100).optional(),
+        group: z.enum(["QRIS", "Bank", "E-Wallet", "COD"]).optional(),
+        detail: z.string().trim().max(500).optional(),
+        paymentType: z.enum(["gateway", "cod", "qris_manual"]).optional(),
+        qrisPayload: z.string().trim().max(2000).optional(),
+        qrisMerchantName: z.string().trim().max(120).optional(),
+        qrisProvider: z.string().trim().max(80).optional(),
+        qrisMode: z.enum(["dynamic", "static"]).optional(),
+        enabled: z.boolean().optional(),
+        sortOrder: z.number().int().min(0).max(10000).optional(),
+      })
+      .strict()
+      .parse(req.body);
+
+    const row = (
+      await pool.query("SELECT * FROM store_payment_methods WHERE id=?", [req.params.id])
+    ).rows[0];
     if (!row) throw fail(404, "Metode pembayaran tidak ditemukan.");
 
     const updatedName = f.name !== undefined ? f.name : row.name;
@@ -744,10 +988,39 @@ export function createApp(pool, options = {}) {
     const updatedDetail = f.detail !== undefined ? f.detail : row.detail;
     const updatedEnabled = f.enabled !== undefined ? f.enabled : row.enabled;
     const updatedSort = f.sortOrder !== undefined ? f.sortOrder : row.sort_order;
+    const mergedType =
+      f.paymentType !== undefined
+        ? f.paymentType
+        : f.group !== undefined && f.group !== row.group_name
+          ? undefined
+          : row.payment_type;
+    const qrisFields = resolveQrisFieldsForAdmin({
+      group: updatedGroup,
+      paymentType: mergedType,
+      qrisPayload: f.qrisPayload !== undefined ? f.qrisPayload : row.qris_payload || "",
+      qrisMerchantName:
+        f.qrisMerchantName !== undefined ? f.qrisMerchantName : row.qris_merchant_name || "",
+      qrisProvider: f.qrisProvider !== undefined ? f.qrisProvider : row.qris_provider || "",
+      qrisMode: f.qrisMode !== undefined ? f.qrisMode : row.qris_mode || "dynamic",
+    });
 
     await pool.query(
-      "UPDATE store_payment_methods SET name=?,group_name=?,detail=?,enabled=?,sort_order=? WHERE id=?",
-      [updatedName, updatedGroup, updatedDetail, updatedEnabled, updatedSort, req.params.id]
+      `UPDATE store_payment_methods
+       SET name=?,group_name=?,detail=?,payment_type=?,qris_payload=?,qris_merchant_name=?,qris_provider=?,qris_mode=?,enabled=?,sort_order=?
+       WHERE id=?`,
+      [
+        updatedName,
+        updatedGroup,
+        updatedDetail,
+        qrisFields.paymentType,
+        qrisFields.qrisPayload,
+        qrisFields.qrisMerchantName,
+        qrisFields.qrisProvider,
+        qrisFields.qrisMode,
+        updatedEnabled,
+        updatedSort,
+        req.params.id,
+      ],
     );
     res.json({ ok: true });
   });
@@ -759,16 +1032,8 @@ export function createApp(pool, options = {}) {
   });
   app.post("/api/admin/uploads", auth, admin, async (req,res) => {
     const f = z.object({ data: z.string().max(7_000_000) }).parse(req.body);
-    const match = f.data.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
-    if (!match) throw fail(400,"Gunakan gambar PNG, JPG, atau WebP.");
-    const bytes = Buffer.from(match[2],"base64");
-    if (!bytes.length || bytes.length > 5_000_000) throw fail(400,"Ukuran gambar maksimal 5 MB.");
-    const extension = {"image/png":"png","image/jpeg":"jpg","image/webp":"webp"}[match[1]];
-    const directory = fileURLToPath(new URL("../public/uploads/",import.meta.url));
-    await mkdir(directory,{recursive:true});
-    const name = `${randomUUID()}.${extension}`;
-    await writeFile(path.join(directory,name),bytes,{flag:"wx"});
-    res.status(201).json({url:`/uploads/${name}`});
+    const url = await saveBase64ImageUpload(f.data);
+    res.status(201).json({ url });
   });
   const otp = createOtp({
     pool,
@@ -948,6 +1213,18 @@ export function createApp(pool, options = {}) {
   });
 
   function presentProduct(p, variants) {
+    const normalizedVariants = variants.map((v) => {
+      const images = collectVariantImages(v);
+      const customPrice = v.price != null && Number(v.price) >= 1000 ? Number(v.price) : null;
+      return {
+        ...v,
+        id: v.id || `${p.id}::${v.size}::${v.color}`,
+        price: customPrice,
+        image_url: images[0] || null,
+        images,
+      };
+    });
+    const allVariantImages = normalizedVariants.flatMap((v) => v.images);
     return {
       ...p,
       active: Boolean(p.active),
@@ -957,18 +1234,11 @@ export function createApp(pool, options = {}) {
       motif: p.motif || "",
       isNew: Boolean(p.is_new),
       rating: Number(p.rating),
-      sizes: [...new Set(variants.map((v) => v.size))].sort((a, b) => {
-        const sizes = ["XS", "S", "M", "L", "XL", "XXL"];
-        const x = sizes.indexOf(a),
-          y = sizes.indexOf(b);
-        return x >= 0 && y >= 0
-          ? x - y
-          : a.localeCompare(b, undefined, { numeric: true });
-      }),
-      colors: [...new Set(variants.map((v) => v.color))],
-      stock: variants.reduce((s, v) => s + v.stock, 0),
-      variants,
-      images: [p.image],
+      sizes: sortCategorySizes(normalizedVariants.map((v) => v.size)),
+      colors: [...new Set(normalizedVariants.map((v) => v.color))],
+      stock: normalizedVariants.reduce((s, v) => s + v.stock, 0),
+      variants: normalizedVariants,
+      images: [...new Set([p.image, ...allVariantImages].filter(Boolean))],
     };
   }
   async function hydrate(rows, includePromotions = false) {
@@ -990,6 +1260,13 @@ export function createApp(pool, options = {}) {
           ? Number(promotion.promo_price)
           : promotionPrice(p.price, promotion.discount_percent);
         product.price = salePrice;
+        product.variants = product.variants.map((v) => {
+          if (v.price == null) return v;
+          const variantSale = promotion.discount_percent
+            ? promotionPrice(v.price, promotion.discount_percent)
+            : v.price;
+          return { ...v, basePrice: v.price, oldPrice: v.price, price: variantSale };
+        });
         product.promotion = { id: promotion.id, title: promotion.title, discountPercent: Number(promotion.discount_percent), promoPrice: salePrice };
       }
       return product;
@@ -1056,12 +1333,15 @@ export function createApp(pool, options = {}) {
       args.push(q.ids.split(",").filter(Boolean).slice(0, 100));
       if (!args.at(-1).length) args[args.length - 1] = ["__empty__"];
     }
+    const facetClause = where.join(" AND ");
+    const facetArgs = [...args];
     if (q.size || q.color) {
       let variant =
-        "EXISTS(SELECT 1 FROM product_variants v WHERE v.product_id=p.id";
+        "EXISTS(SELECT 1 FROM product_variants v WHERE v.product_id=p.id AND v.stock>0";
       if (q.size) {
-        variant += " AND v.size=?";
-        args.push(q.size);
+        const candidates = sizeQueryCandidates(q.size);
+        variant += " AND v.size IN (?)";
+        args.push(candidates);
       }
       if (q.color) {
         variant += " AND v.color=?";
@@ -1087,7 +1367,10 @@ export function createApp(pool, options = {}) {
         [...args, q.pageSize, (q.page - 1) * q.pageSize],
       ),
       pool.query(
-        "SELECT DISTINCT v.size,v.color FROM product_variants v JOIN products p ON p.id=v.product_id WHERE p.active=TRUE ORDER BY v.size,v.color",
+        "SELECT DISTINCT v.size,v.color FROM product_variants v JOIN products p ON p.id=v.product_id WHERE " +
+          facetClause +
+          " AND v.stock>0 ORDER BY v.size,v.color",
+        facetArgs,
       ),
     ]);
     const total = Number(countResult.rows[0]?.total || 0);
@@ -1100,8 +1383,8 @@ export function createApp(pool, options = {}) {
       pageSize: q.pageSize,
       pages: Math.ceil(total / q.pageSize),
       facets: {
-        sizes: [...new Set(facets.map((v) => v.size))],
-        colors: [...new Set(facets.map((v) => v.color))],
+        sizes: sortCategorySizes(facets.map((v) => v.size)),
+        colors: [...new Set(facets.map((v) => v.color).filter(Boolean))],
       },
     });
   });
@@ -1270,12 +1553,14 @@ export function createApp(pool, options = {}) {
         [rows.map((o) => o.id)],
       )
     ).rows;
-    return rows.map((o) => ({
-      ...orderRow(o),
-      items: items
-        .filter((i) => i.order_id === o.id)
-        .map(({ cost_price, ...i }) => ({ ...i, id: i.product_id })),
-    }));
+    return enrichQrisOrders(
+      rows.map((o) => ({
+        ...orderRow(o),
+        items: items
+          .filter((i) => i.order_id === o.id)
+          .map(({ cost_price, ...i }) => ({ ...i, id: i.product_id })),
+      })),
+    );
   }
   async function ownOrder(req) {
     const rows = await readOrders(
@@ -1302,25 +1587,40 @@ export function createApp(pool, options = {}) {
       const requested=aggregateItems(f.items);
       const promotionMap=await readProductPromotions([...new Set(requested.map((item)=>item.id))]);
       for (const i of requested) {
+        const candidates = sizeQueryCandidates(i.size);
         const p = (
           await pool.query(
-            "SELECT p.*,v.stock FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE",
-            [i.id, i.size, i.color],
+            "SELECT p.*,v.id AS variantId,v.price AS variantPrice,v.image_url AS variantImage,v.images_json AS variantImagesJson,v.stock,v.size AS resolvedSize,v.color AS resolvedColor FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size IN (?) AND v.color=? AND p.active=TRUE",
+            [i.id, candidates, i.color],
           )
         ).rows[0];
         if (!p) throw fail(400, "Varian produk tidak tersedia.");
         if (p.stock < i.quantity)
           throw fail(409, "Stok " + p.name + " tidak mencukupi.");
+        const variantImages = collectVariantImages({
+          image_url: p.variantImage,
+          images_json: p.variantImagesJson,
+        });
+        const resolvedSize = p.resolvedSize || i.size;
+        const resolvedVariantId = p.variantId || `${p.id}::${resolvedSize}::${p.resolvedColor || i.color}`;
+        const hasCustomPrice = p.variantPrice != null && Number(p.variantPrice) >= 1000;
+        const baseUnitPrice = hasCustomPrice ? Number(p.variantPrice) : Number(p.price);
+        const promo = promotionMap.get(p.id);
+        const unitPrice = promo
+          ? hasCustomPrice
+            ? (promo.discount_percent ? promotionPrice(baseUnitPrice, promo.discount_percent) : baseUnitPrice)
+            : (promo.promo_price && Number(promo.promo_price) > 0
+                ? Number(promo.promo_price)
+                : promotionPrice(baseUnitPrice, promo.discount_percent))
+          : baseUnitPrice;
         canonical.push({
           ...i,
+          variantId: resolvedVariantId,
+          size: resolvedSize,
           name: p.name,
-          image: p.image,
-          price: promotionMap.has(p.id)
-            ? (promotionMap.get(p.id).promo_price && Number(promotionMap.get(p.id).promo_price) > 0
-                ? Number(promotionMap.get(p.id).promo_price)
-                : promotionPrice(p.price, promotionMap.get(p.id).discount_percent))
-            : p.price,
-          oldPrice: promotionMap.has(p.id) ? p.price : p.old_price,
+          image: variantImages[0] || p.image,
+          price: unitPrice,
+          oldPrice: promo ? baseUnitPrice : (hasCustomPrice ? 0 : p.old_price),
           stock: p.stock,
         });
       }
@@ -1338,12 +1638,56 @@ export function createApp(pool, options = {}) {
   app.post("/api/orders", auth, customer, async (req, res) => {
     const f = orderSchema.parse(req.body),
       items = aggregateItems(f.items);
-    const methodRow = (await pool.query("SELECT id, name, group_name AS `group`, enabled FROM store_payment_methods WHERE id=? AND enabled=TRUE", [f.payment])).rows[0];
-    if (!methodRow)
-      throw fail(400, "Metode pembayaran tidak tersedia atau belum diaktifkan admin.");
-    const isCod = methodRow.group === "COD" || methodRow.id === "COD";
-    if (!isCod && !gateway.configured)
-      throw fail(503, "Pembayaran online belum tersedia. Hubungi pengelola.");
+    const rawPaymentProvided = req.body && Object.prototype.hasOwnProperty.call(req.body, "payment") && req.body.payment !== undefined && req.body.payment !== "";
+    const isStorePickup = f.shipping === "pickup";
+
+    let resolvedPaymentId;
+    let snapshotPaymentType;
+    let snapshotMethodName;
+    let initialStatus;
+
+    if (isStorePickup) {
+      if (rawPaymentProvided && f.payment !== "store_pickup") {
+        throw fail(
+          400,
+          "Pesanan Ambil Langsung di Toko menggunakan pembayaran di toko (store_pickup), bukan COD, QRIS, atau pembayaran online.",
+        );
+      }
+      resolvedPaymentId = "store_pickup";
+      snapshotPaymentType = PAYMENT_TYPES.STORE_PICKUP;
+      snapshotMethodName = "Bayar di Toko (Store Pickup)";
+      initialStatus = "Menunggu Pengambilan & Pembayaran";
+    } else {
+      if (!f.address.street || !f.address.city) {
+        throw fail(400, "Alamat lengkap dan kota tujuan pengiriman wajib diisi.");
+      }
+      if (f.payment === "store_pickup") {
+        throw fail(
+          400,
+          "Metode Bayar di Toko (store_pickup) hanya tersedia untuk layanan Ambil Langsung di Toko.",
+        );
+      }
+      const methodRow = (
+        await pool.query(
+          "SELECT id, name, group_name AS `group`, group_name, payment_type, qris_payload, enabled FROM store_payment_methods WHERE id=? AND enabled=TRUE",
+          [f.payment],
+        )
+      ).rows[0];
+      if (!methodRow)
+        throw fail(400, "Metode pembayaran tidak tersedia atau belum diaktifkan admin.");
+      const isCod = isCodMethod(methodRow);
+      const isQrisManual = isManualQrisMethod(methodRow);
+      if (!isCod && !isQrisManual && !gateway.configured)
+        throw fail(503, "Pembayaran online belum tersedia. Hubungi pengelola.");
+      resolvedPaymentId = f.payment;
+      snapshotPaymentType = isCod
+        ? PAYMENT_TYPES.COD
+        : isQrisManual
+          ? PAYMENT_TYPES.QRIS_MANUAL
+          : PAYMENT_TYPES.GATEWAY;
+      snapshotMethodName = methodRow.name;
+      initialStatus = "Menunggu pembayaran";
+    }
     const c = await pool.connect();
     let id;
     try {
@@ -1361,30 +1705,42 @@ export function createApp(pool, options = {}) {
       else {
         const canonical = [];
         for (const i of items) {
+          const candidates = sizeQueryCandidates(i.size);
           const p = (
             await c.query(
-              "SELECT p.id,p.name,p.image,p.price,p.cost_price,p.variation_label,v.stock,(SELECT sp.discount_percent FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS discount_percent,(SELECT sp.promo_price FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS promo_price FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size=? AND v.color=? AND p.active=TRUE FOR UPDATE",
-              [i.id, i.size, i.color],
+              "SELECT p.id,p.name,p.image,p.price,p.cost_price,p.variation_label,v.id AS variantId,v.price AS variantPrice,v.image_url AS variantImage,v.images_json AS variantImagesJson,v.stock,v.size AS resolvedSize,v.color AS resolvedColor,(SELECT sp.discount_percent FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS discount_percent,(SELECT sp.promo_price FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS promo_price FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size IN (?) AND v.color=? AND p.active=TRUE FOR UPDATE",
+              [i.id, candidates, i.color],
             )
           ).rows[0];
           if (!p) throw fail(400, "Varian produk tidak ditemukan.");
           if (p.stock < i.quantity)
             throw fail(409, "Stok " + p.name + " tidak mencukupi.");
-          const itemPrice = p.promo_price && Number(p.promo_price) > 0
-            ? Number(p.promo_price)
-            : (p.discount_percent ? promotionPrice(p.price, p.discount_percent) : p.price);
+          const hasCustomPrice = p.variantPrice != null && Number(p.variantPrice) >= 1000;
+          const baseUnitPrice = hasCustomPrice ? Number(p.variantPrice) : Number(p.price);
+          const itemPrice = hasCustomPrice
+            ? (p.discount_percent ? promotionPrice(baseUnitPrice, p.discount_percent) : baseUnitPrice)
+            : (p.promo_price && Number(p.promo_price) > 0
+                ? Number(p.promo_price)
+                : (p.discount_percent ? promotionPrice(baseUnitPrice, p.discount_percent) : baseUnitPrice));
+          const resolvedSize = p.resolvedSize || i.size;
+          const variantImages = collectVariantImages({
+            image_url: p.variantImage,
+            images_json: p.variantImagesJson,
+          });
           canonical.push({
             ...i,
+            variantId: p.variantId || `${i.id}::${resolvedSize}::${p.resolvedColor || i.color}`,
+            size: resolvedSize,
             name: p.name,
-            image: p.image,
+            image: variantImages[0] || p.image,
             price: itemPrice,
-            oldPrice: (p.promo_price || p.discount_percent) ? p.price : 0,
+            oldPrice: (p.promo_price || p.discount_percent) ? baseUnitPrice : 0,
             costPrice: p.cost_price,
             variationLabel: p.variation_label,
           });
           await c.query(
             "UPDATE product_variants SET stock=stock-? WHERE product_id=? AND size=? AND color=?",
-            [i.quantity, i.id, i.size, i.color],
+            [i.quantity, i.id, resolvedSize, i.color],
           );
         }
         const shipment = await deliveryFor(f.shipping, f.shippingOption, canonical);
@@ -1393,30 +1749,34 @@ export function createApp(pool, options = {}) {
         const total = calculateTotals(canonical, f.coupon, f.shipping, shipment.delivery, manualFee);
         id = "LJ-" + randomUUID();
         await c.query(
-          "INSERT INTO orders(id,user_id,address,shipping,shipping_name,payment,coupon,subtotal,discount,delivery,total,checkout_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO orders(id,user_id,address,shipping,shipping_name,payment,payment_type,payment_method_name,coupon,subtotal,discount,delivery,total,status,checkout_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
           [
             id,
             req.user.id,
             JSON.stringify(f.address),
             f.shipping,
             shipment.name,
-            f.payment,
+            resolvedPaymentId,
+            snapshotPaymentType,
+            snapshotMethodName,
             f.coupon,
             total.subtotal,
             total.discount,
             total.delivery,
             total.total,
+            initialStatus,
             f.checkoutKey,
           ],
         );
         for (const i of canonical) {
           const dimensions = parseDimensions(i.size);
           await c.query(
-            "INSERT INTO order_items(id,order_id,product_id,name,image,size,length_cm,width_cm,height_cm,variation_label,color,quantity,price,cost_price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO order_items(id,order_id,product_id,variant_id,name,image,size,length_cm,width_cm,height_cm,variation_label,color,quantity,price,cost_price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
               randomUUID(),
               id,
               i.id,
+              i.variantId || null,
               i.name,
               i.image,
               i.size,
@@ -1429,17 +1789,24 @@ export function createApp(pool, options = {}) {
             ],
           );
         }
-        // Simpan alamat untuk belanja berikutnya tanpa perlu input ulang
-        await c.query(
-          "INSERT INTO customer_profiles(user_id,phone,street,city,postal) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone),street=VALUES(street),city=VALUES(city),postal=VALUES(postal)",
-          [
-            req.user.id,
-            f.address.phone,
-            f.address.street,
-            f.address.city,
-            f.address.postal,
-          ],
-        );
+        // Simpan alamat pengantaran untuk belanja berikutnya; untuk Ambil di Toko hanya simpan nomor HP
+        if (isStorePickup) {
+          await c.query(
+            "INSERT INTO customer_profiles(user_id,phone,street,city,postal) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone)",
+            [req.user.id, f.address.phone, "", "", ""],
+          );
+        } else {
+          await c.query(
+            "INSERT INTO customer_profiles(user_id,phone,street,city,postal) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE phone=VALUES(phone),street=VALUES(street),city=VALUES(city),postal=VALUES(postal)",
+            [
+              req.user.id,
+              f.address.phone,
+              f.address.street,
+              f.address.city,
+              f.address.postal,
+            ],
+          );
+        }
         await c.query(
           "UPDATE users SET phone=COALESCE(NULLIF(phone, ''), ?), name=COALESCE(NULLIF(name, ''), ?) WHERE id=?",
           [f.address.phone, f.address.name, req.user.id],
@@ -1485,6 +1852,106 @@ export function createApp(pool, options = {}) {
     await payments.cancel(order);
     res.json({ ok: true });
   });
+  app.post("/api/orders/:id/confirm-payment", auth, customer, async (req, res) => {
+    const f = z
+      .object({
+        proofData: z.string().max(7_000_000),
+        note: z.string().trim().max(500).optional().default(""),
+      })
+      .parse(req.body);
+    const order = await ownOrder(req);
+    if (order.payment_type !== PAYMENT_TYPES.QRIS_MANUAL) {
+      throw fail(400, "Metode pembayaran pesanan ini tidak mendukung konfirmasi bukti manual.");
+    }
+    if (
+      order.status !== "Menunggu pembayaran" ||
+      !["PENDING", "WAITING_VERIFICATION"].includes(order.payment_status)
+    ) {
+      throw fail(409, "Status pesanan tidak mengizinkan pengunggahan bukti pembayaran.");
+    }
+
+    const proofUrl = await saveBase64ImageUpload(f.proofData, "proofs");
+    const c = await pool.connect();
+    try {
+      await c.query("START TRANSACTION");
+      const o = (
+        await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
+      ).rows[0];
+      if (!o) throw fail(404, "Pesanan tidak ditemukan.");
+      if (
+        o.status !== "Menunggu pembayaran" ||
+        !["PENDING", "WAITING_VERIFICATION"].includes(o.payment_status)
+      ) {
+        throw fail(409, "Pesanan sudah diproses atau dibatalkan.");
+      }
+
+      await c.query(
+        `UPDATE orders
+         SET payment_status='WAITING_VERIFICATION',
+             payment_proof_url=?,
+             payment_proof_note=?,
+             payment_submitted_at=UTC_TIMESTAMP(3),
+             payment_rejection_reason=''
+         WHERE id=?`,
+        [proofUrl, f.note, o.id],
+      );
+
+      const adminPhoneRaw = env.ADMIN_PHONE || env.STORE_CONTACT_PHONE || "";
+      let adminPhone = "";
+      if (adminPhoneRaw) {
+        try {
+          adminPhone = normalizePhone(adminPhoneRaw);
+        } catch {
+          adminPhone = "";
+        }
+      }
+      if (adminPhone) {
+        const a = orderRow(o).address;
+        const fallbackOrigin = req.get("host") ? `${req.protocol}://${req.get("host")}` : "http://localhost:5173";
+        const appUrl = (env.APP_URL || fallbackOrigin).replace(/\/+$/, "");
+        const verifyLink = `${appUrl}/#admin/orders/${o.id}`;
+        const formattedTotal = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+        const methodTitle = o.payment_method_name || o.payment || "QRIS Manual";
+        const message = [
+          "*Konfirmasi Pembayaran QRIS Baru*",
+          "",
+          `Nama Pelanggan: ${a.name}`,
+          `No. HP: ${a.phone}`,
+          `Nomor Pesanan: *${o.id}*`,
+          `Metode QRIS: ${methodTitle}`,
+          `Nominal Tagihan: *${formattedTotal}*`,
+          f.note ? `Catatan: ${f.note}` : null,
+          "",
+          `Link Verifikasi Admin: ${verifyLink}`,
+          "",
+          "Mohon periksa mutasi masuk akun DANA sebelum menyetujui transaksi menjadi Lunas.",
+        ]
+          .filter((line) => line !== null)
+          .join("\n");
+        await queueWhatsApp(
+          c,
+          `qris_confirm/${o.id}/${Date.now()}`,
+          adminPhone,
+          message,
+        );
+      }
+
+      await c.query("COMMIT");
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    } finally {
+      c.release();
+    }
+
+    await flushWhatsApp(
+      pool,
+      env,
+      options.waTransport || options.mailTransport,
+    ).catch(() => {});
+    res.json((await readOrders(req.user.id, order.id))[0]);
+  });
+
   app.get("/api/admin/orders", auth, operations, async (req, res) =>
     res.json(await readOrders()),
   );
@@ -1493,6 +1960,214 @@ export function createApp(pool, options = {}) {
     await payments.sync(order);
     res.json((await readOrders(undefined, order.id))[0]);
   });
+  app.post("/api/admin/orders/:id/verify-payment", auth, operations, async (req, res) => {
+    const f = z
+      .object({
+        action: z.enum(["approve", "reject"]),
+        reason: z.string().trim().max(300).optional().default(""),
+      })
+      .parse(req.body);
+
+    const order = await ownOrder(req);
+    const c = await pool.connect();
+    try {
+      await c.query("START TRANSACTION");
+      const o = (
+        await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
+      ).rows[0];
+      if (!o) throw fail(404, "Pesanan tidak ditemukan.");
+      if (o.payment_type !== PAYMENT_TYPES.QRIS_MANUAL) {
+        throw fail(409, "Pesanan ini tidak menggunakan pembayaran QRIS manual.");
+      }
+      if (o.status !== "Menunggu pembayaran" || o.stock_released) {
+        throw fail(409, "Pesanan tidak lagi menunggu verifikasi pembayaran.");
+      }
+      if (o.payment_status !== "WAITING_VERIFICATION" || !o.payment_proof_url) {
+        throw fail(409, "Bukti pembayaran pelanggan belum diunggah atau belum siap diverifikasi.");
+      }
+
+      const a = orderRow(o).address;
+      const totalFormatted = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+
+      if (f.action === "approve") {
+        await c.query(
+          "INSERT IGNORE INTO payment_events(event_key,order_id,provider_status) VALUES(?,?,?)",
+          [hash(`manual-qris:${o.id}:PAID:${Date.now()}`), o.id, "PAID"],
+        );
+        await c.query(
+          `UPDATE orders
+           SET status='Diproses',
+               payment_status='PAID',
+               paid_at=UTC_TIMESTAMP(3),
+               payment_verified_at=UTC_TIMESTAMP(3),
+               payment_verified_by=?,
+               payment_rejection_reason=''
+           WHERE id=?`,
+          [req.user.id, o.id],
+        );
+
+        const waValues = {
+          nama: a.name,
+          nomor_pesanan: o.id,
+          total: totalFormatted,
+          toko: "Kintsugi",
+          nomor_resi: o.tracking_number || "",
+          kurir: o.shipping_name || "",
+        };
+        await queueWhatsApp(
+          c,
+          "purchased/" + o.id,
+          a.phone,
+          await payments.notification(c, "purchased", waValues),
+        );
+        await queueWhatsApp(
+          c,
+          "processing/" + o.id,
+          a.phone,
+          await payments.notification(c, "processing", waValues),
+        );
+      } else {
+        const rejectionReason =
+          f.reason ||
+          "Bukti pembayaran belum sesuai dengan mutasi DANA yang diterima. Silakan unggah ulang bukti pembayaran yang valid.";
+        await c.query(
+          `UPDATE orders
+           SET payment_status='PENDING',
+               payment_rejection_reason=?,
+               payment_verified_at=NULL,
+               payment_verified_by=NULL
+           WHERE id=?`,
+          [rejectionReason, o.id],
+        );
+        await queueWhatsApp(
+          c,
+          `qris_rejected/${o.id}/${Date.now()}`,
+          a.phone,
+          `Halo ${a.name}, bukti pembayaran QRIS untuk pesanan *${o.id}* (${totalFormatted}) belum dapat disetujui dengan alasan: ${rejectionReason}. Silakan unggah ulang bukti bayar Anda di halaman Pesanan.`,
+        );
+      }
+
+      await c.query("COMMIT");
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    } finally {
+      c.release();
+    }
+
+    await flushWhatsApp(
+      pool,
+      env,
+      options.waTransport || options.mailTransport,
+    ).catch(() => {});
+    res.json((await readOrders(undefined, order.id))[0]);
+  });
+  app.post("/api/admin/orders/:id/confirm-pickup", auth, operations, async (req, res) => {
+    const f = z
+      .object({
+        paymentConfirmed: z.literal(true),
+        pickupConfirmed: z.literal(true),
+        paymentNote: z.string().trim().max(300).optional().default(""),
+      })
+      .parse(req.body);
+
+    const order = await ownOrder(req);
+    const c = await pool.connect();
+    try {
+      await c.query("START TRANSACTION");
+      const o = (
+        await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
+      ).rows[0];
+      if (!o) throw fail(404, "Pesanan tidak ditemukan.");
+
+      const isStorePickup =
+        o.payment_type === PAYMENT_TYPES.STORE_PICKUP ||
+        o.payment === "store_pickup";
+      if (!isStorePickup) {
+        throw fail(409, "Pesanan ini bukan metode Ambil Langsung di Toko (store_pickup).");
+      }
+      if (o.stock_released || o.status === "Dibatalkan") {
+        throw fail(409, "Pesanan ini sudah dibatalkan.");
+      }
+      if (o.status === "Selesai" && o.payment_status === "PAID") {
+        throw fail(409, "Pengambilan dan pembayaran pesanan ini sudah dikonfirmasi sebelumnya.");
+      }
+      if (!["Menunggu Pengambilan & Pembayaran", "Diproses"].includes(o.status)) {
+        throw fail(409, "Status pesanan tidak mengizinkan konfirmasi pengambilan.");
+      }
+
+      const cleanNote = f.paymentNote || "Dibayar & diambil langsung di toko";
+      await c.query(
+        "INSERT IGNORE INTO payment_events(event_key,order_id,provider_status) VALUES(?,?,?)",
+        [hash(`store-pickup:${o.id}:PAID:${Date.now()}`), o.id, "PAID"],
+      );
+      await c.query(
+        `UPDATE orders
+         SET status='Selesai',
+             payment_status='PAID',
+             paid_at=UTC_TIMESTAMP(3),
+             payment_verified_at=UTC_TIMESTAMP(3),
+             payment_verified_by=?,
+             payment_proof_note=?,
+             tracking_number='Diambil di Toko'
+         WHERE id=?`,
+        [req.user.id, cleanNote, o.id],
+      );
+
+      const a = orderRow(o).address;
+      const totalFormatted = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+      const brandRow = (
+        await c.query("SELECT setting_value FROM store_settings WHERE setting_key='brand'")
+      ).rows[0];
+      let brandName = "Kintsugi";
+      if (brandRow?.setting_value) {
+        try {
+          brandName =
+            typeof brandRow.setting_value === "string"
+              ? JSON.parse(brandRow.setting_value)
+              : brandRow.setting_value;
+        } catch {
+          brandName = String(brandRow.setting_value);
+        }
+      }
+
+      const waValues = {
+        nama: a.name,
+        nomor_pesanan: o.id,
+        total: totalFormatted,
+        toko: brandName || "Kintsugi",
+        nomor_resi: "Diambil di Toko",
+        kurir: "Ambil di Toko",
+      };
+      await queueWhatsApp(
+        c,
+        "purchased/" + o.id,
+        a.phone,
+        await payments.notification(c, "purchased", waValues),
+      );
+      await queueWhatsApp(
+        c,
+        "pickup_completed/" + o.id,
+        a.phone,
+        `Halo ${a.name}, pesanan Ambil di Toko *${o.id}* (${totalFormatted}) telah diambil dan pembayarannya dikonfirmasi *Lunas*. Terima kasih telah berbelanja di ${brandName || "Kintsugi"}!`,
+      );
+
+      await c.query("COMMIT");
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    } finally {
+      c.release();
+    }
+
+    await flushWhatsApp(
+      pool,
+      env,
+      options.waTransport || options.mailTransport,
+    ).catch(() => {});
+    res.json((await readOrders(undefined, order.id))[0]);
+  });
+
   app.patch("/api/admin/orders/:id", auth, operations, async (req, res) => {
     const f = z
       .object({ status: z.enum(Object.keys(transitions)), trackingNumber: z.string().trim().max(100).optional().default("") })
@@ -1508,16 +2183,41 @@ export function createApp(pool, options = {}) {
       const o = (
         await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
       ).rows[0];
-      const methodRow = (await c.query("SELECT group_name FROM store_payment_methods WHERE id=?", [o.payment])).rows[0];
-      const isCod = o.payment === "COD" || methodRow?.group_name === "COD";
+      const methodRow = (await c.query("SELECT group_name, payment_type FROM store_payment_methods WHERE id=?", [o.payment])).rows[0];
+      const isStorePickup =
+        o.payment_type === PAYMENT_TYPES.STORE_PICKUP ||
+        o.payment === "store_pickup";
+      const isCod =
+        o.payment_type === PAYMENT_TYPES.COD ||
+        o.payment === "COD" ||
+        methodRow?.group_name === "COD";
+      const isQrisManual =
+        o.payment_type === PAYMENT_TYPES.QRIS_MANUAL ||
+        methodRow?.payment_type === PAYMENT_TYPES.QRIS_MANUAL;
+
+      if (isStorePickup && f.status === "Dikirim") {
+        throw fail(
+          409,
+          "Pesanan Ambil di Toko tidak dikirim kurir. Gunakan Konfirmasi Pengambilan & Pembayaran di Toko.",
+        );
+      }
+      if (isStorePickup && f.status === "Selesai" && o.payment_status !== "PAID") {
+        throw fail(
+          409,
+          "Status Lunas/Selesai hanya boleh ditetapkan setelah pembayaran dan pengambilan barang di toko dikonfirmasi.",
+        );
+      }
+
       if (
-        (!isCod && o.payment_status !== "PAID") ||
+        (!isCod && !isStorePickup && o.payment_status !== "PAID") ||
         !transitions[o.status]?.includes(f.status)
       )
         throw fail(
           409,
-          !isCod
-            ? "Perubahan status tidak diizinkan. Pembayaran harus dikonfirmasi Xendit."
+          !isCod && !isStorePickup
+            ? isQrisManual
+              ? "Perubahan status tidak diizinkan. Pembayaran QRIS harus diverifikasi Admin terlebih dahulu."
+              : "Perubahan status tidak diizinkan. Pembayaran harus dikonfirmasi Xendit."
             : "Transisi status pesanan tidak diizinkan.",
         );
       const trackingNumber = f.status === "Dikirim" ? f.trackingNumber : o.tracking_number || "";
@@ -1620,9 +2320,22 @@ export function createApp(pool, options = {}) {
       if (new Set(keys).size !== keys.length) throw fail(400,"Ada kombinasi ukuran dan variasi yang duplikat.");
       for (const v of variants) {
         const d = parseDimensions(v.size);
+        const gallery = collectVariantImages(v);
         await c.query(
-          "INSERT INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,image_url,stock) VALUES(?,?,?,?,?,?,?,?)",
-          [id, v.size, d?.length ?? v.lengthCm ?? 0, d?.width ?? v.widthCm ?? 0, d?.height ?? v.heightCm ?? 0, v.color, v.imageUrl || null, v.stock],
+          "INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,price,image_url,images_json,stock) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+          [
+            v.id || randomUUID(),
+            id,
+            v.size,
+            d?.length ?? v.lengthCm ?? 0,
+            d?.width ?? v.widthCm ?? 0,
+            d?.height ?? v.heightCm ?? 0,
+            v.color,
+            v.price ?? null,
+            gallery[0] || null,
+            gallery.length ? JSON.stringify(gallery) : null,
+            v.stock,
+          ],
         );
       }
       await c.query("COMMIT");
@@ -1638,7 +2351,7 @@ export function createApp(pool, options = {}) {
   app.patch("/api/admin/products/:id", auth, admin, async (req, res) => {
     const f = z
       .object({
-        ...productFields,
+        ...productBaseFields,
         active: z.boolean(),
         variants: z.array(variantSchema).min(1).max(400),
       })
@@ -1697,11 +2410,32 @@ export function createApp(pool, options = {}) {
           const length = v.lengthCm ?? parseDimensions(v.size)?.length ?? 0;
           const width = v.widthCm ?? parseDimensions(v.size)?.width ?? 0;
           const height = v.heightCm ?? parseDimensions(v.size)?.height ?? 0;
+          const gallery = collectVariantImages(v);
           await c.query(
-            `INSERT INTO product_variants(product_id,size,length_cm,width_cm,height_cm,color,image_url,stock)
-             VALUES(?,?,?,?,?,?,?,?)
-             ON DUPLICATE KEY UPDATE stock=VALUES(stock), image_url=COALESCE(VALUES(image_url), image_url), length_cm=VALUES(length_cm), width_cm=VALUES(width_cm), height_cm=VALUES(height_cm)`,
-            [req.params.id, v.size, length, width, height, v.color, v.imageUrl || null, v.stock],
+            `INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,price,image_url,images_json,stock)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?)
+             ON DUPLICATE KEY UPDATE
+               id=COALESCE(NULLIF(id,''), VALUES(id)),
+               stock=VALUES(stock),
+               price=VALUES(price),
+               image_url=VALUES(image_url),
+               images_json=VALUES(images_json),
+               length_cm=VALUES(length_cm),
+               width_cm=VALUES(width_cm),
+               height_cm=VALUES(height_cm)`,
+            [
+              v.id || randomUUID(),
+              req.params.id,
+              v.size,
+              length,
+              width,
+              height,
+              v.color,
+              v.price ?? null,
+              gallery[0] || null,
+              gallery.length ? JSON.stringify(gallery) : null,
+              v.stock,
+            ],
           );
         }
       }

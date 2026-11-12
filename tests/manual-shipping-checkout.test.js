@@ -196,10 +196,13 @@ test("Manual Shipping & Checkout: Solusi Ongkir Manual Tanpa Error shippingOptio
       address: orderAddress,
       shipping: "pickup",
       shippingOption: { courier: "TOKO", service: "Ambil di Toko", cost: 0 },
-      payment: "COD",
+      payment: "store_pickup",
       checkoutKey: "33333333-3333-4333-8333-333333333333",
     }, customerCookie);
     assert.equal(orderPickup.status, 201);
+    assert.equal(orderPickup.data.payment_type, "store_pickup");
+    assert.equal(orderPickup.data.status, "Menunggu Pengambilan & Pembayaran");
+    assert.equal(orderPickup.data.payment_status, "PENDING");
     assert.equal(Number(orderPickup.data.delivery), 0);
     assert.equal(Number(orderPickup.data.total), unitPrice);
 

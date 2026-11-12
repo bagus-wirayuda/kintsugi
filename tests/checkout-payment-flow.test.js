@@ -143,7 +143,7 @@ test("Alur Checkout dan Pembayaran Terstruktur (Pemisahan Step & Validasi)", asy
       }, customerCookie);
       assert.equal(failOrder.status, 400);
 
-      // B. Validasi: Opsi Ambil di Toko (pickup) berhasil tanpa alamat jalan pengantaran
+      // B. Validasi: Opsi Ambil di Toko (pickup) menggunakan metode store_pickup dan status Menunggu Pengambilan & Pembayaran
       const pickupOrder = await req("/orders", {
         items: [{ id: product.id, size: variant.size, color: variant.color, quantity: 1 }],
         address: {
@@ -155,10 +155,14 @@ test("Alur Checkout dan Pembayaran Terstruktur (Pemisahan Step & Validasi)", asy
         },
         shipping: "pickup",
         shippingOption: { courier: "TOKO", service: "Ambil di Toko", cost: 0 },
-        payment: "COD",
+        payment: "store_pickup",
         checkoutKey: "bbbbbbbb-2222-4222-8222-222222222222",
       }, customerCookie);
       assert.equal(pickupOrder.status, 201);
+      assert.equal(pickupOrder.data.payment, "store_pickup");
+      assert.equal(pickupOrder.data.payment_type, "store_pickup");
+      assert.equal(pickupOrder.data.status, "Menunggu Pengambilan & Pembayaran");
+      assert.equal(pickupOrder.data.payment_status, "PENDING");
       assert.equal(Number(pickupOrder.data.delivery), 0);
       assert.equal(Number(pickupOrder.data.total), unitPrice);
 

@@ -26,6 +26,9 @@ export default function Account({
   config,
   cart = [],
   setCart,
+  selectedKeys = [],
+  onToggleSelect,
+  onToggleSelectAll,
   coupon = "",
   setCoupon,
   wish = [],
@@ -573,6 +576,9 @@ export default function Account({
             <CartView
               cart={cart}
               setCart={setCart}
+              selectedKeys={selectedKeys}
+              onToggleSelect={onToggleSelect}
+              onToggleSelectAll={onToggleSelectAll}
               coupon={coupon}
               setCoupon={setCoupon}
               config={config}
