@@ -160,10 +160,12 @@ export async function initialize(target = pool, seed = true) {
       brand: "Kintsugi",
       announcementText: "Ruang tidur yang tenang, dimulai dari tekstil yang baik.",
       contactEmail: process.env.STORE_CONTACT_EMAIL || "wirayuda101101@gmail.com",
-      contactPhone: process.env.STORE_CONTACT_PHONE || "",
-      storeAddress: "",
+      contactPhone: process.env.STORE_CONTACT_PHONE || "081234567890",
+      storeAddress:
+        process.env.STORE_ADDRESS ||
+        "Jl. Sam Ratulangi No. 88, Kemaraya, Kec. Kendari Barat, Kota Kendari, Sulawesi Tenggara 93111",
       pickupInfo:
-        "Pembayaran dilakukan langsung saat pengambilan di toko. Silakan konfirmasi jadwal kedatangan melalui WhatsApp toko dengan menunjukkan nomor pesanan.",
+        "Pengambilan pesanan tersedia setiap hari pukul 09.00 - 20.00 WITA di Toko Kintsugi Kendari. Tunjukkan nomor pesanan kepada petugas kasir saat mengambil pesanan dan melakukan pembayaran langsung di toko.",
       logo: "/brand/kintsugi-logo-transparent-v2.png",
       heroImage: "/images/seprai/sprei-01.jpg",
       heroKicker: "KINTSUGI / BEDROOM COLLECTION",
@@ -184,7 +186,7 @@ export async function initialize(target = pool, seed = true) {
       promoOldPrice: 0,
       localDeliveryFee: 15000,
       packageWeightGrams: 1000,
-      rajaOriginId: "",
+      rajaOriginId: process.env.RAJAONGKIR_ORIGIN_ID || "31864",
       waTemplates: {
         otp: "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].",
         purchased: "Halo [nama], pembayaran pesanan [nomor_pesanan] sebesar [total] berhasil dikonfirmasi. Pesanan Anda segera disiapkan oleh [toko]. Terima kasih!",

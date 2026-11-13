@@ -6,6 +6,11 @@ import {
   Package,
   CheckCircle2,
   Clock3,
+  Truck,
+  Copy,
+  Check,
+  MapPin,
+  ExternalLink,
 } from "lucide-react";
 import { api } from "./store";
 import { colorLabel, money } from "./data";
@@ -13,6 +18,7 @@ import { paymentName } from './payment-methods';
 import { Notice, Status } from "./Workspace";
 import { dimensionLabel } from "./dimensions.js";
 import QrisPanel from "./QrisPanel.jsx";
+import { resolveShippingInfo } from "./shipping-info.js";
 export const paymentLabel = {
   CREATING: "Menyiapkan pembayaran",
   PENDING: "Belum dibayar",
@@ -25,7 +31,32 @@ export const paymentLabel = {
 export default function OrderCard({ order: o, onRefresh, notify, config }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [confirm, setConfirm] = useState(false);
+    [confirm, setConfirm] = useState(false),
+    [copiedResi, setCopiedResi] = useState(false);
+
+  const shipInfo = resolveShippingInfo(o);
+
+  async function handleCopyResi(resi) {
+    if (!resi) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(resi);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = resi;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopiedResi(true);
+      notify?.("Nomor resi berhasil disalin ke papan klip.");
+      setTimeout(() => setCopiedResi(false), 2500);
+    } catch (_) {
+      notify?.("Gagal menyalin nomor resi.");
+    }
+  }
+
   async function action(path) {
     setBusy(true);
     setError("");
@@ -120,6 +151,114 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
         </div>
       </div>
       <Notice>{error}</Notice>
+      {/* Informasi Pilihan Kurir & Status Pengantaran */}
+      {shipInfo && (
+        <div className="ks-order-shipping-panel">
+          <div className="ks-order-shipping-header">
+            <div className="ks-order-shipping-courier">
+              <span
+                className="ks-courier-badge"
+                style={{
+                  backgroundColor: shipInfo.courier.bg,
+                  borderColor: shipInfo.courier.border,
+                  color: shipInfo.courier.color,
+                }}
+              >
+                <Truck size={14} />
+                {shipInfo.courier.shortName}
+              </span>
+              <div className="ks-order-courier-title-wrap">
+                <strong className="ks-order-courier-title">{shipInfo.title}</strong>
+                <span className="ks-order-courier-service">{shipInfo.service}</span>
+              </div>
+            </div>
+            <div className="ks-order-shipping-fee-wrap">
+              <span className="ks-order-shipping-fee-label">Ongkos Kirim</span>
+              <strong className={`ks-order-shipping-fee ${shipInfo.isFree ? "free" : ""}`}>
+                {shipInfo.deliveryCostLabel}
+              </strong>
+            </div>
+          </div>
+
+          <div className="ks-order-shipping-body">
+            <div className="ks-order-shipping-status-banner">
+              <div className="ks-order-status-indicator-col">
+                <span
+                  className={`ks-order-status-dot ${
+                    o.status === "Dikirim"
+                      ? "in-transit"
+                      : o.status === "Selesai"
+                        ? "delivered"
+                        : o.status === "Dibatalkan"
+                          ? "cancelled"
+                          : "processing"
+                  }`}
+                />
+              </div>
+              <div className="ks-order-status-content">
+                <p className="ks-order-status-headline">{shipInfo.statusText}</p>
+                <p className="ks-order-status-desc">{shipInfo.statusDetail}</p>
+              </div>
+            </div>
+
+            {/* Nomor Resi Pengantaran (Jika Tersedia) */}
+            {shipInfo.trackingNumber ? (
+              <div className="ks-order-resi-card">
+                <div className="ks-order-resi-meta">
+                  <span className="ks-order-resi-label">Nomor Resi / Pelacakan:</span>
+                  <strong className="ks-order-resi-code">{shipInfo.trackingNumber}</strong>
+                </div>
+                <div className="ks-order-resi-buttons">
+                  <button
+                    type="button"
+                    className="ks-order-btn-copy"
+                    onClick={() => handleCopyResi(shipInfo.trackingNumber)}
+                    title="Salin nomor resi"
+                  >
+                    {copiedResi ? <Check size={14} color="#057a55" /> : <Copy size={14} />}
+                    <span>{copiedResi ? "Tersalin!" : "Salin Resi"}</span>
+                  </button>
+                  {shipInfo.trackUrl && (
+                    <a
+                      href={shipInfo.trackUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ks-order-btn-track"
+                    >
+                      <span>Lacak Resmi {shipInfo.courier.shortName}</span>
+                      <ExternalLink size={13} />
+                    </a>
+                  )}
+                </div>
+              </div>
+            ) : !shipInfo.isPickup && (o.status === "Diproses" || o.status === "Menunggu pembayaran") ? (
+              <div className="ks-order-resi-placeholder">
+                <small>
+                  ℹ Nomor resi pengantaran resmi {shipInfo.courier.name} akan otomatis tercantum di sini segera setelah paket diserahkan ke pihak kurir.
+                </small>
+              </div>
+            ) : null}
+
+            {/* Alamat Pengantaran */}
+            {!shipInfo.isPickup && o.address && (
+              <div className="ks-order-address-box">
+                <div className="ks-order-address-icon">
+                  <MapPin size={16} />
+                </div>
+                <div className="ks-order-address-text">
+                  <div className="ks-order-address-recipient">
+                    <b>{o.address.name}</b>
+                    {o.address.phone && <span> · {o.address.phone}</span>}
+                  </div>
+                  <p className="ks-order-address-detail">
+                    {o.address.street}, {o.address.city} {o.address.postal}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {isStorePickup && !cancelled && o.payment_status !== "PAID" && (
         <div className="ks-pickup-instruction-card ks-pickup-order-card">
           <p className="ks-pickup-highlight">
@@ -222,19 +361,29 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
       )}
       {!cancelled && (
         <div className="ws-order-progress">
-          {["Diproses", "Dikirim", "Selesai"].map((step, index) => (
-            <span
-              key={step}
-              className={
-                ["Diproses", "Dikirim", "Selesai"].indexOf(o.status) >= index
-                  ? "done"
-                  : ""
-              }
-            >
-              <CheckCircle2 size={16} />
-              {step}
-            </span>
-          ))}
+          {(shipInfo?.isPickup
+            ? ["Diproses", "Siap Diambil", "Selesai"]
+            : ["Diproses", "Dikirim", "Selesai"]
+          ).map((step, index) => {
+            const currentIdx = shipInfo?.isPickup
+              ? o.status === "Selesai"
+                ? 2
+                : awaitingPickup || o.payment_status === "PAID"
+                  ? 1
+                  : 0
+              : ["Diproses", "Dikirim", "Selesai"].indexOf(o.status);
+            return (
+              <span
+                key={step}
+                className={currentIdx >= index ? "done" : ""}
+              >
+                <CheckCircle2 size={16} />
+                {step === "Dikirim" && shipInfo?.courier?.shortName
+                  ? `Dikirim (${shipInfo.courier.shortName})`
+                  : step}
+              </span>
+            );
+          })}
         </div>
       )}
       <details className="ws-order-details">
@@ -253,15 +402,19 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
           </p>
           <dl>
             <div>
-              <dt>Pengiriman</dt>
+              <dt>Kurir &amp; Pengantaran</dt>
               <dd>
-                {
+                {shipInfo?.title ||
+                  o.shipping_name ||
                   {
+                    rajaongkir: "Ekspedisi Resmi",
+                    local: "Kurir Toko",
                     regular: "Reguler",
                     express: "Ekspres",
-                    pickup: "Pengambilan pesanan",
-                  }[o.shipping]
-                }
+                    pickup: "Ambil di Toko",
+                  }[o.shipping] ||
+                  o.shipping}
+                {shipInfo?.trackingNumber ? ` · No. Resi: ${shipInfo.trackingNumber}` : ""}
               </dd>
             </div>
             <div>

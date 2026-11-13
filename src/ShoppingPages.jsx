@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   Tag,
   ShieldCheck,
+  Truck,
+  MapPin,
 } from "lucide-react";
 import { Empty, Notice } from "./Workspace";
 import { api, totals } from "./store";
@@ -19,6 +21,7 @@ import { StoreHeader, StoreFooter } from "./StoreChrome";
 import { dimensionLabel } from "./dimensions.js";
 import { getCartItemCount } from "./checkout-state.js";
 import QrisPanel from "./QrisPanel.jsx";
+import { resolveShippingInfo } from "./shipping-info.js";
 function Shell({
   user,
   config,
@@ -124,10 +127,10 @@ export function CartView({
         signal: controller.signal,
         body: {
           items: selectedItems.map(({ id, variantId, size, color, quantity }) => ({
-            id,
-            ...(variantId ? { variantId } : {}),
-            size,
-            color,
+            id: String(id).trim(),
+            ...(variantId && String(variantId).trim() ? { variantId: String(variantId).trim() } : {}),
+            size: String(size ?? "").trim(),
+            color: String(color ?? "").trim(),
             quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
           })),
           coupon,
@@ -179,10 +182,10 @@ export function CartView({
         method: "POST",
         body: {
           items: selectedItems.map(({ id, variantId, size, color, quantity }) => ({
-            id,
-            ...(variantId ? { variantId } : {}),
-            size,
-            color,
+            id: String(id).trim(),
+            ...(variantId && String(variantId).trim() ? { variantId: String(variantId).trim() } : {}),
+            size: String(size ?? "").trim(),
+            color: String(color ?? "").trim(),
             quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
           })),
           coupon: code,
@@ -207,10 +210,10 @@ export function CartView({
         method: "POST",
         body: {
           items: selectedItems.map(({ id, variantId, size, color, quantity }) => ({
-            id,
-            ...(variantId ? { variantId } : {}),
-            size,
-            color,
+            id: String(id).trim(),
+            ...(variantId && String(variantId).trim() ? { variantId: String(variantId).trim() } : {}),
+            size: String(size ?? "").trim(),
+            color: String(color ?? "").trim(),
             quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
           })),
           coupon,
@@ -223,9 +226,10 @@ export function CartView({
           prev.map((row) => {
             const matched = q.items.find(
               (srv) =>
-                srv.id === row.id &&
-                srv.color === row.color &&
-                String(srv.size) === String(row.size),
+                (srv.variantId && row.variantId && srv.variantId === row.variantId) ||
+                (srv.id === row.id &&
+                  String(srv.color).trim().toLowerCase() === String(row.color).trim().toLowerCase() &&
+                  String(srv.size).trim().toLowerCase() === String(row.size).trim().toLowerCase()),
             );
             return matched ? { ...row, price: matched.price } : row;
           }),
@@ -694,6 +698,7 @@ export function PaymentPage({
   const isExternalUrl = order?.payment_url && /^https?:\/\//i.test(order.payment_url);
   const pending = order?.payment_status === "PENDING";
   const waitingVerify = order?.payment_status === "WAITING_VERIFICATION";
+  const shipInfo = resolveShippingInfo(order);
   const waDigits = String(config?.contactPhone || "").replace(/\D/g, "");
   const waHref = waDigits
     ? `https://wa.me/${waDigits.startsWith("0") ? "62" + waDigits.slice(1) : waDigits}`
@@ -756,6 +761,64 @@ export function PaymentPage({
         </p>
         <h3>{money(order?.total || 0)}</h3>
         {order?.paymentError && <Notice>{order.paymentError}</Notice>}
+        {!isStorePickup && shipInfo && (
+          <div className="ks-order-shipping-panel ks-payment-shipping-panel">
+            <div className="ks-order-shipping-header">
+              <div className="ks-order-shipping-courier">
+                <span
+                  className="ks-courier-badge"
+                  style={{
+                    backgroundColor: shipInfo.courier.bg,
+                    borderColor: shipInfo.courier.border,
+                    color: shipInfo.courier.color,
+                  }}
+                >
+                  <Truck size={14} />
+                  {shipInfo.courier.shortName}
+                </span>
+                <div className="ks-order-courier-title-wrap">
+                  <strong className="ks-order-courier-title">{shipInfo.title}</strong>
+                  <span className="ks-order-courier-service">{shipInfo.service}</span>
+                </div>
+              </div>
+              <div className="ks-order-shipping-fee-wrap">
+                <span className="ks-order-shipping-fee-label">Ongkos Kirim</span>
+                <strong className={`ks-order-shipping-fee ${shipInfo.isFree ? "free" : ""}`}>
+                  {shipInfo.deliveryCostLabel}
+                </strong>
+              </div>
+            </div>
+
+            <div className="ks-order-shipping-body">
+              <div className="ks-order-shipping-status-banner">
+                <div className="ks-order-status-indicator-col">
+                  <span className="ks-order-status-dot processing" />
+                </div>
+                <div className="ks-order-status-content">
+                  <p className="ks-order-status-headline">{shipInfo.statusText}</p>
+                  <p className="ks-order-status-desc">{shipInfo.statusDetail}</p>
+                </div>
+              </div>
+
+              {order?.address && (
+                <div className="ks-order-address-box">
+                  <div className="ks-order-address-icon">
+                    <MapPin size={16} />
+                  </div>
+                  <div className="ks-order-address-text">
+                    <div className="ks-order-address-recipient">
+                      <b>{order.address.name}</b>
+                      {order.address.phone && <span> · {order.address.phone}</span>}
+                    </div>
+                    <p className="ks-order-address-detail">
+                      {order.address.street}, {order.address.city} {order.address.postal}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {isStorePickup ? (
           <div className="ks-pickup-instruction-card">
             <p className="ks-pickup-highlight">

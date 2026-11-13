@@ -314,6 +314,46 @@ function App() {
       window.removeEventListener("popstate", change);
     };
   }, [authReady, user?.id, user?.role]);
+
+  useEffect(() => {
+    const brandName = config?.brand || "Kintsugi";
+    const brandLogo = config?.logo || "/brand/kintsugi-logo-transparent-v2.png";
+
+    const viewTitles = {
+      home: `${brandName} | Sleep, made whole.`,
+      catalog: `Katalog Produk | ${brandName}`,
+      cart: `Keranjang Belanja | ${brandName}`,
+      checkout: `Checkout Pesanan | ${brandName}`,
+      payment: `Metode Pembayaran | ${brandName}`,
+      success: `Status Pesanan | ${brandName}`,
+      account: `Akun Saya | ${brandName}`,
+      admin: `Panel Admin | ${brandName}`,
+      auth: `Masuk / Daftar | ${brandName}`,
+    };
+
+    let titleText = viewTitles[view] || `${brandName} | Sleep, made whole.`;
+    if (detail?.title) {
+      titleText = `${detail.title} | ${brandName}`;
+    }
+    document.title = titleText;
+
+    let iconLink = document.querySelector("link[rel~='icon']");
+    if (!iconLink) {
+      iconLink = document.createElement("link");
+      iconLink.rel = "icon";
+      document.head.appendChild(iconLink);
+    }
+    iconLink.type = "image/png";
+    iconLink.href = brandLogo;
+
+    let appleLink = document.querySelector("link[rel='apple-touch-icon']");
+    if (!appleLink) {
+      appleLink = document.createElement("link");
+      appleLink.rel = "apple-touch-icon";
+      document.head.appendChild(appleLink);
+    }
+    appleLink.href = brandLogo;
+  }, [config?.brand, config?.logo, view, detail?.title]);
   useEffect(() => {
     if (!detail && !searchOpen && !menu && !info) return;
     const previous = document.activeElement;
@@ -621,10 +661,11 @@ function App() {
     const safeStock = Math.max(0, Math.trunc(Number(selectedStock) || 0));
     const resolvedVariant = activeVariantInfo?.variant;
     const canonicalSize = resolvedVariant?.size || size;
-    const resolvedVariantId = activeVariantInfo?.variantId || "";
+    const canonicalColor = resolvedVariant?.color || color;
+    const resolvedVariantId = activeVariantInfo?.variantId || resolvedVariant?.id || "";
     const resolvedImage = activeVariantInfo?.image || activeMainPhoto || detail.image;
     const resolvedPrice = activeUnitPrice;
-    const key = `${detail.id}:${canonicalSize}:${color}`;
+    const key = `${detail.id}:${canonicalSize}:${canonicalColor}`;
     if (buyNow) {
       if (safeQty > Math.min(99, safeStock)) return notify('Jumlah melebihi stok tersedia.');
       const item = {
@@ -636,7 +677,7 @@ function App() {
         stock: safeStock,
         key,
         size: canonicalSize,
-        color,
+        color: canonicalColor,
         quantity: safeQty,
       };
       setDirectPurchase(item);
@@ -675,7 +716,7 @@ function App() {
               stock: safeStock,
               key,
               size: canonicalSize,
-              color,
+              color: canonicalColor,
               quantity: safeQty,
             },
           ],

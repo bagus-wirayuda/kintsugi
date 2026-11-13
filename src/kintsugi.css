@@ -3811,8 +3811,35 @@ img, svg { max-width: 100%; }
     grid-template-columns: 1fr;
   }
 }
-.ks-destination-options,.ks-raja-rates { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.ks-destination-options button { padding: 12px; text-align: left; border: 1px solid var(--ks-line); background: #fff; }
+.ks-destination-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ks-destination-options button { padding: 10px 14px; text-align: left; border: 1px solid var(--ks-line); background: #fff; border-radius: 4px; font-size: 0.86rem; cursor: pointer; transition: background 0.15s; }
+.ks-destination-options button:hover { background: #f8fafc; border-color: var(--ks-teal); }
+.ks-raja-panel { margin-top: 14px; padding: 16px; background: #fafaf9; border: 1px solid var(--ks-line); border-radius: 8px; }
+.ks-raja-panel-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--ks-line); }
+.ks-raja-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ks-teal, #0e6575); }
+.ks-raja-dest-info { font-size: 0.8rem; color: var(--ks-muted, #64748b); }
+.ks-raja-hint, .ks-raja-loading, .ks-raja-empty, .ks-raja-error { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #fff; border: 1px dashed var(--ks-line); border-radius: 6px; font-size: 0.88rem; color: var(--ks-text); }
+.ks-raja-rates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.ks-courier-rate-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; border: 1px solid var(--ks-line); border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+.ks-courier-rate-card:hover { border-color: #94a3b8; background: #fdfdfd; }
+.ks-courier-rate-card.selected { border-color: var(--ks-teal, #0e6575); background: #f0f7f7; box-shadow: 0 0 0 1px var(--ks-teal, #0e6575); }
+.ks-courier-rate-card input[type="radio"] { width: 17px; height: 17px; accent-color: var(--ks-teal, #0e6575); margin: 0; flex-shrink: 0; }
+.ks-rate-info { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ks-rate-brand-row { display: flex; align-items: center; gap: 8px; }
+.ks-courier-badge { display: inline-block; padding: 2px 7px; font-size: 0.72rem; font-weight: 700; border-radius: 3px; border: 1px solid transparent; line-height: 1.2; }
+.ks-service-name { font-size: 0.88rem; color: var(--ks-text); }
+.ks-rate-desc { font-size: 0.76rem; color: var(--ks-muted, #64748b); }
+.ks-rate-etd { display: flex; align-items: center; gap: 4px; font-size: 0.76rem; color: #475569; margin-top: 2px; }
+.ks-rate-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.ks-rate-price strong { font-size: 0.95rem; font-weight: 700; color: var(--ks-text); }
+.ks-free-strike { font-size: 0.75rem; color: #94a3b8; }
+.ks-dest-autocomplete-wrapper { position: relative; }
+.ks-dest-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid var(--ks-line); border-radius: 6px; max-height: 220px; overflow-y: auto; z-index: 50; box-shadow: 0 6px 18px rgba(0,0,0,0.1); }
+.ks-dest-item { width: 100%; padding: 10px 14px; text-align: left; border: none; border-bottom: 1px solid #f1f5f9; background: transparent; cursor: pointer; display: flex; flex-direction: column; gap: 2px; transition: background 0.15s ease; }
+.ks-dest-item:hover, .ks-dest-item:focus { background: #f0f7f7; }
+.ks-dest-label { font-size: 0.84rem; font-weight: 600; color: #1e293b; }
+.ks-dest-sub { font-size: 0.75rem; color: #64748b; }
+.ks-raja-rates { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .ks-raja-rates label { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--ks-line); background: #fff; }
 .ks-raja-rates label.selected { border-color: var(--ks-teal); background: #eef5f4; }
 .ks-raja-rates label > span { display: flex; flex-direction: column; flex: 1; }
@@ -6290,5 +6317,308 @@ button.ks-variant-chip.is-interactive {
 
   .ks-admin-pickup-verify {
     padding: 12px;
+  }
+}
+
+/* ==========================================================================
+   Customer Order Courier & Delivery Information Styles (Kintsugi)
+   ========================================================================== */
+.ks-order-shipping-panel {
+  width: 100%;
+  margin: 14px 0 6px;
+  padding: 14px 16px;
+  background: #fbfbfd;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.ks-payment-shipping-panel {
+  max-width: 580px;
+  margin: 16px auto 0;
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.ks-order-shipping-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.ks-order-shipping-courier {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ks-order-courier-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ks-order-courier-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.3;
+}
+
+.ks-order-courier-service {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.ks-order-shipping-fee-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.ks-order-shipping-fee-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.ks-order-shipping-fee {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.ks-order-shipping-fee.free {
+  color: #057a55;
+  background: #def7ec;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #bcf0da;
+}
+
+.ks-order-shipping-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ks-order-shipping-status-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #ffffff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.ks-order-status-indicator-col {
+  padding-top: 3px;
+}
+
+.ks-order-status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.ks-order-status-dot.processing {
+  background: #e3a008;
+  box-shadow: 0 0 0 3px rgba(227, 160, 8, 0.2);
+}
+
+.ks-order-status-dot.in-transit {
+  background: #1c64f2;
+  box-shadow: 0 0 0 3px rgba(28, 100, 242, 0.2);
+}
+
+.ks-order-status-dot.delivered {
+  background: #057a55;
+  box-shadow: 0 0 0 3px rgba(5, 122, 85, 0.2);
+}
+
+.ks-order-status-dot.cancelled {
+  background: #9ca3af;
+  box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.2);
+}
+
+.ks-order-status-content {
+  flex: 1;
+}
+
+.ks-order-status-headline {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.35;
+}
+
+.ks-order-status-desc {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.ks-order-resi-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+.ks-order-resi-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ks-order-resi-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.ks-order-resi-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.05em;
+  background: #ffffff;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #94a3b8;
+}
+
+.ks-order-resi-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ks-order-btn-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ks-order-btn-copy:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.ks-order-btn-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.ks-order-btn-track:hover {
+  background: #dbeafe;
+}
+
+.ks-order-resi-placeholder {
+  background: #ffffff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ks-order-address-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ks-order-address-icon {
+  color: #64748b;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.ks-order-address-text {
+  flex: 1;
+}
+
+.ks-order-address-recipient {
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+
+.ks-order-address-recipient b {
+  font-weight: 600;
+}
+
+.ks-order-address-recipient span {
+  color: #64748b;
+}
+
+.ks-order-address-detail {
+  margin: 0;
+  color: #64748b;
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  .ks-order-shipping-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ks-order-shipping-fee-wrap {
+    align-items: flex-start;
+  }
+
+  .ks-order-resi-card {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

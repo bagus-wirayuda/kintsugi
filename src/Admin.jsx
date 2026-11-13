@@ -49,6 +49,7 @@ import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import { PAYMENT_GROUPS, paymentName, isStorePickupMethod } from "./payment-methods.js";
 import { SAMPLE_DANA_QRIS_PAYLOAD, validateQrisPayload } from "./qris.js";
 import { collectVariantImages } from "./variant-utils.js";
+import { resolveShippingInfo } from "./shipping-info.js";
 
 export default function Admin({ user, notify, onLogout, config, reloadConfig }) {
   const isAdmin = user.role === "admin";
@@ -3578,9 +3579,28 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     Status: {paymentLabel[selected.payment_status] || selected.payment_status}
                     <br />
                     Metode pengiriman:{" "}
-                    {isStorePickupMethod(selected) || selected.shipping === "pickup"
-                      ? "Ambil Langsung di Toko"
-                      : selected.shipping}
+                    {isStorePickupMethod(selected) || selected.shipping === "pickup" ? (
+                      "Ambil Langsung di Toko"
+                    ) : (
+                      <>
+                        {selected.shipping_name || (selected.shipping === "rajaongkir" ? "Ekspedisi Resmi (J&T, JNE, TIKI, POS)" : selected.shipping)}
+                        {resolveShippingInfo(selected)?.courier && !resolveShippingInfo(selected)?.isPickup && (
+                          <span
+                            className="ks-courier-badge"
+                            style={{
+                              backgroundColor: resolveShippingInfo(selected).courier.bg,
+                              borderColor: resolveShippingInfo(selected).courier.border,
+                              color: resolveShippingInfo(selected).courier.color,
+                              marginLeft: 6,
+                              fontSize: 11,
+                              padding: "1px 6px",
+                            }}
+                          >
+                            {resolveShippingInfo(selected).courier.shortName}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </p>
                   <small className="ws-mono">
                     {isStorePickupMethod(selected) || selected.shipping === "pickup"
@@ -3938,11 +3958,24 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   selected.shipping === "pickup";
                 return (
                   <>
-                    {selected.tracking_number && !selectedIsPickup && (
-                      <p>
-                        Nomor resi: <b>{selected.tracking_number}</b>
-                      </p>
-                    )}
+                    {selected.tracking_number && !selectedIsPickup && (() => {
+                      const sInfo = resolveShippingInfo(selected);
+                      return (
+                        <p style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "8px 0" }}>
+                          <span>Nomor resi {sInfo?.courier?.shortName ? `(${sInfo.courier.shortName})` : ""}: <b>{selected.tracking_number}</b></span>
+                          {sInfo?.trackUrl && (
+                            <a
+                              href={sInfo.trackUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize: 12, color: "#1d4ed8", fontWeight: 600, textDecoration: "underline" }}
+                            >
+                              Buka Cek Resi Resmi &rarr;
+                            </a>
+                          )}
+                        </p>
+                      );
+                    })()}
                     {selected.status === "Diproses" && !selectedIsPickup && (
                       <label>
                         Nomor resi untuk notifikasi

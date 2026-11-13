@@ -421,23 +421,79 @@ export function createApp(pool, options = {}) {
     return result?.data ?? [];
   }
   async function rajaRates(destinationId, items) {
-    const settings=await readStoreSettings();
-    const origin=Number(settings.rajaOriginId||env.RAJAONGKIR_ORIGIN_ID);
-    if(!origin) throw fail(503,"ID asal pengiriman belum diatur di pengaturan toko.");
-    const uniqueIds=[...new Set(items.map((item)=>item.id))];
-    const productRows=(await pool.query("SELECT id,weight_grams FROM products WHERE id IN (?) AND active=TRUE",[uniqueIds])).rows;
-    if(productRows.length!==uniqueIds.length) throw fail(400,"Ada produk yang tidak tersedia.");
-    const weight=Math.max(1,productRows.reduce((sum,product)=>sum+Number(product.weight_grams||settings.packageWeightGrams||1000)*items.filter((item)=>item.id===product.id).reduce((n,item)=>n+item.quantity,0),0));
-    const couriers=["jne","jnt","sicepat","tiki","pos"];
-    const replies=await Promise.all(couriers.map(async(courier)=>{
-      try {
-        const body=new URLSearchParams({origin:String(origin),destination:String(destinationId),weight:String(weight),courier,price:"lowest"});
-        const data=await rajaFetch("calculate/domestic-cost",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
-        return (Array.isArray(data)?data:[]).map((row)=>({courier:row.code||courier,courierName:row.name||courier.toUpperCase(),service:row.service||row.description||"Reguler",cost:Number(row.cost),etd:String(row.etd||""),weight})).filter((row)=>Number.isSafeInteger(row.cost)&&row.cost>=0);
-      } catch { return []; }
-    }));
-    const result=replies.flat().sort((a,b)=>a.cost-b.cost);
-    if(!result.length) throw fail(400,"Belum ada layanan kurir untuk tujuan tersebut.");
+    const settings = await readStoreSettings();
+    const origin = Number(settings.rajaOriginId || env.RAJAONGKIR_ORIGIN_ID || 31864);
+    if (!origin) throw fail(503, "ID asal pengiriman belum diatur di pengaturan toko.");
+    const uniqueIds = [...new Set(items.map((item) => item.id))];
+    const productRows = (
+      await pool.query("SELECT id,weight_grams FROM products WHERE id IN (?) AND active=TRUE", [uniqueIds])
+    ).rows;
+    if (uniqueIds.length > 0 && productRows.length !== uniqueIds.length) {
+      throw fail(400, "Ada produk yang tidak tersedia.");
+    }
+    const weight = Math.max(
+      1,
+      productRows.reduce(
+        (sum, product) =>
+          sum +
+          Number(product.weight_grams || settings.packageWeightGrams || 1000) *
+            items.filter((item) => item.id === product.id).reduce((n, item) => n + item.quantity, 0),
+        0,
+      ),
+    );
+
+    const courierNames = {
+      jnt: "J&T Express",
+      jne: "JNE",
+      tiki: "TIKI",
+      pos: "POS Indonesia",
+    };
+
+    const formatEtd = (raw) => {
+      if (!raw) return "1–3 hari";
+      const s = String(raw).trim();
+      if (/^\d+(?:-\d+)?$/.test(s)) return `${s} hari`;
+      return s.replace(/days?/gi, "hari").replace(/hours?/gi, "jam");
+    };
+
+    // Pilihan kurir resmi: J&T, JNE, TIKI, dan POS Indonesia
+    const couriers = ["jnt", "jne", "tiki", "pos"];
+    const replies = await Promise.all(
+      couriers.map(async (courier) => {
+        try {
+          const body = new URLSearchParams({
+            origin: String(origin),
+            destination: String(destinationId),
+            weight: String(weight),
+            courier,
+            price: "lowest",
+          });
+          const data = await rajaFetch("calculate/domestic-cost", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body,
+          });
+          return (Array.isArray(data) ? data : [])
+            .map((row) => {
+              const code = String(row.code || courier).toLowerCase();
+              return {
+                courier: code,
+                courierName: courierNames[code] || row.name || code.toUpperCase(),
+                service: row.service || row.description || "Reguler",
+                description: row.description || "",
+                cost: Number(row.cost),
+                etd: formatEtd(row.etd),
+                weight,
+              };
+            })
+            .filter((row) => Number.isSafeInteger(row.cost) && row.cost >= 0);
+        } catch {
+          return [];
+        }
+      }),
+    );
+    const result = replies.flat().sort((a, b) => a.cost - b.cost);
+    if (!result.length) throw fail(400, "Belum ada layanan kurir untuk tujuan tersebut.");
     return result;
   }
   async function deliveryFor(shipping, option, items) {
@@ -463,6 +519,34 @@ export function createApp(pool, options = {}) {
       };
     }
 
+    if (shipping === "rajaongkir" && option && typeof option === "object") {
+      const rawCost = Number(option.cost);
+      const chosenCost = Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : manualFee;
+      const fee = isFreeShipping ? 0 : chosenCost;
+      const courierCode = String(option.courier || "").toLowerCase();
+      const courierName = option.courierName || ({
+        jnt: "J&T Express",
+        jne: "JNE",
+        tiki: "TIKI",
+        pos: "POS Indonesia",
+      }[courierCode] || courierCode.toUpperCase() || "Ekspedisi");
+      const serviceName = option.service || "Reguler";
+      const name = isFreeShipping
+        ? `${courierName} ${serviceName} (Gratis Ongkir)`
+        : `${courierName} ${serviceName}`;
+      return {
+        delivery: fee,
+        name,
+        option: {
+          ...option,
+          courier: courierCode,
+          courierName,
+          service: serviceName,
+          cost: fee,
+        },
+      };
+    }
+
     const fee = isFreeShipping ? 0 : manualFee;
     const name = isFreeShipping
       ? "Pengiriman Standar (Gratis Ongkir)"
@@ -480,13 +564,37 @@ export function createApp(pool, options = {}) {
       },
     };
   }
-  app.get("/api/shipping/destinations", async (_req, res) => {
-    // API pengiriman otomatis dinonaktifkan sementara demi stabilitas checkout
-    res.json([]);
+  app.get("/api/shipping/destinations", async (req, res) => {
+    if (!env.RAJAONGKIR_API_KEY) return res.json([]);
+    const search = String(req.query.search || req.query.q || "").trim();
+    if (!search || search.length < 2) return res.json([]);
+    try {
+      const data = await rajaFetch(`destination/domestic-destination?search=${encodeURIComponent(search)}`);
+      const destinations = (Array.isArray(data) ? data : []).map((d) => ({
+        id: d.id,
+        label: d.label,
+        subdistrict: d.subdistrict_name || "",
+        district: d.district_name || "",
+        city: d.city_name || "",
+        province: d.province_name || "",
+        postal: d.zip_code || "",
+      }));
+      res.json(destinations);
+    } catch {
+      res.json([]);
+    }
   });
-  app.post("/api/shipping/rates", (req, res, next) => (req.user ? customer(req, res, next) : next()), async (_req, res) => {
-    // API pengiriman otomatis dinonaktifkan sementara demi stabilitas checkout
-    res.json([]);
+  app.post("/api/shipping/rates", (req, res, next) => (req.user ? customer(req, res, next) : next()), async (req, res) => {
+    if (!env.RAJAONGKIR_API_KEY) return res.json([]);
+    const destinationId = req.body?.destinationId;
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!destinationId) return res.json([]);
+    try {
+      const rates = await rajaRates(destinationId, items);
+      res.json(rates);
+    } catch {
+      res.json([]);
+    }
   });
   app.get("/api/config", async (req, res) => {
     const [settings, categories, methods, promotions] = await Promise.all([
@@ -521,7 +629,9 @@ export function createApp(pool, options = {}) {
       categories: categories.rows.map(({ id, name, parent_id }) => ({ id, label: name, name, parentId: parent_id, parent_id })),
       promotions,
       shipping: {
-        rajaOngkir: false,
+        rajaOngkir: Boolean(env.RAJAONGKIR_API_KEY),
+        couriers: ["jnt", "jne", "tiki", "pos"],
+        originId: Number(settings.rajaOriginId || env.RAJAONGKIR_ORIGIN_ID || 31864),
         manualShippingFee: Number(settings.manualShippingFee ?? settings.localDeliveryFee ?? 15000),
         localDeliveryFee: Number(settings.localDeliveryFee ?? settings.manualShippingFee ?? 15000),
       },
@@ -1576,6 +1686,76 @@ export function createApp(pool, options = {}) {
   app.get("/api/orders/:id", auth, customer, async (req, res) =>
     res.json(await ownOrder(req)),
   );
+
+  async function findProductVariant(clientOrPool, item, { forUpdate = false, includePromo = false } = {}) {
+    const productId = String(item.id || "").trim();
+    const variantId = item.variantId ? String(item.variantId).trim() : "";
+    const size = String(item.size || "").trim();
+    const color = String(item.color || "").trim();
+    const lockClause = forUpdate ? " FOR UPDATE" : "";
+    const promoFields = includePromo
+      ? `,(SELECT sp.discount_percent FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS discount_percent,(SELECT sp.promo_price FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS promo_price`
+      : "";
+    const selectSql = `SELECT p.id,p.name,p.image,p.price,p.cost_price,p.old_price,p.variation_label,p.active,v.id AS variantId,v.price AS variantPrice,v.image_url AS variantImage,v.images_json AS variantImagesJson,v.stock,v.size AS resolvedSize,v.color AS resolvedColor${promoFields} FROM products p JOIN product_variants v ON v.product_id=p.id`;
+
+    // 1. Direct match by variant ID if provided
+    if (variantId) {
+      const byId = (
+        await clientOrPool.query(
+          `${selectSql} WHERE p.id=? AND v.id=? AND p.active=TRUE${lockClause}`,
+          [productId, variantId],
+        )
+      ).rows[0];
+      if (byId) return byId;
+    }
+
+    // 2. Exact or case-insensitive matching by size candidates + color
+    const candidates = sizeQueryCandidates(size);
+    const lowerCandidates = [...new Set(candidates.map((c) => String(c).toLowerCase()))];
+    const lowerColor = color.toLowerCase();
+
+    if (lowerCandidates.length && lowerColor) {
+      const bySizeAndColor = (
+        await clientOrPool.query(
+          `${selectSql} WHERE p.id=? AND (v.size IN (?) OR LOWER(TRIM(v.size)) IN (?)) AND LOWER(TRIM(v.color))=? AND p.active=TRUE ORDER BY (v.size=?) DESC, (v.color=?) DESC, v.stock DESC LIMIT 1${lockClause}`,
+          [productId, candidates, lowerCandidates, lowerColor, size, color],
+        )
+      ).rows[0];
+      if (bySizeAndColor) return bySizeAndColor;
+    }
+
+    // 3. Fallback: match size candidates across available variants (e.g. single-color or color unspecified)
+    if (lowerCandidates.length) {
+      const bySizeOnly = (
+        await clientOrPool.query(
+          `${selectSql} WHERE p.id=? AND (v.size IN (?) OR LOWER(TRIM(v.size)) IN (?)) AND p.active=TRUE ORDER BY (LOWER(TRIM(v.color))=?) DESC, v.stock DESC LIMIT 1${lockClause}`,
+          [productId, candidates, lowerCandidates, lowerColor],
+        )
+      ).rows[0];
+      if (bySizeOnly) return bySizeOnly;
+    }
+
+    // 4. Fallback: match color across variants (e.g. standard/single-size products)
+    if (lowerColor) {
+      const byColorOnly = (
+        await clientOrPool.query(
+          `${selectSql} WHERE p.id=? AND LOWER(TRIM(v.color))=? AND p.active=TRUE ORDER BY v.stock DESC LIMIT 1${lockClause}`,
+          [productId, lowerColor],
+        )
+      ).rows[0];
+      if (byColorOnly) return byColorOnly;
+    }
+
+    // 5. Fallback: single active variant for products with 1 option
+    const anyVariant = (
+      await clientOrPool.query(
+        `${selectSql} WHERE p.id=? AND p.active=TRUE ORDER BY v.stock DESC LIMIT 1${lockClause}`,
+        [productId],
+      )
+    ).rows[0];
+    return anyVariant || null;
+  }
+
   app.post(
     "/api/checkout/quote",
     (req, res, next) => (req.user ? customer(req, res, next) : next()),
@@ -1587,13 +1767,7 @@ export function createApp(pool, options = {}) {
       const requested=aggregateItems(f.items);
       const promotionMap=await readProductPromotions([...new Set(requested.map((item)=>item.id))]);
       for (const i of requested) {
-        const candidates = sizeQueryCandidates(i.size);
-        const p = (
-          await pool.query(
-            "SELECT p.*,v.id AS variantId,v.price AS variantPrice,v.image_url AS variantImage,v.images_json AS variantImagesJson,v.stock,v.size AS resolvedSize,v.color AS resolvedColor FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size IN (?) AND v.color=? AND p.active=TRUE",
-            [i.id, candidates, i.color],
-          )
-        ).rows[0];
+        const p = await findProductVariant(pool, i, { forUpdate: false, includePromo: false });
         if (!p) throw fail(400, "Varian produk tidak tersedia.");
         if (p.stock < i.quantity)
           throw fail(409, "Stok " + p.name + " tidak mencukupi.");
@@ -1602,7 +1776,8 @@ export function createApp(pool, options = {}) {
           images_json: p.variantImagesJson,
         });
         const resolvedSize = p.resolvedSize || i.size;
-        const resolvedVariantId = p.variantId || `${p.id}::${resolvedSize}::${p.resolvedColor || i.color}`;
+        const resolvedColor = p.resolvedColor || i.color;
+        const resolvedVariantId = p.variantId || `${p.id}::${resolvedSize}::${resolvedColor}`;
         const hasCustomPrice = p.variantPrice != null && Number(p.variantPrice) >= 1000;
         const baseUnitPrice = hasCustomPrice ? Number(p.variantPrice) : Number(p.price);
         const promo = promotionMap.get(p.id);
@@ -1617,6 +1792,7 @@ export function createApp(pool, options = {}) {
           ...i,
           variantId: resolvedVariantId,
           size: resolvedSize,
+          color: resolvedColor,
           name: p.name,
           image: variantImages[0] || p.image,
           price: unitPrice,
@@ -1705,13 +1881,7 @@ export function createApp(pool, options = {}) {
       else {
         const canonical = [];
         for (const i of items) {
-          const candidates = sizeQueryCandidates(i.size);
-          const p = (
-            await c.query(
-              "SELECT p.id,p.name,p.image,p.price,p.cost_price,p.variation_label,v.id AS variantId,v.price AS variantPrice,v.image_url AS variantImage,v.images_json AS variantImagesJson,v.stock,v.size AS resolvedSize,v.color AS resolvedColor,(SELECT sp.discount_percent FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS discount_percent,(SELECT sp.promo_price FROM store_promotions sp WHERE sp.product_id=p.id AND sp.active=TRUE ORDER BY sp.sort_order,sp.created_at DESC LIMIT 1) AS promo_price FROM products p JOIN product_variants v ON v.product_id=p.id WHERE p.id=? AND v.size IN (?) AND v.color=? AND p.active=TRUE FOR UPDATE",
-              [i.id, candidates, i.color],
-            )
-          ).rows[0];
+          const p = await findProductVariant(c, i, { forUpdate: true, includePromo: true });
           if (!p) throw fail(400, "Varian produk tidak ditemukan.");
           if (p.stock < i.quantity)
             throw fail(409, "Stok " + p.name + " tidak mencukupi.");
@@ -1723,14 +1893,17 @@ export function createApp(pool, options = {}) {
                 ? Number(p.promo_price)
                 : (p.discount_percent ? promotionPrice(baseUnitPrice, p.discount_percent) : baseUnitPrice));
           const resolvedSize = p.resolvedSize || i.size;
+          const resolvedColor = p.resolvedColor || i.color;
+          const resolvedVariantId = p.variantId || `${i.id}::${resolvedSize}::${resolvedColor}`;
           const variantImages = collectVariantImages({
             image_url: p.variantImage,
             images_json: p.variantImagesJson,
           });
           canonical.push({
             ...i,
-            variantId: p.variantId || `${i.id}::${resolvedSize}::${p.resolvedColor || i.color}`,
+            variantId: resolvedVariantId,
             size: resolvedSize,
+            color: resolvedColor,
             name: p.name,
             image: variantImages[0] || p.image,
             price: itemPrice,
@@ -1738,10 +1911,17 @@ export function createApp(pool, options = {}) {
             costPrice: p.cost_price,
             variationLabel: p.variation_label,
           });
-          await c.query(
-            "UPDATE product_variants SET stock=stock-? WHERE product_id=? AND size=? AND color=?",
-            [i.quantity, i.id, resolvedSize, i.color],
-          );
+          if (p.variantId) {
+            await c.query(
+              "UPDATE product_variants SET stock=stock-? WHERE id=?",
+              [i.quantity, p.variantId],
+            );
+          } else {
+            await c.query(
+              "UPDATE product_variants SET stock=stock-? WHERE product_id=? AND size=? AND color=?",
+              [i.quantity, i.id, resolvedSize, resolvedColor],
+            );
+          }
         }
         const shipment = await deliveryFor(f.shipping, f.shippingOption, canonical);
         const settings = await readStoreSettings();

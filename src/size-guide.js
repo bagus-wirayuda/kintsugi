@@ -45,39 +45,61 @@ export function normalizeSizeToken(value) {
  * Checks whether two size labels represent the same physical size.
  */
 export function sizesMatch(a, b) {
-  const na = normalizeSizeToken(a).toUpperCase();
-  const nb = normalizeSizeToken(b).toUpperCase();
-  if (!na || !nb) return false;
+  const rawA = String(a ?? "").trim();
+  const rawB = String(b ?? "").trim();
+  if (!rawA || !rawB) return false;
+  if (rawA.toLowerCase() === rawB.toLowerCase()) return true;
+  const na = normalizeSizeToken(rawA).toUpperCase();
+  const nb = normalizeSizeToken(rawB).toUpperCase();
   if (na === nb) return true;
-  const da = parseDimensions(a);
-  const db = parseDimensions(b);
-  return Boolean(
-    da &&
-      db &&
+  const da = parseDimensions(rawA);
+  const db = parseDimensions(rawB);
+  if (da && db) {
+    if (da.length === db.length && da.width === db.width && da.height === db.height) {
+      return true;
+    }
+    const partsA = rawA.split(/[×xX]/).map((p) => Number(p.trim()));
+    const partsB = rawB.split(/[×xX]/).map((p) => Number(p.trim()));
+    if (
+      (partsA.length === 2 || partsB.length === 2) &&
       da.length === db.length &&
-      da.width === db.width &&
-      da.height === db.height,
-  );
+      da.width === db.width
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
- * Returns candidate size strings to query MySQL safely regardless of `x` vs `×`.
+ * Returns candidate size strings to query MySQL safely regardless of `x` vs `×`,
+ * casing differences, or height omissions.
  */
 export function sizeQueryCandidates(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return [];
-  const candidates = new Set([raw]);
+  const candidates = new Set([raw, raw.toLowerCase(), raw.toUpperCase()]);
   const normalized = normalizeSizeToken(raw);
-  if (normalized) candidates.add(normalized);
+  if (normalized) {
+    candidates.add(normalized);
+    candidates.add(normalized.toLowerCase());
+    candidates.add(normalized.toUpperCase());
+  }
   const parts = raw.split(/[×xX]/).map((part) => Number(part.trim()));
   if (parts.length === 3 && parts.every((n) => Number.isInteger(n) && n >= 1 && n <= 500)) {
     candidates.add(`${parts[0]}×${parts[1]}×${parts[2]}`);
     candidates.add(`${parts[0]}x${parts[1]}x${parts[2]}`);
+    candidates.add(`${parts[0]}X${parts[1]}X${parts[2]}`);
+    candidates.add(`${parts[0]}×${parts[1]}`);
+    candidates.add(`${parts[0]}x${parts[1]}`);
   } else if (parts.length === 2 && parts.every((n) => Number.isInteger(n) && n >= 1 && n <= 500)) {
     candidates.add(`${parts[0]}×${parts[1]}`);
     candidates.add(`${parts[0]}x${parts[1]}`);
-    candidates.add(`${parts[0]}×${parts[1]}×30`);
-    candidates.add(`${parts[0]}x${parts[1]}x30`);
+    const heights = [30, 35, 20, 25, 40, 15];
+    for (const h of heights) {
+      candidates.add(`${parts[0]}×${parts[1]}×${h}`);
+      candidates.add(`${parts[0]}x${parts[1]}x${h}`);
+    }
   }
   return [...candidates];
 }

@@ -13,13 +13,14 @@ export const orderSchema = z.object({
   items: z
     .array(
       z.object({
-        id: z.string().min(1).max(40),
-        variantId: z.string().trim().max(80).optional(),
-        size: z.string().min(1).max(30).transform((value) => {
-          const dimensions = parseDimensions(value);
+        id: z.string().trim().min(1).max(40),
+        variantId: z.string().trim().max(80).nullish(),
+        size: z.string().trim().min(1).max(80).transform((value) => {
+          const trimmed = value.trim();
+          const dimensions = parseDimensions(trimmed);
           return dimensions
             ? `${dimensions.length}×${dimensions.width}×${dimensions.height}`
-            : value;
+            : trimmed;
         }),
         color: z.string().trim().min(1).max(100),
         quantity: z.number().int().min(1).max(99),
@@ -68,13 +69,22 @@ export function calculateTotals(items, coupon, shipping, deliveryOverride, manua
 export function aggregateItems(items) {
   const result = new Map();
   for (const i of items) {
-    const normalizedSize = normalizeSizeToken(i.size) || i.size;
-    const key = [i.id, normalizedSize, i.color].join(":");
+    const normalizedSize = normalizeSizeToken(i.size) || String(i.size ?? "").trim();
+    const cleanColor = String(i.color ?? "").trim();
+    const cleanVariantId = i.variantId ? String(i.variantId).trim() : "";
+    const key = cleanVariantId || [i.id, normalizedSize.toLowerCase(), cleanColor.toLowerCase()].join(":");
     const existing = result.get(key);
     if (existing) {
       existing.quantity += i.quantity;
-      if (i.variantId && !existing.variantId) existing.variantId = i.variantId;
-    } else result.set(key, { ...i, size: normalizedSize });
+      if (cleanVariantId && !existing.variantId) existing.variantId = cleanVariantId;
+    } else {
+      result.set(key, {
+        ...i,
+        variantId: cleanVariantId || undefined,
+        size: normalizedSize,
+        color: cleanColor,
+      });
+    }
   }
   const rows = [...result.values()].sort((a, b) =>
     [a.id, a.size, a.color]

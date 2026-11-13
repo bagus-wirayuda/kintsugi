@@ -371,14 +371,20 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
 
   useEffect(() => {
     if (product) {
-      if (product.colors?.length && !selectedColor) {
-        setSelectedColor(product.colors[0]);
+      const validColor = product.colors?.includes(selectedColor)
+        ? selectedColor
+        : (product.colors?.[0] || "");
+      if (validColor !== selectedColor) {
+        setSelectedColor(validColor);
       }
-      if (product.sizes?.length && !selectedSize) {
-        setSelectedSize(product.sizes[0]);
+      const validSize = product.sizes?.includes(selectedSize)
+        ? selectedSize
+        : (product.sizes?.[0] || "");
+      if (validSize !== selectedSize) {
+        setSelectedSize(validSize);
       }
     }
-  }, [product]);
+  }, [product?.id]);
 
   // Compute selected variant and stock
   const activeVariantInfo = resolveActiveVariant(product, selectedColor, selectedSize);
@@ -583,17 +589,20 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
               disabled={!product || currentStock < 1}
               onClick={() => {
                 if (!product) return;
-                const key = `${product.id}:${selectedSize}:${selectedColor}`;
+                const resolvedSize = activeVariantInfo.variant?.size || selectedSize;
+                const resolvedColor = activeVariantInfo.variant?.color || selectedColor;
+                const resolvedVariantId = activeVariantInfo.variantId || activeVariantInfo.variant?.id || "";
+                const key = `${product.id}:${resolvedSize}:${resolvedColor}`;
                 onBuyDirect?.({
                   ...product,
-                  variantId: activeVariantInfo.variantId,
+                  variantId: resolvedVariantId,
                   image: displayImage,
                   price: salePrice,
                   oldPrice: basePrice > salePrice ? basePrice : 0,
                   stock: currentStock,
                   key,
-                  size: selectedSize,
-                  color: selectedColor,
+                  size: resolvedSize,
+                  color: resolvedColor,
                   quantity,
                 });
               }}
@@ -608,17 +617,20 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
               disabled={!product || currentStock < 1}
               onClick={(e) => {
                 if (!product) return;
-                const key = `${product.id}:${selectedSize}:${selectedColor}`;
+                const resolvedSize = activeVariantInfo.variant?.size || selectedSize;
+                const resolvedColor = activeVariantInfo.variant?.color || selectedColor;
+                const resolvedVariantId = activeVariantInfo.variantId || activeVariantInfo.variant?.id || "";
+                const key = `${product.id}:${resolvedSize}:${resolvedColor}`;
                 onAddToCart?.({
                   ...product,
-                  variantId: activeVariantInfo.variantId,
+                  variantId: resolvedVariantId,
                   image: displayImage,
                   price: salePrice,
                   oldPrice: basePrice > salePrice ? basePrice : 0,
                   stock: currentStock,
                   key,
-                  size: selectedSize,
-                  color: selectedColor,
+                  size: resolvedSize,
+                  color: resolvedColor,
                   quantity,
                 }, e.currentTarget);
               }}

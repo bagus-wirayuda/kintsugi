@@ -60,9 +60,20 @@ export default function Checkout({
     ...initial?.address,
   }));
   const [editingAddress, setEditingAddress] = useState(false);
-  const [shipping, setShipping] = useState(
-    ["local", "pickup"].includes(initial?.shipping) ? initial.shipping : "local"
-  );
+  const hasRaja = Boolean(config?.shipping?.rajaOngkir);
+  const [destinationId, setDestinationId] = useState(() => initial?.destinationId || null);
+  const [destinationLabel, setDestinationLabel] = useState(() => initial?.destinationLabel || "");
+  const [destinationOptions, setDestinationOptions] = useState([]);
+  const [searchingDestinations, setSearchingDestinations] = useState(false);
+  const [showDestDropdown, setShowDestDropdown] = useState(false);
+  const [shippingRates, setShippingRates] = useState([]);
+  const [loadingRates, setLoadingRates] = useState(false);
+  const [ratesError, setRatesError] = useState("");
+
+  const [shipping, setShipping] = useState(() => {
+    if (["rajaongkir", "local", "pickup"].includes(initial?.shipping)) return initial.shipping;
+    return hasRaja ? "rajaongkir" : "local";
+  });
   const manualFee = Number(
     config?.shipping?.manualShippingFee ?? config?.shipping?.localDeliveryFee ?? 15000
   );
@@ -70,6 +81,12 @@ export default function Checkout({
   const resolveShippingOption = (opt, ship = shipping) => {
     if (ship === "pickup") {
       return { courier: "TOKO", service: "Ambil di Toko", cost: 0 };
+    }
+    if (ship === "rajaongkir") {
+      if (opt && typeof opt === "object" && opt.courier && opt.service) {
+        return opt;
+      }
+      return null;
     }
     if (opt && typeof opt === "object" && opt.courier && opt.service) {
       return opt;
@@ -81,8 +98,65 @@ export default function Checkout({
     if (initial?.shippingOption && typeof initial.shippingOption === "object") {
       return initial.shippingOption;
     }
-    return { courier: "TOKO", service: "Standar", cost: manualFee };
+    return hasRaja ? null : { courier: "TOKO", service: "Standar", cost: manualFee };
   });
+
+  const fetchShippingRates = (destId) => {
+    if (!destId || !cart.length) {
+      setShippingRates([]);
+      return;
+    }
+    setLoadingRates(true);
+    setRatesError("");
+    api("/shipping/rates", {
+      method: "POST",
+      body: {
+        destinationId: destId,
+        items: cart.map(({ id, quantity }) => ({
+          id: String(id).trim(),
+          quantity: Math.max(1, Math.min(99, Math.trunc(Number(quantity) || 1))),
+        })),
+      },
+    })
+      .then((rates) => {
+        const validRates = Array.isArray(rates) ? rates : [];
+        setShippingRates(validRates);
+        if (validRates.length > 0) {
+          setShippingOption((curr) => {
+            const matched = validRates.find(
+              (r) => r.courier === curr?.courier && r.service === curr?.service
+            );
+            return matched || validRates[0];
+          });
+        }
+      })
+      .catch((err) => {
+        setRatesError(err.message || "Gagal memuat tarif pengiriman.");
+      })
+      .finally(() => {
+        setLoadingRates(false);
+      });
+  };
+
+  useEffect(() => {
+    if (destinationId && hasRaja) {
+      fetchShippingRates(destinationId);
+    }
+  }, [destinationId, cart.length]);
+
+  useEffect(() => {
+    if (!destinationId && address.city && address.city.length >= 2 && hasRaja) {
+      const q = address.city.split(",")[0].trim();
+      api(`/shipping/destinations?search=${encodeURIComponent(q)}`)
+        .then((options) => {
+          if (Array.isArray(options) && options.length > 0) {
+            setDestinationId(options[0].id);
+            setDestinationLabel(options[0].label);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [hasRaja]);
 
   const [payment, setPayment] = useState(
     initial?.shipping === "pickup" ? "" : (initial?.payment || "")
@@ -127,6 +201,9 @@ export default function Checkout({
         setEditingAddress(true);
         return "Alamat jalan pengiriman lengkap wajib diisi (minimal 10 karakter jalan, no. rumah, RT/RW).";
       }
+      if (shipping === "rajaongkir" && (!shippingOption || !shippingOption.courier || !shippingOption.service)) {
+        return "Pilih salah satu layanan kurir resmi (J&T, JNE, TIKI, atau POS) untuk melanjutkan.";
+      }
     }
     if (!cart.length) {
       return "Keranjang belanja masih kosong.";
@@ -166,9 +243,11 @@ export default function Checkout({
       identity,
       payment,
       shippingOption,
+      destinationId,
+      destinationLabel,
       step,
     });
-  }, [owner, address, shipping, identity, payment, shippingOption, step]);
+  }, [owner, address, shipping, identity, payment, shippingOption, destinationId, destinationLabel, step]);
 
   useEffect(() => {
     if (!user) return;
@@ -212,11 +291,11 @@ export default function Checkout({
       signal: c.signal,
       body: {
         items: cart.map(({ id, variantId, size, color, quantity }) => ({
-          id,
-          ...(variantId ? { variantId } : {}),
-          size,
-          color,
-          quantity,
+          id: String(id).trim(),
+          ...(variantId && String(variantId).trim() ? { variantId: String(variantId).trim() } : {}),
+          size: String(size ?? "").trim(),
+          color: String(color ?? "").trim(),
+          quantity: Math.max(1, Math.min(99, Math.trunc(Number(quantity) || 1))),
         })),
         coupon,
         shipping,
@@ -251,11 +330,11 @@ export default function Checkout({
     };
     const payload = {
       items: cart.map(({ id, variantId, size, color, quantity }) => ({
-        id,
-        ...(variantId ? { variantId } : {}),
-        size,
-        color,
-        quantity,
+        id: String(id).trim(),
+        ...(variantId && String(variantId).trim() ? { variantId: String(variantId).trim() } : {}),
+        size: String(size ?? "").trim(),
+        color: String(color ?? "").trim(),
+        quantity: Math.max(1, Math.min(99, Math.trunc(Number(quantity) || 1))),
       })),
       address: cleanAddress,
       shipping,
@@ -551,18 +630,67 @@ export default function Checkout({
                               autoComplete: "tel",
                               placeholder: "08xxxxxxxxxx",
                             })}
-                            {field(
-                              "city",
-                              shipping === "pickup"
-                                ? "Kota (opsional untuk ambil di toko)"
-                                : "Kota / kabupaten",
-                              {
-                                minLength: shipping === "pickup" ? 0 : 2,
-                                maxLength: 100,
-                                autoComplete: "address-level2",
-                                placeholder: "Kota / kabupaten",
-                              }
-                            )}
+                            <div className="ks-dest-autocomplete-wrapper">
+                              {field(
+                                "city",
+                                shipping === "pickup"
+                                  ? "Kota (opsional untuk ambil di toko)"
+                                  : "Kota / Kabupaten / Kecamatan",
+                                {
+                                  minLength: shipping === "pickup" ? 0 : 2,
+                                  maxLength: 150,
+                                  autoComplete: "off",
+                                  placeholder: "Ketik kecamatan atau kota tujuan...",
+                                  onChange: (e) => {
+                                    const val = e.target.value;
+                                    setAddress((a) => ({ ...a, city: val }));
+                                    setIdentity(false);
+                                    if (val.trim().length >= 2 && hasRaja) {
+                                      setShowDestDropdown(true);
+                                      setSearchingDestinations(true);
+                                      api(`/shipping/destinations?search=${encodeURIComponent(val.trim())}`)
+                                        .then((res) => {
+                                          if (Array.isArray(res)) setDestinationOptions(res);
+                                        })
+                                        .catch(() => {})
+                                        .finally(() => setSearchingDestinations(false));
+                                    } else {
+                                      setDestinationOptions([]);
+                                      setShowDestDropdown(false);
+                                    }
+                                  },
+                                }
+                              )}
+                              {showDestDropdown && destinationOptions.length > 0 && (
+                                <div className="ks-dest-dropdown">
+                                  {destinationOptions.map((opt) => (
+                                    <button
+                                      type="button"
+                                      key={opt.id}
+                                      className="ks-dest-item"
+                                      onClick={() => {
+                                        setDestinationId(opt.id);
+                                        setDestinationLabel(opt.label);
+                                        setAddress((a) => ({
+                                          ...a,
+                                          city: opt.label,
+                                          postal: opt.postal || a.postal,
+                                        }));
+                                        setShowDestDropdown(false);
+                                        setDestinationOptions([]);
+                                        fetchShippingRates(opt.id);
+                                      }}
+                                    >
+                                      <span className="ks-dest-label">{opt.label}</span>
+                                      <span className="ks-dest-sub">
+                                        {opt.subdistrict ? `${opt.subdistrict}, ` : ""}
+                                        {opt.city}, {opt.province} {opt.postal ? `(${opt.postal})` : ""}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             {field(
                               "street",
                               shipping === "pickup"
@@ -610,23 +738,37 @@ export default function Checkout({
                       </div>
                       <div className="checkout-shipping">
                         {[
+                          ...(hasRaja
+                            ? [
+                                [
+                                  "rajaongkir",
+                                  "Ekspedisi Resmi (J&T, JNE, TIKI, POS)",
+                                  "Tarif otomatis real-time sesuai lokasi tujuan & berat paket",
+                                  shippingOption?.cost != null ? shippingOption.cost : null,
+                                ],
+                              ]
+                            : []),
                           [
                             "local",
-                            "Pengiriman Standar",
-                            "Kurir toko / ekspedisi reguler · ongkir manual toko",
+                            "Kurir Toko / Pengiriman Standar",
+                            "Kurir toko / ekspedisi reguler · ongkir manual flat",
                             manualFee,
                           ],
                           [
                             "pickup",
                             "Ambil di Toko",
-                            "Ambil pesanan langsung di toko tanpa ongkos kirim",
+                            "Ambil pesanan langsung di toko fisik tanpa ongkos kirim",
                             0,
                           ],
                         ].map(([value, title, detail, price]) => {
                           const isFree =
                             value !== "pickup" && total.subtotal >= 699000;
                           const displayPrice =
-                            value === "pickup" ? 0 : isFree ? 0 : price;
+                            value === "pickup"
+                              ? 0
+                              : isFree
+                                ? 0
+                                : price;
                           return (
                             <label
                               className={shipping === value ? "selected" : ""}
@@ -646,6 +788,20 @@ export default function Checkout({
                                       service: "Ambil di Toko",
                                       cost: 0,
                                     });
+                                  } else if (value === "rajaongkir") {
+                                    if (payment === "store_pickup") setPayment("");
+                                    if (shippingRates.length > 0) {
+                                      const matched = shippingRates.find(
+                                        (r) => r.courier === shippingOption?.courier && r.service === shippingOption?.service
+                                      ) || shippingRates[0];
+                                      setShippingOption({
+                                        ...matched,
+                                        cost: isFree ? 0 : matched.cost,
+                                        destinationId,
+                                      });
+                                    } else {
+                                      setShippingOption(null);
+                                    }
                                   } else {
                                     if (payment === "store_pickup") setPayment("");
                                     setShippingOption({
@@ -665,14 +821,131 @@ export default function Checkout({
                                 </small>
                               </div>
                               <strong>
-                                {displayPrice === 0
-                                  ? "Gratis"
-                                  : money(displayPrice)}
+                                {displayPrice === null
+                                  ? (shippingOption?.cost != null ? (isFree ? "Gratis" : money(shippingOption.cost)) : "Pilih kurir")
+                                  : displayPrice === 0
+                                    ? "Gratis"
+                                    : money(displayPrice)}
                               </strong>
                             </label>
                           );
                         })}
                       </div>
+
+                      {/* Panel Kurir Resmi: J&T, JNE, TIKI, POS */}
+                      {shipping === "rajaongkir" && hasRaja && (
+                        <div className="ks-raja-panel">
+                          <div className="ks-raja-panel-header">
+                            <span className="ks-raja-badge">
+                              <Truck size={15} /> Pilihan Kurir Resmi (J&T, JNE, TIKI, POS)
+                            </span>
+                            {destinationLabel && (
+                              <small className="ks-raja-dest-info">
+                                Tujuan: <b>{destinationLabel}</b>
+                              </small>
+                            )}
+                          </div>
+
+                          {!destinationId ? (
+                            <div className="ks-raja-hint">
+                              <MapPin size={18} />
+                              <div>
+                                <b>Pilih Kecamatan / Kota Tujuan</b>
+                                <p>Ketik nama kecamatan atau kota Anda di kolom formulir alamat di atas untuk melihat tarif pengiriman resmi J&T, JNE, TIKI, dan POS.</p>
+                              </div>
+                            </div>
+                          ) : loadingRates ? (
+                            <div className="ks-raja-loading">
+                              <Clock size={16} />
+                              <span>Menghitung tarif resmi J&T, JNE, TIKI, dan POS...</span>
+                            </div>
+                          ) : ratesError ? (
+                            <div className="ks-raja-error">
+                              <p>{ratesError}</p>
+                              <button
+                                type="button"
+                                className="ws-link"
+                                onClick={() => fetchShippingRates(destinationId)}
+                              >
+                                Coba lagi
+                              </button>
+                            </div>
+                          ) : shippingRates.length === 0 ? (
+                            <div className="ks-raja-empty">
+                              <p>Belum ada rute ekspedisi langsung untuk tujuan ini. Anda dapat memilih opsi <b>Kurir Toko / Pengiriman Standar</b>.</p>
+                            </div>
+                          ) : (
+                            <div className="ks-raja-rates-grid">
+                              {shippingRates.map((rate) => {
+                                const isSelected =
+                                  shippingOption?.courier === rate.courier &&
+                                  shippingOption?.service === rate.service;
+                                const isFree = total.subtotal >= 699000;
+                                const displayCost = isFree ? 0 : rate.cost;
+
+                                const courierTheme = {
+                                  jnt: { badge: "J&T Express", color: "#E11D48", bg: "#FFF1F2" },
+                                  jne: { badge: "JNE", color: "#1E40AF", bg: "#EFF6FF" },
+                                  tiki: { badge: "TIKI", color: "#0284C7", bg: "#F0F9FF" },
+                                  pos: { badge: "POS Indonesia", color: "#EA580C", bg: "#FFF7ED" },
+                                }[rate.courier] || { badge: rate.courierName, color: "#475569", bg: "#F8FAFC" };
+
+                                return (
+                                  <label
+                                    key={`${rate.courier}-${rate.service}`}
+                                    className={`ks-courier-rate-card ${isSelected ? "selected" : ""}`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="courierRateChoice"
+                                      checked={isSelected}
+                                      onChange={() => {
+                                        setShippingOption({
+                                          courier: rate.courier,
+                                          courierName: rate.courierName,
+                                          service: rate.service,
+                                          description: rate.description,
+                                          cost: isFree ? 0 : rate.cost,
+                                          etd: rate.etd,
+                                          destinationId,
+                                        });
+                                      }}
+                                    />
+                                    <div className="ks-rate-info">
+                                      <div className="ks-rate-brand-row">
+                                        <span
+                                          className="ks-courier-badge"
+                                          style={{
+                                            color: courierTheme.color,
+                                            backgroundColor: courierTheme.bg,
+                                            borderColor: courierTheme.color,
+                                          }}
+                                        >
+                                          {courierTheme.badge}
+                                        </span>
+                                        <strong className="ks-service-name">{rate.service}</strong>
+                                      </div>
+                                      {rate.description && rate.description !== rate.service && (
+                                        <small className="ks-rate-desc">{rate.description}</small>
+                                      )}
+                                      <div className="ks-rate-etd">
+                                        <Clock size={13} />
+                                        <span>Estimasi sampai: <b>{rate.etd}</b></span>
+                                      </div>
+                                    </div>
+                                    <div className="ks-rate-price">
+                                      <strong>{displayCost === 0 ? "Gratis" : money(displayCost)}</strong>
+                                      {isFree && rate.cost > 0 && (
+                                        <del className="ks-free-strike">{money(rate.cost)}</del>
+                                      )}
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </section>
                   </fieldset>
                 </form>
@@ -707,7 +980,9 @@ export default function Checkout({
                           <b>Layanan: </b>
                           {shipping === "pickup"
                             ? "Ambil Langsung di Toko (Gratis Ongkir Rp0)"
-                            : "Pengiriman Standar Kurir Toko"}
+                            : shipping === "rajaongkir"
+                              ? `${shippingOption?.courierName || "Ekspedisi Resmi"} ${shippingOption?.service || ""} (${total.subtotal >= 699000 ? "Gratis Ongkir" : money(shippingOption?.cost || 0)})`
+                              : "Pengiriman Standar Kurir Toko"}
                         </p>
                         {shipping !== "pickup" ? (
                           <p className="ks-saved-street">

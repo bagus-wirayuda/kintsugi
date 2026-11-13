@@ -148,6 +148,15 @@ export function resolveVariationDisplayMode(options = [], variants = [], variati
 }
 
 /**
+ * Checks whether two color labels represent the same color (case-insensitive & trimmed).
+ */
+export function colorsMatch(a, b) {
+  const ca = String(a ?? "").trim().toLowerCase();
+  const cb = String(b ?? "").trim().toLowerCase();
+  return Boolean(ca && cb && ca === cb);
+}
+
+/**
  * Resolves the active database variant row for (selectedColor, selectedSize),
  * falling back cleanly to the active color's first in-stock or first variant when size is unset.
  */
@@ -171,14 +180,14 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
   const exactVariant =
     selectedColor && selectedSize
       ? variants.find(
-          (v) => v.color === selectedColor && sizesMatch(v.size, selectedSize),
+          (v) => colorsMatch(v.color, selectedColor) && sizesMatch(v.size, selectedSize),
         ) || null
       : selectedSize
         ? variants.find((v) => sizesMatch(v.size, selectedSize)) || null
         : null;
 
   const colorSiblings = selectedColor
-    ? variants.filter((v) => v.color === selectedColor)
+    ? variants.filter((v) => colorsMatch(v.color, selectedColor))
     : variants;
 
   const fallbackVariant =
