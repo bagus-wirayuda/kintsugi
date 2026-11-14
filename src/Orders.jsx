@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "./store";
 import { colorLabel, money } from "./data";
-import { paymentName } from './payment-methods';
+import { paymentName, isManualPaymentMethod } from './payment-methods';
 import { Notice, Status } from "./Workspace";
 import { dimensionLabel } from "./dimensions.js";
 import QrisPanel from "./QrisPanel.jsx";
@@ -27,6 +27,7 @@ export const paymentLabel = {
   FAILED: "Pembayaran gagal",
   EXPIRED: "Kedaluwarsa",
   CANCELLED: "Dibatalkan",
+  REJECTED: "Pembayaran Ditolak",
 };
 export default function OrderCard({ order: o, onRefresh, notify, config }) {
   const [busy, setBusy] = useState(false),
@@ -81,10 +82,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
     cancelled = o.status === "Dibatalkan",
     isStorePickup = o.payment_type === "store_pickup" || o.payment === "store_pickup",
     isCod = !isStorePickup && (o.payment_type === "cod" || o.payment === "COD"),
-    isQrisManual =
-      !isStorePickup &&
-      (o.payment_type === "qris_manual" ||
-        Boolean(o.qris_payload || o.qris_static_payload));
+    isManual = !isStorePickup && !isCod && isManualPaymentMethod(o);
   const waDigits = String(config?.contactPhone || "").replace(/\D/g, "");
   const waHref = waDigits
     ? `https://wa.me/${waDigits.startsWith("0") ? "62" + waDigits.slice(1) : waDigits}`
@@ -287,7 +285,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
           )}
         </div>
       )}
-      {isQrisManual && (pending || o.payment_proof_url) && (
+      {isManual && (pending || o.payment_proof_url || o.payment_status === "WAITING_VERIFICATION" || o.payment_status === "REJECTED") && (
         <QrisPanel
           order={o}
           onUpdated={() => onRefresh?.()}
@@ -304,7 +302,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
             <p className="ws-payment-expiry" style={{ width: "100%", margin: "4px 0" }}>
               Metode Bayar di Tempat (COD). Siapkan uang pas kepada kurir saat pesanan sampai.
             </p>
-          ) : isQrisManual ? null : (
+          ) : isManual ? null : (
             <>
               {o.payment_url && /^https?:\/\//i.test(o.payment_url) && (
                 <a className="ws-button primary" href={o.payment_url}>

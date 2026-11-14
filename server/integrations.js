@@ -309,10 +309,29 @@ export async function flushWhatsApp(pool, env = process.env, transport = fetch) 
           [msg.id],
         );
       } catch (e) {
-        await c.query(
-          "UPDATE wa_outbox SET attempts=attempts+1,last_error=?,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 30 MINUTE) WHERE id=?",
-          [e.message.slice(0, 500), msg.id],
-        );
+        const nextAttempts = Number(msg.attempts || 0) + 1;
+        const errMsg = (e.message || "Gagal mengirim pesan").slice(0, 500);
+        if (nextAttempts >= 8) {
+          await c.query(
+            "UPDATE wa_outbox SET status='failed',attempts=?,last_error=? WHERE id=?",
+            [nextAttempts, errMsg, msg.id],
+          );
+        } else {
+          const interval =
+            nextAttempts === 1
+              ? "INTERVAL 1 MINUTE"
+              : nextAttempts === 2
+                ? "INTERVAL 5 MINUTE"
+                : nextAttempts === 3
+                  ? "INTERVAL 15 MINUTE"
+                  : nextAttempts === 4
+                    ? "INTERVAL 30 MINUTE"
+                    : "INTERVAL 60 MINUTE";
+          await c.query(
+            `UPDATE wa_outbox SET attempts=?,last_error=?,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3), ${interval}) WHERE id=?`,
+            [nextAttempts, errMsg, msg.id],
+          );
+        }
       }
       await c.query("COMMIT");
     } catch (e) {

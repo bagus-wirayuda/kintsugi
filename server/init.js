@@ -1299,6 +1299,94 @@ export async function initialize(target = pool, seed = true) {
     await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_store_pickup_status_and_settings"]);
   }
 
+  const variantPricingMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_variant_based_pricing_and_default_variants"],
+  )).rows[0];
+  if (!variantPricingMigration) {
+    // 1. Migrasi harga lama ke varian jika varian belum memiliki harga
+    await target.query(`
+      UPDATE product_variants pv
+      JOIN products p ON p.id = pv.product_id
+      SET pv.price = p.price
+      WHERE pv.price IS NULL OR pv.price = 0
+    `);
+
+    // 2. Buat varian default internal untuk produk yang belum memiliki varian
+    const prodsWithoutVariants = (await target.query(`
+      SELECT p.id, p.price, p.image
+      FROM products p
+      LEFT JOIN product_variants pv ON pv.product_id = p.id
+      WHERE pv.id IS NULL
+    `)).rows;
+
+    for (const p of prodsWithoutVariants) {
+      await target.query(`
+        INSERT INTO product_variants (id, product_id, size, length_cm, width_cm, height_cm, color, price, image_url, images_json, stock)
+        VALUES (?, ?, 'Standard', 0, 0, 0, 'Default', ?, ?, NULL, 10)
+      `, [randomUUID(), p.id, p.price || 1000, p.image || null]);
+    }
+
+    // 3. Pastikan kolom price pada tabel products diisi dengan harga varian termurah
+    await target.query(`
+      UPDATE products p
+      JOIN (
+        SELECT product_id, MIN(price) AS min_price
+        FROM product_variants
+        WHERE price IS NOT NULL AND price >= 1000
+        GROUP BY product_id
+      ) v_min ON v_min.product_id = p.id
+      SET p.price = v_min.min_price
+    `);
+
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_variant_based_pricing_and_default_variants"]);
+  }
+
+  // Migrasi Pembayaran Manual (Bank, E-Wallet, QRIS) & Notifikasi WhatsApp Terstruktur
+  const manualPaymentsFlowMigration = (await target.query(
+    "SELECT id FROM app_migrations WHERE id=?",
+    ["2026_comprehensive_manual_payments_and_whatsapp_flow"],
+  )).rows[0];
+  if (!manualPaymentsFlowMigration) {
+    const ensureColumn = async (table, name, sql) => {
+      const columns = (await target.query(`SHOW COLUMNS FROM ${table}`)).rows;
+      if (!columns.some((column) => column.Field === name)) {
+        await target.query(`ALTER TABLE ${table} ADD COLUMN ${sql}`);
+      }
+    };
+
+    // 1. Tambah kolom rekening & petunjuk pada store_payment_methods
+    await ensureColumn("store_payment_methods", "account_number", "account_number VARCHAR(100) NOT NULL DEFAULT ''");
+    await ensureColumn("store_payment_methods", "account_name", "account_name VARCHAR(150) NOT NULL DEFAULT ''");
+    await ensureColumn("store_payment_methods", "instructions", "instructions TEXT NULL");
+
+    // 2. Tambah kolom snapshot rekening & petunjuk pada orders
+    await ensureColumn("orders", "account_number", "account_number VARCHAR(100) NOT NULL DEFAULT ''");
+    await ensureColumn("orders", "account_name", "account_name VARCHAR(150) NOT NULL DEFAULT ''");
+    await ensureColumn("orders", "instructions", "instructions TEXT NULL");
+
+    // 3. Update enum payment_status pada tabel orders agar mendukung REJECTED
+    await target.query(
+      "ALTER TABLE orders MODIFY COLUMN payment_status ENUM('CREATING','PENDING','WAITING_VERIFICATION','PAID','FAILED','EXPIRED','CANCELLED','REJECTED') NOT NULL DEFAULT 'CREATING'"
+    );
+
+    // 4. Update enum status pada tabel wa_outbox agar mendukung failed
+    await target.query(
+      "ALTER TABLE wa_outbox MODIFY COLUMN status ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending'"
+    );
+
+    // 5. Inisialisasi metode pembayaran Bank Transfer Manual (BCA) & E-Wallet Manual (DANA) jika belum ada
+    await target.query(`
+      INSERT IGNORE INTO store_payment_methods
+        (id, name, group_name, detail, payment_type, account_number, account_name, instructions, enabled, sort_order)
+      VALUES
+        ('BANK_BCA_MANUAL', 'Transfer Bank BCA', 'Bank', 'Transfer manual ke rekening BCA toko lalu unggah bukti transfer.', 'manual', '1234567890', 'PT Liny Jaya', 'Transfer ke rekening BCA 1234567890 a.n. PT Liny Jaya. Setelah transfer berhasil, klik tombol \"Saya Sudah Melakukan Pembayaran\" dan unggah bukti transfer Anda.', TRUE, 2),
+        ('EWALLET_DANA_MANUAL', 'Transfer DANA / E-Wallet', 'E-Wallet', 'Transfer manual ke nomor akun DANA toko lalu unggah bukti transfer.', 'manual', '081234567890', 'PT Liny Jaya', 'Transfer ke nomor DANA 081234567890 a.n. PT Liny Jaya. Setelah transfer berhasil, klik tombol \"Saya Sudah Melakukan Pembayaran\" dan unggah bukti transfer Anda.', TRUE, 3)
+    `);
+
+    await target.query("INSERT INTO app_migrations(id) VALUES(?)", ["2026_comprehensive_manual_payments_and_whatsapp_flow"]);
+  }
+
   if (!seed) return;
   const client = await target.connect();
   try {

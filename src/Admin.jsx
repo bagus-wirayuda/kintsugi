@@ -51,7 +51,7 @@ import { colorLabel, money, formatRupiah, parseRupiah, formatRupiahInput } from 
 import RupiahInput from "./RupiahInput.jsx";
 import { paymentLabel } from "./Orders";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
-import { PAYMENT_GROUPS, paymentName, isStorePickupMethod } from "./payment-methods.js";
+import { PAYMENT_GROUPS, paymentName, isStorePickupMethod, isManualPaymentMethod, isManualQrisMethod } from "./payment-methods.js";
 import { SAMPLE_DANA_QRIS_PAYLOAD, validateQrisPayload } from "./qris.js";
 import { collectVariantImages } from "./variant-utils.js";
 import { resolveShippingInfo } from "./shipping-info.js";
@@ -124,6 +124,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
 
   const [productImagePreview, setProductImagePreview] = useState("");
   const [uploadingMainImage, setUploadingMainImage] = useState(false);
+  const [activeLightboxImage, setActiveLightboxImage] = useState(null);
+  const [storeLogoPreview, setStoreLogoPreview] = useState("");
+  const [storeHeroPreview, setStoreHeroPreview] = useState("");
+  const [waTestPhone, setWaTestPhone] = useState("");
+  const [waTestMessage, setWaTestMessage] = useState("Uji koneksi gateway WhatsApp Kintsugi berhasil!");
+  const [waTestResult, setWaTestResult] = useState(null);
+  const [waOutboxList, setWaOutboxList] = useState([]);
+  const [waOutboxLoading, setWaOutboxLoading] = useState(false);
   const mainFileInputRef = useRef(null);
   const mainImageInputRef = useRef(null);
 
@@ -140,6 +148,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
       cancelled:
         "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
+      payment_confirmation_customer:
+        "Terima kasih, [nama].\n\nKonfirmasi pembayaran pesanan #[nomor_pesanan] sebesar [total] melalui [metode_pembayaran] telah kami terima.\n\nPembayaran Anda sedang dalam proses verifikasi oleh Admin [toko]. Kami akan mengirimkan informasi setelah pemeriksaan selesai.",
+      payment_verification_admin:
+        "PERMINTAAN VERIFIKASI PEMBAYARAN\n\nPelanggan: [nama]\nNo. Pesanan: [nomor_pesanan]\nMetode: [metode_pembayaran]\nNominal: [total]\nWaktu Konfirmasi: [waktu_konfirmasi]\n\nPelanggan telah mengunggah bukti pembayaran. Silakan periksa mutasi rekening dan lakukan verifikasi pembayaran melalui dashboard Admin [toko]:\n[url_verifikasi]",
+      payment_approved:
+        "Halo [nama],\n\nPembayaran untuk pesanan #[nomor_pesanan] sebesar [total] telah berhasil diverifikasi dan kami terima.\n\nPesanan Anda sedang diproses dan dipersiapkan untuk pengiriman. Terima kasih telah berbelanja di [toko].",
+      payment_rejected:
+        "Halo [nama],\n\nMohon maaf, bukti pembayaran untuk pesanan #[nomor_pesanan] belum dapat kami verifikasi karena:\n\"[alasan_penolakan]\"\n\nSilakan periksa kembali transaksi Anda dan unggah ulang bukti pembayaran yang sesuai melalui tautan berikut:\n[url_pesanan]",
     }),
     [],
   );
@@ -156,6 +172,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
     cancelled:
       "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
+    payment_confirmation_customer:
+      "Terima kasih, [nama].\n\nKonfirmasi pembayaran pesanan #[nomor_pesanan] sebesar [total] melalui [metode_pembayaran] telah kami terima.\n\nPembayaran Anda sedang dalam proses verifikasi oleh Admin [toko]. Kami akan mengirimkan informasi setelah pemeriksaan selesai.",
+    payment_verification_admin:
+      "PERMINTAAN VERIFIKASI PEMBAYARAN\n\nPelanggan: [nama]\nNo. Pesanan: [nomor_pesanan]\nMetode: [metode_pembayaran]\nNominal: [total]\nWaktu Konfirmasi: [waktu_konfirmasi]\n\nPelanggan telah mengunggah bukti pembayaran. Silakan periksa mutasi rekening dan lakukan verifikasi pembayaran melalui dashboard Admin [toko]:\n[url_verifikasi]",
+    payment_approved:
+      "Halo [nama],\n\nPembayaran untuk pesanan #[nomor_pesanan] sebesar [total] telah berhasil diverifikasi dan kami terima.\n\nPesanan Anda sedang diproses dan dipersiapkan untuk pengiriman. Terima kasih telah berbelanja di [toko].",
+    payment_rejected:
+      "Halo [nama],\n\nMohon maaf, bukti pembayaran untuk pesanan #[nomor_pesanan] belum dapat kami verifikasi karena:\n\"[alasan_penolakan]\"\n\nSilakan periksa kembali transaksi Anda dan unggah ulang bukti pembayaran yang sesuai melalui tautan berikut:\n[url_pesanan]",
   }));
 
   useEffect(() => {
@@ -645,42 +669,64 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       await reloadConfig?.();
     }
   }
-  async function uploadAsset(file, input) {
+  async function processImageFile(file) {
     if (!file) return null;
     if (file.size > 10_000_000) {
-      setError("Ukuran gambar maksimal 10 MB.");
+      setError(`Ukuran gambar ${file.name || ""} melebihi batas 10 MB.`);
       return null;
     }
-    return new Promise((resolve) => {
+    const isBmp = file.type === "image/bmp" || file.type === "image/x-ms-bmp" || /\.bmp$/i.test(file.name || "");
+    if (isBmp && typeof window !== "undefined" && window.createImageBitmap) {
+      try {
+        const bitmap = await createImageBitmap(file);
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(bitmap, 0, 0);
+        return canvas.toDataURL("image/png");
+      } catch (err) {
+        console.warn("BMP canvas conversion fallback:", err);
+      }
+    }
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const { url } = await api("/admin/uploads", { method: "POST", body: { data: reader.result } });
-          if (input) {
-            input.value = url;
-            input.dispatchEvent(new Event("input", { bubbles: true }));
-            input.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-          setMessage("Gambar berhasil diunggah.");
-          resolve(url);
-        } catch (e) {
-          setError(e.message || "Gagal mengunggah gambar.");
-          resolve(null);
-        }
-      };
-      reader.onerror = () => {
-        setError("Gagal membaca file gambar.");
-        resolve(null);
-      };
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Gagal membaca file gambar."));
       reader.readAsDataURL(file);
     });
+  }
+
+  async function uploadAsset(file, input, onPreview) {
+    if (!file) return null;
+    try {
+      const dataUrl = await processImageFile(file);
+      if (!dataUrl) return null;
+      if (typeof onPreview === "function") {
+        onPreview(dataUrl);
+      }
+      const { url } = await api("/admin/uploads", { method: "POST", body: { data: dataUrl } });
+      if (input) {
+        input.value = url;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setMessage("Gambar berhasil diunggah.");
+      return url;
+    } catch (e) {
+      setError(e.message || "Gagal mengunggah gambar.");
+      return null;
+    }
   }
 
   async function handleMainImageUpload(file) {
     if (!file) return;
     setUploadingMainImage(true);
     try {
-      const url = await uploadAsset(file);
+      // Langsung tampilkan preview client-side seketika file dipilih
+      const url = await uploadAsset(file, null, (previewDataUrl) => {
+        setProductImagePreview(previewDataUrl);
+      });
       if (url) {
         setProductImagePreview(url);
         if (mainImageInputRef.current) {
@@ -708,7 +754,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     setOrders(o);
     setHealth(h);
     setMetrics(m);
-    if (s) { setSettings(s.settings); setCategories(s.categories); setPaymentMethods(s.paymentMethods); setPromotions(s.promotions || []); }
+    if (s) {
+      setSettings(s.settings);
+      if (s.settings?.logo) setStoreLogoPreview(s.settings.logo);
+      if (s.settings?.heroImage) setStoreHeroPreview(s.settings.heroImage);
+      setCategories(s.categories);
+      setPaymentMethods(s.paymentMethods);
+      setPromotions(s.promotions || []);
+    }
     setTeam(t);
     syncRoute(p, o, s?.categories || categoriesRef.current);
   }
@@ -972,7 +1025,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         height: defaultHeight,
         imageUrl: "",
         images: [],
-        variantPrice: "",
+        variantPrice: rows[rows.length - 1]?.variantPrice || "149000",
       },
     ]);
   };
@@ -994,7 +1047,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         height: "30",
         imageUrl: "",
         images: [],
-        variantPrice: "",
+        variantPrice: "149000",
       },
     ]);
     const firstCat = cats.find((c) => (!c.parent_id && !c.parentId) && c.active)?.id || "bedding";
@@ -1093,7 +1146,6 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     const body = {
       name: f.name,
       sku: f.sku,
-      price: parseRupiah(f.price),
       category: cat,
       subcategory: sub,
       image: finalImage,
@@ -1153,13 +1205,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         ? row.images.map((u) => String(u || "").trim()).filter(Boolean).slice(0, 10)
         : (row.imageUrl ? [row.imageUrl.trim()] : []);
       const rawVarPrice = String(row.variantPrice ?? "").trim();
-      let parsedVarPrice = null;
-      if (rawVarPrice !== "") {
-        parsedVarPrice = parseRupiah(rawVarPrice);
-        if (!Number.isFinite(parsedVarPrice) || parsedVarPrice < 1000 || parsedVarPrice > 10000000) {
-          setError(`Harga variasi untuk Paket Variasi #${i + 1} (${color}) harus antara Rp 1.000 - Rp 10.000.000 atau dikosongkan.`);
-          return;
-        }
+      if (!rawVarPrice) {
+        setError(`Harga variasi untuk Paket Variasi #${i + 1} (${color || "Baris " + (i + 1)}) wajib diisi.`);
+        return;
+      }
+      const parsedVarPrice = parseRupiah(rawVarPrice);
+      if (!Number.isFinite(parsedVarPrice) || parsedVarPrice < 1000 || parsedVarPrice > 10000000) {
+        setError(`Harga variasi untuk Paket Variasi #${i + 1} (${color}) harus antara Rp 1.000 - Rp 10.000.000.`);
+        return;
       }
 
       variants.push({
@@ -1175,6 +1228,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         heightCm,
       });
     }
+
+    const minVariantPrice = Math.min(...variants.map((v) => v.price));
+    body.price = minVariantPrice;
 
     // Check duplicate combinations of size + color
     const keys = variants.map((v) => `${v.size}:${v.color}`);
@@ -1592,6 +1648,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         .includes(search.toLowerCase()),
   );
   function orderTable(list) {
+    const isVerifFilter = filter === "WAITING_VERIFICATION";
     return (
       <div className="ws-table-scroll">
         <table className="ws-table">
@@ -1599,9 +1656,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
             <tr>
               <th>Pesanan</th>
               <th>Pelanggan</th>
-              <th>Total</th>
-              <th>Pembayaran</th>
-              <th>Status</th>
+              <th>Total Tagihan</th>
+              <th>Metode Pembayaran</th>
+              {isVerifFilter && <th>Bukti Transfer</th>}
+              <th>Status Pembayaran</th>
+              <th>Status Pesanan</th>
               <th />
             </tr>
           </thead>
@@ -1616,24 +1675,60 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 </td>
                 <td>
                   {o.address.name}
-                  <small>{o.address.email}</small>
+                  <small>{o.address.phone ? `WA: ${o.address.phone}` : o.address.email}</small>
                 </td>
-                <td className="ws-nowrap">{money(o.total)}</td>
+                <td className="ws-nowrap">
+                  <strong style={{ color: "#0f172a" }}>{money(o.total)}</strong>
+                </td>
+                <td>
+                  <span>{o.payment_method_name || paymentName(o.payment, config?.paymentMethods) || o.payment}</span>
+                  {(o.account_number || o.accountNumber) && (
+                    <small className="ws-muted ws-mono">No: {o.account_number || o.accountNumber}</small>
+                  )}
+                  {(isStorePickupMethod(o) || o.shipping === "pickup") && (
+                    <small className="ws-muted">Ambil &amp; Bayar di Toko</small>
+                  )}
+                </td>
+                {isVerifFilter && (
+                  <td>
+                    {o.payment_proof_url ? (
+                      <button
+                        type="button"
+                        style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: 2, background: "#fff", cursor: "zoom-in", display: "inline-flex", alignItems: "center", gap: 6 }}
+                        onClick={() =>
+                          setActiveLightboxImage({
+                            url: o.payment_proof_url,
+                            title: `Bukti Transfer #${o.id.slice(-8).toUpperCase()} - ${o.address.name} (${money(o.total)})`,
+                          })
+                        }
+                        title="Klik untuk melihat bukti dalam ukuran penuh (Lightbox)"
+                      >
+                        <img
+                          src={o.payment_proof_url}
+                          alt="Bukti transfer"
+                          style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 4, display: "block" }}
+                        />
+                        <span style={{ fontSize: 11, color: "#0284c7", fontWeight: 600 }}>Perbesar</span>
+                      </button>
+                    ) : (
+                      <span className="ws-muted" style={{ fontSize: 12 }}>Belum diunggah</span>
+                    )}
+                  </td>
+                )}
                 <td>
                   <Status
                     tone={
                       o.payment_status === "PAID"
                         ? "success"
-                        : ["PENDING", "WAITING_VERIFICATION"].includes(o.payment_status)
+                        : o.payment_status === "WAITING_VERIFICATION"
                           ? "warning"
-                          : "neutral"
+                          : o.payment_status === "REJECTED"
+                            ? "critical"
+                            : "neutral"
                     }
                   >
                     {paymentLabel[o.payment_status] || o.payment_status}
                   </Status>
-                  {(isStorePickupMethod(o) || o.shipping === "pickup") && (
-                    <small className="ws-muted">Ambil &amp; Bayar di Toko</small>
-                  )}
                 </td>
                 <td>{o.status}</td>
                 <td>
@@ -1641,7 +1736,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     className="ws-link"
                     onClick={() => viewOrder(o)}
                   >
-                    Lihat
+                    {isVerifFilter ? "Verifikasi" : "Lihat"}
                     <ArrowRight size={15} />
                   </button>
                 </td>
@@ -2633,21 +2728,51 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                         setPromotionDraft((curr) => ({ ...curr, image: val }));
                       }}
                     />
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      style={{ marginTop: "8px" }}
-                      onChange={async (event) => {
-                        const file = event.target.files?.[0];
-                        const urlInput = event.currentTarget.previousElementSibling;
-                        const url = await uploadAsset(file, urlInput);
-                        if (url) {
-                          setPromotionDraft((curr) => ({ ...curr, image: url }));
-                        }
-                      }}
-                    />
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", alignItems: "center" }}>
+                      <input
+                        id="promo-draft-file-input"
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/avif"
+                        style={{ display: "none" }}
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+                          const url = await uploadAsset(file, null, (dataUrl) => {
+                            setPromotionDraft((curr) => ({ ...curr, image: dataUrl }));
+                          });
+                          if (url) {
+                            setPromotionDraft((curr) => ({ ...curr, image: url }));
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="ws-btn-change-image"
+                        onClick={() => document.getElementById("promo-draft-file-input")?.click()}
+                      >
+                        Pilih Gambar Promo
+                      </button>
+                      {promotionDraft.image && (
+                        <>
+                          <button
+                            type="button"
+                            className="ws-btn-view-image"
+                            onClick={() => setActiveLightboxImage({ url: promotionDraft.image, title: "Pratinjau Promo" })}
+                          >
+                            Lihat
+                          </button>
+                          <button
+                            type="button"
+                            className="ws-btn-remove-image"
+                            onClick={() => setPromotionDraft((curr) => ({ ...curr, image: "" }))}
+                          >
+                            Hapus
+                          </button>
+                        </>
+                      )}
+                    </div>
                     <small style={{ display: "block", marginTop: "4px" }}>
-                      Pilih gambar editorial khusus promo (PNG, JPG, WebP maks 5 MB). Jika tidak diunggah, sistem otomatis menggunakan gambar utama produk.
+                      Pilih gambar editorial khusus promo (PNG, JPG, WebP, GIF, BMP, AVIF maks 10 MB). Jika tidak diunggah, sistem otomatis menggunakan gambar utama produk.
                     </small>
                   </div>
                   {/* Pratinjau Gambar Promo */}
@@ -2661,7 +2786,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       background: "#f8faf9",
                       position: "relative",
                       flexShrink: 0,
+                      cursor: "pointer",
                     }}
+                    onClick={() => {
+                      const displayImg = promotionDraft.image || draftProduct?.image;
+                      if (displayImg) setActiveLightboxImage({ url: displayImg, title: "Pratinjau Promo" });
+                    }}
+                    title="Klik untuk melihat foto penuh"
                   >
                     <img
                       src={
@@ -2962,6 +3093,46 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
           "Dikirim saat pesanan dibatalkan oleh admin atau sistem karena kendala transaksi.",
         placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[toko]"],
       },
+      {
+        key: "payment_confirmation_customer",
+        title: "Konfirmasi Bayar Pelanggan",
+        badge: "Verifikasi Manual",
+        badgeColor: "#0284c7",
+        badgeBg: "#e0f2fe",
+        description:
+          "Dikirim otomatis ke WhatsApp pelanggan setelah menekan tombol 'Saya Sudah Melakukan Pembayaran' dan mengunggah bukti.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[metode_pembayaran]", "[toko]"],
+      },
+      {
+        key: "payment_verification_admin",
+        title: "Permintaan Verifikasi ke Admin",
+        badge: "Admin Alert",
+        badgeColor: "#d97706",
+        badgeBg: "#fef3c7",
+        description:
+          "Dikirim ke WhatsApp Admin saat ada pelanggan yang mengunggah bukti bayar manual, lengkap dengan ringkasan & tautan verifikasi.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[metode_pembayaran]", "[total]", "[waktu_konfirmasi]", "[url_verifikasi]", "[toko]"],
+      },
+      {
+        key: "payment_approved",
+        title: "Pembayaran Disetujui (Lunas)",
+        badge: "Verifikasi Berhasil",
+        badgeColor: "#16a34a",
+        badgeBg: "#dcfce7",
+        description:
+          "Dikirim otomatis ke WhatsApp pelanggan saat Admin menyetujui mutasi pembayaran manual dan mengubah status pesanan menjadi Lunas.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[metode_pembayaran]", "[toko]"],
+      },
+      {
+        key: "payment_rejected",
+        title: "Pembayaran Ditolak",
+        badge: "Penolakan Bukti",
+        badgeColor: "#dc2626",
+        badgeBg: "#fee2e2",
+        description:
+          "Dikirim otomatis ke WhatsApp pelanggan jika bukti ditolak Admin, menyertakan alasan penolakan dan tautan untuk unggah ulang.",
+        placeholders: ["[nama]", "[nomor_pesanan]", "[total]", "[metode_pembayaran]", "[alasan_penolakan]", "[url_pesanan]", "[toko]"],
+      },
     ];
 
     const previewSample = {
@@ -2969,6 +3140,12 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       kode_otp: "749210",
       nomor_pesanan: "ORD-2026-8801",
       total: "Rp185.000",
+      total_pembayaran: "Rp185.000",
+      metode_pembayaran: "Transfer Bank BCA",
+      waktu_konfirmasi: "14/11/2026 14:30",
+      url_verifikasi: "https://kintsugi.test/#admin/orders/ORD-2026-8801",
+      alasan_penolakan: "Nominal transfer belum sesuai mutasi rekening kami",
+      url_pesanan: "https://kintsugi.test/#account/orders",
       nomor_resi: "JNE-9920148819",
       kurir: "JNE Reguler",
       toko: settings?.brand || "PT Liny Jaya",
@@ -3088,6 +3265,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 { tag: "[nomor_resi]", desc: "Nomor resi ekspedisi" },
                 { tag: "[kurir]", desc: "Layanan kurir pengiriman" },
                 { tag: "[toko]", desc: "Nama toko / brand" },
+                { tag: "[metode_pembayaran]", desc: "Metode transfer (Bank BCA, DANA, QRIS)" },
+                { tag: "[waktu_konfirmasi]", desc: "Tanggal & jam konfirmasi pembayaran" },
+                { tag: "[url_verifikasi]", desc: "Tautan verifikasi pesanan dashboard admin" },
+                { tag: "[alasan_penolakan]", desc: "Alasan penolakan pembayaran" },
+                { tag: "[url_pesanan]", desc: "Tautan halaman pesanan pelanggan" },
               ].map(({ tag, desc }) => (
                 <span
                   key={tag}
@@ -3939,17 +4121,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     </small>
                   )}
                 </label>
-                <label>
-                  Harga jual (Rp) *
-                  <RupiahInput
-                    name="price"
-                    min={1000}
-                    max={10000000}
-                    required
-                    defaultValue={edit.price}
-                    placeholder="150.000"
-                  />
-                </label>
+                <div className="ws-price-mode-info">
+                  <span className="ws-price-mode-title">Mekanisme Harga Produk</span>
+                  <span className="ws-price-mode-badge">Harga Berbasis Variasi</span>
+                  <p className="ws-price-mode-desc">
+                    Harga produk diatur langsung per paket variasi di bawah. Katalog akan secara otomatis menampilkan harga variasi termurah ({sizeRows.some((r) => r.variantPrice && parseRupiah(r.variantPrice) >= 1000) ? money(Math.min(...sizeRows.map((r) => parseRupiah(r.variantPrice)).filter((p) => p >= 1000))) : "Belum ditentukan"}).
+                  </p>
+                </div>
                 <div className="ws-wide ws-product-image-container">
                   <label className="ws-product-image-label">
                     Gambar Produk Utama *
@@ -3957,7 +4135,12 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   <div className="ws-product-image-box">
                     {productImagePreview ? (
                       <div className="ws-product-preview-active">
-                        <div className="ws-product-preview-thumb-wrap">
+                        <div
+                          className="ws-product-preview-thumb-wrap"
+                          onClick={() => setActiveLightboxImage({ url: productImagePreview, title: "Foto Utama Produk" })}
+                          style={{ cursor: "pointer" }}
+                          title="Klik untuk melihat foto penuh"
+                        >
                           <img
                             src={productImagePreview}
                             alt="Foto utama produk"
@@ -3976,6 +4159,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                               : productImagePreview}
                           </span>
                           <div className="ws-product-preview-btns">
+                            <button
+                              type="button"
+                              className="ws-btn-view-image"
+                              onClick={() => setActiveLightboxImage({ url: productImagePreview, title: "Foto Utama Produk" })}
+                            >
+                              Lihat
+                            </button>
                             <button
                               type="button"
                               className="ws-btn-change-image"
@@ -4277,22 +4467,23 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             />
                           </label>
 
-                          {/* Harga Khusus Variasi (Opsional) */}
+                          {/* Harga Variasi (Wajib per Variasi) */}
                           <div className="ws-variant-price-group">
                             <label>
-                              Harga Khusus Variasi (Rp, Opsional)
+                              Harga Variasi (Rp) *
                               <input
                                 type="text"
                                 inputMode="numeric"
+                                required
                                 value={row.variantPrice ? formatRupiahInput(row.variantPrice) : ""}
                                 onChange={(e) => updateVariantField(row.id, "variantPrice", parseRupiah(e.target.value) || "")}
-                                placeholder={`Ikuti harga produk (${money(parseRupiah(edit.price) || edit.price || 0)})`}
+                                placeholder="150.000"
                               />
                             </label>
                             <span className="ws-variant-price-badge">
-                              {row.variantPrice
-                                ? `Harga khusus varian: ${money(parseRupiah(row.variantPrice))}`
-                                : `Mengikuti harga utama: ${money(parseRupiah(edit.price) || edit.price || 0)}`}
+                              {row.variantPrice && parseRupiah(row.variantPrice) >= 1000
+                                ? `Harga: ${money(parseRupiah(row.variantPrice))}`
+                                : "Wajib diisi (min. Rp 1.000)"}
                             </span>
                           </div>
 
@@ -4304,24 +4495,16 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                 <input
                                   type="file"
                                   multiple
-                                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/avif"
+                                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/avif"
                                   onChange={async (event) => {
                                     const files = Array.from(event.target.files || []);
                                     event.target.value = "";
                                     if (!files.length) return;
                                     const uploadedUrls = [];
                                     for (const file of files) {
-                                      if (file.size > 10000000) {
-                                        setError(`Ukuran gambar ${file.name} melebihi batas 10 MB.`);
-                                        continue;
-                                      }
                                       try {
-                                        const dataUrl = await new Promise((resolve, reject) => {
-                                          const reader = new FileReader();
-                                          reader.onload = () => resolve(reader.result);
-                                          reader.onerror = () => reject(new Error("Gagal membaca file gambar."));
-                                          reader.readAsDataURL(file);
-                                        });
+                                        const dataUrl = await processImageFile(file);
+                                        if (!dataUrl) continue;
                                         const { url } = await api("/admin/uploads", {
                                           method: "POST",
                                           body: { data: dataUrl },
@@ -4346,7 +4529,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                   ? [row.imageUrl]
                                   : []
                               ).map((imgUrl, imgIdx) => (
-                                <div className="ws-variant-thumb-item" key={`${row.id}-img-${imgIdx}`}>
+                                <div
+                                  className="ws-variant-thumb-item"
+                                  key={`${row.id}-img-${imgIdx}`}
+                                  onClick={() => setActiveLightboxImage({ url: imgUrl, title: `${row.variation || "Variasi"} - Foto ${imgIdx + 1}` })}
+                                  style={{ cursor: "pointer" }}
+                                  title="Klik untuk melihat foto penuh"
+                                >
                                   <img
                                     src={imgUrl}
                                     alt={`${row.variation || "Variasi"} ${imgIdx + 1}`}
@@ -4366,7 +4555,10 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                     className="ws-variant-thumb-remove"
                                     title="Hapus gambar variasi"
                                     aria-label="Hapus gambar variasi"
-                                    onClick={() => removeVariantImage(row.id, imgIdx)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeVariantImage(row.id, imgIdx);
+                                    }}
                                   >
                                     ×
                                   </button>
@@ -4406,6 +4598,45 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
           )}
           {tab === "orders" && !selected && (
             <section className="ws-panel">
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                <button
+                  type="button"
+                  className={`ws-button small ${filter === "all" ? "primary" : ""}`}
+                  onClick={() => setFilter("all")}
+                >
+                  Semua Pesanan ({orders.length})
+                </button>
+                <button
+                  type="button"
+                  className={`ws-button small ${filter === "WAITING_VERIFICATION" ? "primary" : ""}`}
+                  onClick={() => setFilter("WAITING_VERIFICATION")}
+                  style={
+                    filter === "WAITING_VERIFICATION"
+                      ? {}
+                      : {
+                          background: orders.filter((o) => o.payment_status === "WAITING_VERIFICATION").length > 0 ? "#fef3c7" : undefined,
+                          color: orders.filter((o) => o.payment_status === "WAITING_VERIFICATION").length > 0 ? "#b45309" : undefined,
+                          borderColor: orders.filter((o) => o.payment_status === "WAITING_VERIFICATION").length > 0 ? "#fcd34d" : undefined,
+                        }
+                  }
+                >
+                  <Clock3 size={14} style={{ marginRight: 4 }} />
+                  Verifikasi Pembayaran
+                  {orders.filter((o) => o.payment_status === "WAITING_VERIFICATION").length > 0 && (
+                    <span style={{ marginLeft: 6, background: "#dc2626", color: "#fff", padding: "1px 6px", borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+                      {orders.filter((o) => o.payment_status === "WAITING_VERIFICATION").length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className={`ws-button small ${filter === "STORE_PICKUP" ? "primary" : ""}`}
+                  onClick={() => setFilter("STORE_PICKUP")}
+                >
+                  Ambil di Toko ({orders.filter((o) => isStorePickupMethod(o) || o.shipping === "pickup").length})
+                </button>
+              </div>
+
               <div className="ws-toolbar">
                 <label className="ws-search">
                   <Search size={18} />
@@ -4422,11 +4653,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   onChange={(e) => setFilter(e.target.value)}
                 >
                   <option value="all">Semua status</option>
+                  <option value="WAITING_VERIFICATION">
+                    Menunggu Verifikasi Pembayaran ({orders.filter((o) => o.payment_status === "WAITING_VERIFICATION").length})
+                  </option>
                   <option value="STORE_PICKUP">
                     Ambil di Toko (Store Pickup)
-                  </option>
-                  <option value="WAITING_VERIFICATION">
-                    Menunggu Verifikasi Pembayaran (QRIS)
                   </option>
                   {[
                     "Menunggu Pengambilan & Pembayaran",
@@ -4649,17 +4880,39 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                   )}
                 </div>
               )}
-              {(selected.payment_type === "qris_manual" ||
+              {(isManualPaymentMethod(selected) ||
                 Boolean(selected.qris_payload || selected.payment_proof_url)) && (
                 <div className="ks-admin-qris-verify">
                   <div className="ks-admin-qris-verify-head">
                     <div>
                       <h4>
-                        <QrCode size={17} /> Verifikasi Pembayaran QRIS Manual
+                        {selected.qris_payload || isManualQrisMethod(selected) ? (
+                          <>
+                            <QrCode size={17} /> Verifikasi Pembayaran QRIS Manual
+                          </>
+                        ) : selected.payment?.startsWith("BANK_") || selected.group_name === "Bank" ? (
+                          <>
+                            <Building2 size={17} /> Verifikasi Pembayaran Transfer Bank
+                          </>
+                        ) : (
+                          <>
+                            <Smartphone size={17} /> Verifikasi Pembayaran Transfer E-Wallet
+                          </>
+                        )}
                       </h4>
                       <p>
-                        Merchant: <b>{selected.qris_merchant_name || "-"}</b> ·
-                        Penyedia: <b>{selected.qris_provider || "QRIS"}</b> ·
+                        {selected.qris_payload || isManualQrisMethod(selected) ? (
+                          <>
+                            Merchant: <b>{selected.qris_merchant_name || "-"}</b> ·
+                            Penyedia: <b>{selected.qris_provider || "QRIS"}</b> ·
+                          </>
+                        ) : (
+                          <>
+                            Tujuan: <b>{selected.payment_method_name || selected.payment}</b> ·
+                            {selected.account_number ? ` No: ${selected.account_number} ·` : ""}
+                            a.n. <b>{selected.account_name || "PT Liny Jaya"}</b> ·
+                          </>
+                        )}
                         Total Wajib Masuk: <b>{money(selected.total)}</b>
                       </p>
                     </div>
@@ -4669,7 +4922,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           ? "success"
                           : selected.payment_status === "WAITING_VERIFICATION"
                             ? "warning"
-                            : "neutral"
+                            : selected.payment_status === "REJECTED"
+                              ? "critical"
+                              : "neutral"
                       }
                     >
                       {paymentLabel[selected.payment_status] || selected.payment_status}
@@ -4684,17 +4939,23 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
 
                   {selected.payment_proof_url ? (
                     <div className="ks-admin-proof-box">
-                      <a
-                        href={selected.payment_proof_url}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
                         className="ks-admin-proof-img"
+                        style={{ border: "none", padding: 0, background: "none", cursor: "zoom-in" }}
+                        onClick={() =>
+                          setActiveLightboxImage({
+                            url: selected.payment_proof_url,
+                            title: `Bukti Pembayaran #${selected.id.slice(-8).toUpperCase()} - ${selected.address.name} (${money(selected.total)})`,
+                          })
+                        }
+                        title="Klik untuk melihat bukti dalam ukuran penuh (Lightbox)"
                       >
                         <img
                           src={selected.payment_proof_url}
                           alt="Bukti transfer pelanggan"
                         />
-                      </a>
+                      </button>
                       <div>
                         <p>
                           <b>Bukti Pembayaran Pelanggan</b>
@@ -4712,21 +4973,27 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           <p>
                             Diverifikasi:{" "}
                             {new Date(selected.payment_verified_at).toLocaleString("id-ID")}
+                            {selected.payment_verified_by ? ` (Admin ID #${String(selected.payment_verified_by).slice(-6)})` : ""}
                           </p>
                         )}
-                        <a
-                          href={selected.payment_proof_url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
                           className="ws-link"
+                          style={{ border: "none", background: "none", padding: 0, cursor: "pointer", display: "inline-block", marginTop: 4 }}
+                          onClick={() =>
+                            setActiveLightboxImage({
+                              url: selected.payment_proof_url,
+                              title: `Bukti Pembayaran #${selected.id.slice(-8).toUpperCase()} - ${selected.address.name} (${money(selected.total)})`,
+                            })
+                          }
                         >
-                          Buka gambar bukti ukuran penuh
-                        </a>
+                          Buka gambar bukti ukuran penuh (Lightbox Zoom)
+                        </button>
                       </div>
                     </div>
                   ) : (
                     <div className="ks-admin-proof-empty">
-                      <Clock3 size={16} /> Pelanggan belum mengunggah bukti pembayaran QRIS.
+                      <Clock3 size={16} /> Pelanggan belum mengunggah bukti pembayaran transfer.
                     </div>
                   )}
 
@@ -4736,9 +5003,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                         <div className="ks-qris-caution">
                           <ShieldAlert size={16} />
                           <div>
-                            <b>Pengecekan Mutasi DANA:</b> Pastikan saldo /
-                            mutasi masuk di akun{" "}
-                            <b>{selected.qris_provider || "DANA"}</b> Anda
+                            <b>Pengecekan Mutasi:</b> Pastikan saldo /
+                            mutasi masuk di rekening atau akun toko Anda
                             benar-benar bertambah sebesar{" "}
                             <b>{money(selected.total)}</b> sebelum menyetujui
                             transaksi menjadi <b>Lunas</b>.
@@ -4760,11 +5026,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                       body: { action: "approve" },
                                     },
                                   ),
-                                "Pembayaran QRIS disetujui dan pesanan ditandai Lunas.",
+                                "Pembayaran berhasil disetujui dan pesanan ditandai Lunas.",
                               )
                             }
                           >
-                            <CheckCircle2 size={16} /> Setujui & Tandai Lunas
+                            <CheckCircle2 size={16} /> Terima Pembayaran (Lunas)
                           </button>
                           <button
                             type="button"
@@ -4772,28 +5038,33 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             disabled={busy}
                             onClick={() => setShowRejectBox((v) => !v)}
                           >
-                            Tolak / Minta Unggah Ulang
+                            Tolak Pembayaran
                           </button>
                         </div>
 
                         {showRejectBox && (
-                          <div className="ks-admin-reject-box">
-                            <label>
-                              Alasan penolakan (dikirim ke pelanggan via WhatsApp)
+                          <div className="ks-admin-reject-box" style={{ marginTop: 12, padding: 14, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8 }}>
+                            <label style={{ display: "block", marginBottom: 8, fontWeight: 600, color: "#991b1b" }}>
+                              Alasan penolakan pembayaran (Wajib, dikirim ke pelanggan via WhatsApp)
                               <input
                                 type="text"
                                 maxLength={300}
-                                placeholder="Contoh: Nominal transfer belum sesuai atau bukti tidak terbaca"
+                                placeholder="Contoh: Nominal transfer belum sesuai mutasi atau bukti tidak terbaca"
                                 value={rejectReason}
                                 onChange={(e) => setRejectReason(e.target.value)}
+                                style={{ width: "100%", marginTop: 4 }}
                               />
                             </label>
                             <div className="ws-form-actions">
                               <button
                                 type="button"
                                 className="ws-button danger-button"
-                                disabled={busy}
+                                disabled={busy || !rejectReason.trim()}
                                 onClick={async () => {
+                                  if (!rejectReason.trim()) {
+                                    notify?.("Alasan penolakan pembayaran wajib diisi.");
+                                    return;
+                                  }
                                   const ok = await perform(
                                     () =>
                                       api(
@@ -4806,7 +5077,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                           },
                                         },
                                       ),
-                                    "Bukti pembayaran ditolak. Pelanggan diminta mengunggah ulang.",
+                                    "Bukti pembayaran ditolak. Pelanggan diminta mengunggah ulang via WhatsApp.",
                                   );
                                   if (ok) {
                                     setShowRejectBox(false);
@@ -4814,7 +5085,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                   }
                                 }}
                               >
-                                Konfirmasi Tolak Bukti
+                                Konfirmasi Tolak Pembayaran
+                              </button>
+                              <button
+                                type="button"
+                                className="ws-button"
+                                onClick={() => setShowRejectBox(false)}
+                              >
+                                Batal
                               </button>
                             </div>
                           </div>
@@ -5376,16 +5654,100 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       />
                       <small>Ditampilkan kepada pelanggan pada informasi pengambilan langsung di toko.</small>
                     </label>
-                    <label className="ws-wide">
-                      Logo Toko (URL atau Berkas)
-                      <input name="logo" defaultValue={settings?.logo || ""} placeholder="Contoh: /brand/logo.png atau URL HTTPS" />
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        onChange={(event) => uploadAsset(event.target.files?.[0], event.currentTarget.previousElementSibling)}
-                      />
-                      <small>Format PNG, JPG, atau WebP maksimal 5 MB dengan latar belakang transparan.</small>
-                    </label>
+                    <div className="ws-wide ws-product-image-container">
+                      <label className="ws-product-image-label">
+                        Logo Toko (URL atau Berkas)
+                      </label>
+                      <div className="ws-product-image-box">
+                        {storeLogoPreview ? (
+                          <div className="ws-product-preview-active">
+                            <div
+                              className="ws-product-preview-thumb-wrap"
+                              onClick={() => setActiveLightboxImage({ url: storeLogoPreview, title: "Logo Toko" })}
+                              style={{ cursor: "pointer", background: "#f8fafc" }}
+                              title="Klik untuk melihat foto penuh"
+                            >
+                              <img
+                                src={storeLogoPreview}
+                                alt="Logo Toko"
+                                className="ws-product-preview-img"
+                                style={{ objectFit: "contain", padding: "4px" }}
+                                onError={(e) => {
+                                  e.currentTarget.onerror = null;
+                                  e.currentTarget.style.opacity = "0.4";
+                                }}
+                              />
+                              <span className="ws-product-preview-badge">Logo</span>
+                            </div>
+                            <div className="ws-product-preview-meta">
+                              <span className="ws-product-preview-filename" title={storeLogoPreview}>
+                                {storeLogoPreview}
+                              </span>
+                              <div className="ws-product-preview-btns">
+                                <button
+                                  type="button"
+                                  className="ws-btn-view-image"
+                                  onClick={() => setActiveLightboxImage({ url: storeLogoPreview, title: "Logo Toko" })}
+                                >
+                                  Lihat
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ws-btn-change-image"
+                                  onClick={() => document.getElementById("store-logo-file-input")?.click()}
+                                >
+                                  Ganti Logo
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ws-btn-remove-image"
+                                  onClick={() => {
+                                    setStoreLogoPreview("");
+                                    const input = document.getElementById("store-logo-text-input");
+                                    if (input) input.value = "";
+                                  }}
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className="ws-product-dropzone"
+                            onClick={() => document.getElementById("store-logo-file-input")?.click()}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <b className="ws-product-dropzone-title">Klik untuk unggah logo toko</b>
+                            <small className="ws-product-dropzone-sub">Format PNG, JPG, WebP, GIF, SVG maks 10 MB (latar belakang transparan disarankan)</small>
+                          </div>
+                        )}
+                        <input
+                          id="store-logo-file-input"
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml,image/avif,image/bmp"
+                          style={{ display: "none" }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const url = await uploadAsset(file, document.getElementById("store-logo-text-input"), (dataUrl) => setStoreLogoPreview(dataUrl));
+                              if (url) setStoreLogoPreview(url);
+                            }
+                          }}
+                        />
+                        <div className="ws-product-url-fallback">
+                          <label htmlFor="store-logo-text-input">Atau tautan URL langsung:</label>
+                          <input
+                            id="store-logo-text-input"
+                            name="logo"
+                            value={storeLogoPreview}
+                            onChange={(e) => setStoreLogoPreview(e.target.value)}
+                            placeholder="Contoh: /brand/logo.png atau URL HTTPS"
+                          />
+                        </div>
+                      </div>
+                    </div>
                     <label className="ws-wide">
                       Pengumuman Baris Atas (Announcement Bar)
                       <input
@@ -5449,16 +5811,100 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                         );
                       }}
                     >
-                      <label className="ws-wide">
-                        Gambar Banner Utama (Hero Image)
-                        <input name="heroImage" defaultValue={settings?.heroImage || ""} placeholder="/images/hero.jpg atau URL HTTPS" />
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          onChange={(event) => uploadAsset(event.target.files?.[0], event.currentTarget.previousElementSibling)}
-                        />
-                        <small>Rasio landscape disarankan (1920x1080) agar tampilan layar lebar proporsional.</small>
-                      </label>
+                      <div className="ws-wide ws-product-image-container">
+                        <label className="ws-product-image-label">
+                          Gambar Banner Utama (Hero Image)
+                        </label>
+                        <div className="ws-product-image-box">
+                          {storeHeroPreview ? (
+                            <div className="ws-product-preview-active">
+                              <div
+                                className="ws-product-preview-thumb-wrap"
+                                onClick={() => setActiveLightboxImage({ url: storeHeroPreview, title: "Banner Hero Utama" })}
+                                style={{ cursor: "pointer", width: "140px", height: "80px" }}
+                                title="Klik untuk melihat foto penuh"
+                              >
+                                <img
+                                  src={storeHeroPreview}
+                                  alt="Banner Hero Utama"
+                                  className="ws-product-preview-img"
+                                  style={{ objectFit: "cover" }}
+                                  onError={(e) => {
+                                    e.currentTarget.onerror = null;
+                                    e.currentTarget.style.opacity = "0.4";
+                                  }}
+                                />
+                                <span className="ws-product-preview-badge">Hero Banner</span>
+                              </div>
+                              <div className="ws-product-preview-meta">
+                                <span className="ws-product-preview-filename" title={storeHeroPreview}>
+                                  {storeHeroPreview}
+                                </span>
+                                <div className="ws-product-preview-btns">
+                                  <button
+                                    type="button"
+                                    className="ws-btn-view-image"
+                                    onClick={() => setActiveLightboxImage({ url: storeHeroPreview, title: "Banner Hero Utama" })}
+                                  >
+                                    Lihat
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ws-btn-change-image"
+                                    onClick={() => document.getElementById("store-hero-file-input")?.click()}
+                                  >
+                                    Ganti Foto
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ws-btn-remove-image"
+                                    onClick={() => {
+                                      setStoreHeroPreview("");
+                                      const input = document.getElementById("store-hero-text-input");
+                                      if (input) input.value = "";
+                                    }}
+                                  >
+                                    Hapus
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="ws-product-dropzone"
+                              onClick={() => document.getElementById("store-hero-file-input")?.click()}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <b className="ws-product-dropzone-title">Klik untuk unggah gambar banner hero utama</b>
+                              <small className="ws-product-dropzone-sub">Rasio landscape (1920x1080) disarankan. Mendukung JPG, PNG, WebP, AVIF maks. 10 MB.</small>
+                            </div>
+                          )}
+                          <input
+                            id="store-hero-file-input"
+                            type="file"
+                            accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/avif,image/bmp"
+                            style={{ display: "none" }}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const url = await uploadAsset(file, document.getElementById("store-hero-text-input"), (dataUrl) => setStoreHeroPreview(dataUrl));
+                                if (url) setStoreHeroPreview(url);
+                              }
+                            }}
+                          />
+                          <div className="ws-product-url-fallback">
+                            <label htmlFor="store-hero-text-input">Atau tautan URL langsung:</label>
+                            <input
+                              id="store-hero-text-input"
+                              name="heroImage"
+                              value={storeHeroPreview}
+                              onChange={(e) => setStoreHeroPreview(e.target.value)}
+                              placeholder="/images/hero.jpg atau URL HTTPS"
+                            />
+                          </div>
+                        </div>
+                      </div>
                       <label>
                         Tagline Utama Hero (Kicker)
                         <input name="heroKicker" defaultValue={settings?.heroKicker || ""} placeholder="Contoh: KOLEKSI PILIHAN / 2026" />
@@ -6258,7 +6704,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       </div>
                     </section>
                   </div>
-                  <div style={{ marginTop: "18px" }}>
+                  <div style={{ marginTop: "18px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
                     <button
                       className="ws-button"
                       type="button"
@@ -6269,11 +6715,205 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       Periksa Ulang Status Koneksi
                     </button>
                   </div>
+
+                  {/* Uji Kirim WhatsApp Gateway */}
+                  <div style={{ marginTop: "28px" }} className="ws-panel">
+                    <div className="ws-panel-heading">
+                      <h3>Uji Pengiriman Gateway WhatsApp (Wablas)</h3>
+                      <p>Kirim pesan tes langsung untuk memvalidasi token, secret key, atau status whitelist IP di server Wablas.</p>
+                    </div>
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!waTestPhone.trim()) {
+                          notify?.("Masukkan nomor WhatsApp penerima uji.");
+                          return;
+                        }
+                        setWaTestResult(null);
+                        try {
+                          const res = await api("/admin/whatsapp/test", {
+                            method: "POST",
+                            body: { phone: waTestPhone.trim(), message: waTestMessage.trim() },
+                          });
+                          setWaTestResult({ ok: true, data: res });
+                          notify?.("Pesan uji berhasil dikirim ke gateway Wablas!");
+                        } catch (err) {
+                          setWaTestResult({ ok: false, error: err.message });
+                          notify?.(`Pengiriman pesan uji: ${err.message}`);
+                        }
+                      }}
+                      style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "600px", marginTop: "14px" }}
+                    >
+                      <label>
+                        Nomor WhatsApp Tujuan (contoh: 081234567890 atau 6281234567890)
+                        <input
+                          type="text"
+                          placeholder="081234567890"
+                          value={waTestPhone}
+                          onChange={(e) => setWaTestPhone(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Pesan Uji
+                        <textarea
+                          rows={3}
+                          value={waTestMessage}
+                          onChange={(e) => setWaTestMessage(e.target.value)}
+                        />
+                      </label>
+                      <div className="ws-form-actions">
+                        <button type="submit" className="ws-button primary" disabled={busy || !waTestPhone.trim()}>
+                          Kirim Pesan Uji
+                        </button>
+                      </div>
+                    </form>
+
+                    {waTestResult && (
+                      <div
+                        style={{
+                          marginTop: "16px",
+                          padding: "12px 16px",
+                          borderRadius: "6px",
+                          background: waTestResult.ok ? "#ecfdf5" : "#fef2f2",
+                          border: `1px solid ${waTestResult.ok ? "#a7f3d0" : "#fecaca"}`,
+                          color: waTestResult.ok ? "#065f46" : "#991b1b",
+                          fontSize: "13px",
+                          lineHeight: "1.5",
+                        }}
+                      >
+                        <b>{waTestResult.ok ? "Berhasil:" : "Hasil Diagnosa:"}</b>
+                        <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "12px" }}>
+                          {JSON.stringify(waTestResult.ok ? waTestResult.data : waTestResult.error, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Monitor Antrean Outbox WhatsApp */}
+                  <div style={{ marginTop: "24px" }} className="ws-panel">
+                    <div className="ws-panel-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                      <div>
+                        <h3>Antrean &amp; Riwayat Outbox WhatsApp</h3>
+                        <p>Daftar antrean pengiriman background, jumlah percobaan retry, dan log error.</p>
+                      </div>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          className="ws-button small"
+                          disabled={waOutboxLoading}
+                          onClick={async () => {
+                            setWaOutboxLoading(true);
+                            try {
+                              const res = await api("/admin/whatsapp/outbox");
+                              setWaOutboxList(res.outbox || []);
+                            } finally {
+                              setWaOutboxLoading(false);
+                            }
+                          }}
+                        >
+                          <RefreshCw size={13} style={{ marginRight: "4px" }} />
+                          {waOutboxLoading ? "Memuat…" : "Muat Antrean"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ws-button small primary"
+                          disabled={busy}
+                          onClick={async () => {
+                            try {
+                              const res = await api("/admin/whatsapp/flush", { method: "POST" });
+                              setWaOutboxList(res.outbox || []);
+                              notify?.("Antrean WhatsApp berhasil diproses ulang.");
+                            } catch (err) {
+                              notify?.(`Gagal memproses antrean: ${err.message}`);
+                            }
+                          }}
+                        >
+                          Kirim Ulang Antrean Tertunda
+                        </button>
+                      </div>
+                    </div>
+
+                    {waOutboxList.length > 0 ? (
+                      <div className="ws-table-scroll" style={{ marginTop: "12px" }}>
+                        <table className="ws-table">
+                          <thead>
+                            <tr>
+                              <th>ID / Waktu</th>
+                              <th>Penerima</th>
+                              <th>Pesan</th>
+                              <th>Status</th>
+                              <th>Percobaan</th>
+                              <th>Log Terakhir</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {waOutboxList.map((m) => (
+                              <tr key={m.id}>
+                                <td>
+                                  <small className="ws-mono">{m.id}</small>
+                                  <br />
+                                  <small>{new Date(m.created_at).toLocaleString("id-ID")}</small>
+                                </td>
+                                <td><b>{m.phone}</b></td>
+                                <td style={{ maxWidth: "260px" }}>
+                                  <div style={{ fontSize: "12px", maxHeight: "60px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    {m.message}
+                                  </div>
+                                </td>
+                                <td>
+                                  <Status tone={m.status === "sent" ? "success" : m.status === "pending" ? "warning" : "critical"}>
+                                    {m.status}
+                                  </Status>
+                                </td>
+                                <td>{m.attempts}x</td>
+                                <td>
+                                  <small style={{ color: m.last_error ? "#dc2626" : "#64748b" }}>
+                                    {m.last_error || "-"}
+                                  </small>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p style={{ color: "#64748b", fontSize: "13px", marginTop: "12px" }}>
+                        Klik "Muat Antrean" untuk memeriksa status antrean WhatsApp di basis data.
+                      </p>
+                    )}
+                  </div>
                 </>
               )}
             </>
           )}
         </>
+      )}
+      {activeLightboxImage && (
+        <div
+          className="ks-lightbox-overlay"
+          onClick={() => setActiveLightboxImage(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="ks-lightbox-card" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="ks-lightbox-close"
+              onClick={() => setActiveLightboxImage(null)}
+              aria-label="Tutup pratinjau"
+            >
+              ×
+            </button>
+            <img
+              src={activeLightboxImage.url}
+              alt={activeLightboxImage.title || "Pratinjau"}
+              className="ks-lightbox-img"
+            />
+            {activeLightboxImage.title && (
+              <div className="ks-lightbox-caption">{activeLightboxImage.title}</div>
+            )}
+          </div>
+        </div>
       )}
     </Workspace>
   );

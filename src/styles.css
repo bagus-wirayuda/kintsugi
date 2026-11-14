@@ -3216,3 +3216,110 @@ a.btn {
     grid-column: 1/-1;
   }
 }
+
+/* ==========================================================================
+   Smooth & Professional Modal, Popup, and Auth Animations (Requirement 2)
+   ========================================================================== */
+
+@keyframes ksBackdropFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ksModalScaleFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes ksAuthFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ksDrawerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.overlay,
+.info-overlay,
+.ws-modal-overlay,
+.ks-lightbox-overlay {
+  animation: ksBackdropFadeIn 0.18s ease-out forwards;
+}
+
+.product-dialog,
+.search-panel,
+.info-dialog,
+.ws-modal,
+.ks-lightbox-modal {
+  animation: ksModalScaleFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.menu-panel {
+  animation: ksDrawerSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.auth-card,
+.auth-intro {
+  animation: ksAuthFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Optimasi Modal Khusus Tampilan Ponsel */
+@media (max-width: 768px) {
+  .overlay,
+  .info-overlay {
+    z-index: 99999 !important;
+    padding: max(14px, env(safe-area-inset-top, 0px)) 12px max(18px, env(safe-area-inset-bottom, 0px)) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .product-dialog {
+    max-height: calc(100dvh - 30px) !important;
+    width: 100% !important;
+    border-radius: 14px !important;
+  }
+
+  .product-dialog > .close {
+    width: 42px !important;
+    height: 42px !important;
+    min-width: 42px !important;
+    min-height: 42px !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 50% !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+  }
+
+  .auth-card {
+    border-radius: 12px !important;
+  }
+}

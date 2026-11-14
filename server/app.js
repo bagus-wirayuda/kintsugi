@@ -18,6 +18,7 @@ import {
   createGateway,
   verifyToken,
   fail,
+  sendWhatsApp,
   queueWhatsApp,
   renderWhatsAppTemplate,
   escapeHtml,
@@ -39,6 +40,7 @@ import {
   PAYMENT_TYPES,
   isCodMethod,
   isManualQrisMethod,
+  isManualPaymentMethod,
   isStorePickupMethod,
 } from "../src/payment-methods.js";
 import {
@@ -65,7 +67,9 @@ function mapPaymentMethodRow(row) {
       ? PAYMENT_TYPES.COD
       : group === "QRIS" && row.qris_payload
         ? PAYMENT_TYPES.QRIS_MANUAL
-        : PAYMENT_TYPES.GATEWAY);
+        : row.account_number || row.payment_type === "manual"
+          ? PAYMENT_TYPES.MANUAL
+          : PAYMENT_TYPES.GATEWAY);
   return {
     id: row.id,
     name: row.name,
@@ -74,6 +78,11 @@ function mapPaymentMethodRow(row) {
     detail: row.detail || "",
     paymentType,
     payment_type: paymentType,
+    accountNumber: row.account_number || "",
+    account_number: row.account_number || "",
+    accountName: row.account_name || "",
+    account_name: row.account_name || "",
+    instructions: row.instructions || row.detail || "",
     qrisPayload: row.qris_payload || "",
     qris_payload: row.qris_payload || "",
     qrisMerchantName: row.qris_merchant_name || "",
@@ -89,13 +98,23 @@ function mapPaymentMethodRow(row) {
 
 async function saveBase64ImageUpload(dataUrl, subdir = "") {
   const prefixMatch = String(dataUrl || "").match(/^data:([a-zA-Z0-9\/+-]+);base64,(.+)$/s);
-  if (!prefixMatch) throw fail(400, "Gunakan gambar PNG, JPG, WebP, atau GIF.");
+  if (!prefixMatch) throw fail(400, "Gunakan format gambar JPG, PNG, WebP, GIF, BMP, atau AVIF.");
   const mimeType = prefixMatch[1].toLowerCase();
   const rawBase64 = prefixMatch[2].replace(/\s+/g, "");
   const bytes = Buffer.from(rawBase64, "base64");
   if (!bytes.length || bytes.length > 10_000_000) {
     throw fail(400, "Ukuran gambar maksimal 10 MB.");
   }
+
+  // Validasi keamanan: blokir berkas biner berbahaya (eksekusi langsung)
+  if (bytes.length >= 2) {
+    const isWindowsExe = bytes[0] === 0x4d && bytes[1] === 0x5a; // MZ header
+    const isLinuxElf = bytes.length >= 4 && bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46; // ELF
+    if (isWindowsExe || isLinuxElf) {
+      throw fail(400, "Berkas yang diunggah tidak valid atau terdeteksi biner berbahaya.");
+    }
+  }
+
   let extension = "jpg";
   if (mimeType.includes("png")) extension = "png";
   else if (mimeType.includes("webp")) extension = "webp";
@@ -103,7 +122,9 @@ async function saveBase64ImageUpload(dataUrl, subdir = "") {
   else if (mimeType.includes("jpeg") || mimeType.includes("jpg") || mimeType.includes("pjpeg")) extension = "jpg";
   else if (mimeType.includes("avif")) extension = "avif";
   else if (mimeType.includes("svg")) extension = "svg";
-  else throw fail(400, "Gunakan gambar PNG, JPG, WebP, atau GIF.");
+  else if (mimeType.includes("bmp") || mimeType.includes("x-ms-bmp")) extension = "bmp";
+  else if (mimeType.includes("heic") || mimeType.includes("heif")) extension = "heic";
+  else throw fail(400, "Format gambar tidak didukung. Gunakan JPG, PNG, WebP, GIF, BMP, atau AVIF.");
 
   const cleanSubdir = subdir ? subdir.replace(/[^a-z0-9_-]/gi, "") : "";
   const baseDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
@@ -120,7 +141,7 @@ const imageSchema = z
     (s) =>
       /^\/(?:images|uploads|brand)\/[a-zA-Z0-9_\/.-]+$/i.test(s) ||
       /^https?:\/\//i.test(s) ||
-      /^data:image\/(?:png|jpeg|jpg|webp|gif|avif);base64,/i.test(s),
+      /^data:image\/(?:png|jpeg|jpg|webp|gif|avif|bmp|heic|heif|svg\+xml);base64,/i.test(s),
     "Gunakan gambar /uploads/..., /images/... atau URL HTTPS yang valid.",
   );
 const colorSchema = z.string().trim().min(1).max(100);
@@ -133,7 +154,7 @@ const parseMoneyInt = (v, fallback = 0) => {
 
 const productBaseFields = {
   name: z.string().trim().min(2).max(200),
-  price: z.preprocess((v) => parseMoneyInt(v, v), z.number().int().min(1000).max(10000000)),
+  price: z.preprocess((v) => (v == null || v === "" ? 0 : parseMoneyInt(v, 0)), z.number().int().min(0).max(10000000)).default(0),
   sku: z.string().regex(/^[A-Za-z0-9-]{2,40}$/),
   category: z.string().trim().min(1).max(100),
   subcategory: z.string().trim().max(100),
@@ -162,8 +183,8 @@ const variantSchema = z.object({
   stock: z.number().int().min(0).max(100000),
   price: z.preprocess(
     (v) => (v === "" || v == null ? null : parseMoneyInt(v, null)),
-    z.number().int().min(1000).max(10000000).nullable(),
-  ).optional(),
+    z.number().int().min(1000).max(10000000),
+  ),
   imageUrl: z.preprocess(
     (v) => (v === "" ? null : v),
     imageSchema.nullable(),
@@ -180,6 +201,14 @@ export const DEFAULT_WA_TEMPLATES = {
   shipped: "Halo [nama], pesanan [nomor_pesanan] telah dikirim menggunakan kurir [kurir]. Nomor resi pengiriman Anda: *[nomor_resi]*. Lacak pesanan Anda secara berkala.",
   delivered: "Halo [nama], pesanan [nomor_pesanan] telah sampai di tujuan. Terima kasih telah berbelanja di [toko]. Semoga Anda puas dengan produk kami!",
   cancelled: "Halo [nama], pesanan [nomor_pesanan] telah dibatalkan. Jika ada pertanyaan atau membutuhkan bantuan, silakan hubungi layanan pelanggan [toko].",
+  payment_confirmation_customer:
+    "Terima kasih, [nama].\n\nKonfirmasi pembayaran pesanan #[nomor_pesanan] sebesar [total] melalui [metode_pembayaran] telah kami terima.\n\nPembayaran Anda sedang dalam proses verifikasi oleh Admin [toko]. Kami akan mengirimkan informasi setelah pemeriksaan selesai.",
+  payment_verification_admin:
+    "PERMINTAAN VERIFIKASI PEMBAYARAN\n\nPelanggan: [nama]\nNo. Pesanan: [nomor_pesanan]\nMetode: [metode_pembayaran]\nNominal: [total]\nWaktu Konfirmasi: [waktu_konfirmasi]\n\nPelanggan telah mengunggah bukti pembayaran. Silakan periksa mutasi rekening dan lakukan verifikasi pembayaran melalui dashboard Admin [toko]:\n[url_verifikasi]",
+  payment_approved:
+    "Halo [nama],\n\nPembayaran untuk pesanan #[nomor_pesanan] sebesar [total] telah berhasil diverifikasi dan kami terima.\n\nPesanan Anda sedang diproses dan dipersiapkan untuk pengiriman. Terima kasih telah berbelanja di [toko].",
+  payment_rejected:
+    "Halo [nama],\n\nMohon maaf, bukti pembayaran untuk pesanan #[nomor_pesanan] belum dapat kami verifikasi karena:\n\"[alasan_penolakan]\"\n\nSilakan periksa kembali transaksi Anda dan unggah ulang bukti pembayaran yang sesuai melalui tautan berikut:\n[url_pesanan]",
 };
 
 export function createApp(pool, options = {}) {
@@ -1337,7 +1366,7 @@ export function createApp(pool, options = {}) {
   function presentProduct(p, variants) {
     const normalizedVariants = variants.map((v) => {
       const images = collectVariantImages(v);
-      const customPrice = v.price != null && Number(v.price) >= 1000 ? Number(v.price) : null;
+      const customPrice = v.price != null && Number(v.price) >= 1000 ? Number(v.price) : (Number(p.price) || 0);
       return {
         ...v,
         id: v.id || `${p.id}::${v.size}::${v.color}`,
@@ -1856,6 +1885,7 @@ export function createApp(pool, options = {}) {
     let snapshotPaymentType;
     let snapshotMethodName;
     let initialStatus;
+    let methodRow = null;
 
     if (isStorePickup) {
       if (rawPaymentProvided && f.payment !== "store_pickup") {
@@ -1878,23 +1908,23 @@ export function createApp(pool, options = {}) {
           "Metode Bayar di Toko (store_pickup) hanya tersedia untuk layanan Ambil Langsung di Toko.",
         );
       }
-      const methodRow = (
+      methodRow = (
         await pool.query(
-          "SELECT id, name, group_name AS `group`, group_name, payment_type, qris_payload, enabled FROM store_payment_methods WHERE id=? AND enabled=TRUE",
+          "SELECT id, name, group_name AS `group`, group_name, payment_type, qris_payload, account_number, account_name, instructions, detail, enabled FROM store_payment_methods WHERE id=? AND enabled=TRUE",
           [f.payment],
         )
       ).rows[0];
       if (!methodRow)
         throw fail(400, "Metode pembayaran tidak tersedia atau belum diaktifkan admin.");
       const isCod = isCodMethod(methodRow);
-      const isQrisManual = isManualQrisMethod(methodRow);
-      if (!isCod && !isQrisManual && !gateway.configured)
+      const isManual = isManualPaymentMethod(methodRow);
+      if (!isCod && !isManual && !gateway.configured)
         throw fail(503, "Pembayaran online belum tersedia. Hubungi pengelola.");
       resolvedPaymentId = f.payment;
       snapshotPaymentType = isCod
         ? PAYMENT_TYPES.COD
-        : isQrisManual
-          ? PAYMENT_TYPES.QRIS_MANUAL
+        : isManual
+          ? (isManualQrisMethod(methodRow) ? PAYMENT_TYPES.QRIS_MANUAL : PAYMENT_TYPES.MANUAL)
           : PAYMENT_TYPES.GATEWAY;
       snapshotMethodName = methodRow.name;
       initialStatus = "Menunggu pembayaran";
@@ -1964,7 +1994,7 @@ export function createApp(pool, options = {}) {
         const total = calculateTotals(canonical, f.coupon, f.shipping, shipment.delivery, manualFee);
         id = "LJ-" + randomUUID();
         await c.query(
-          "INSERT INTO orders(id,user_id,address,shipping,shipping_name,payment,payment_type,payment_method_name,coupon,subtotal,discount,delivery,total,status,checkout_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO orders(id,user_id,address,shipping,shipping_name,payment,payment_type,payment_method_name,coupon,subtotal,discount,delivery,total,status,checkout_key,account_number,account_name,instructions) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
           [
             id,
             req.user.id,
@@ -1981,6 +2011,9 @@ export function createApp(pool, options = {}) {
             total.total,
             initialStatus,
             f.checkoutKey,
+            methodRow?.account_number || "",
+            methodRow?.account_name || "",
+            methodRow?.instructions || methodRow?.detail || "",
           ],
         );
         for (const i of canonical) {
@@ -2070,17 +2103,17 @@ export function createApp(pool, options = {}) {
   app.post("/api/orders/:id/confirm-payment", auth, customer, async (req, res) => {
     const f = z
       .object({
-        proofData: z.string().max(7_000_000),
+        proofData: z.string().max(14_000_000),
         note: z.string().trim().max(500).optional().default(""),
       })
       .parse(req.body);
     const order = await ownOrder(req);
-    if (order.payment_type !== PAYMENT_TYPES.QRIS_MANUAL) {
-      throw fail(400, "Metode pembayaran pesanan ini tidak mendukung konfirmasi bukti manual.");
+    if (!isManualPaymentMethod(order)) {
+      throw fail(400, "Metode pembayaran pesanan ini tidak mendukung konfirmasi bukti transfer manual.");
     }
     if (
       order.status !== "Menunggu pembayaran" ||
-      !["PENDING", "WAITING_VERIFICATION"].includes(order.payment_status)
+      !["PENDING", "WAITING_VERIFICATION", "REJECTED"].includes(order.payment_status)
     ) {
       throw fail(409, "Status pesanan tidak mengizinkan pengunggahan bukti pembayaran.");
     }
@@ -2095,7 +2128,7 @@ export function createApp(pool, options = {}) {
       if (!o) throw fail(404, "Pesanan tidak ditemukan.");
       if (
         o.status !== "Menunggu pembayaran" ||
-        !["PENDING", "WAITING_VERIFICATION"].includes(o.payment_status)
+        !["PENDING", "WAITING_VERIFICATION", "REJECTED"].includes(o.payment_status)
       ) {
         throw fail(409, "Pesanan sudah diproses atau dibatalkan.");
       }
@@ -2111,6 +2144,48 @@ export function createApp(pool, options = {}) {
         [proofUrl, f.note, o.id],
       );
 
+      const templateRow = (
+        await c.query("SELECT setting_value FROM store_settings WHERE setting_key='waTemplates'")
+      ).rows[0];
+      const rawTemplates =
+        typeof templateRow?.setting_value === "string"
+          ? JSON.parse(templateRow.setting_value)
+          : templateRow?.setting_value;
+      const templates = { ...DEFAULT_WA_TEMPLATES, ...(rawTemplates || {}) };
+
+      const brandRow = (
+        await c.query("SELECT setting_value FROM store_settings WHERE setting_key='brand'")
+      ).rows[0];
+      const brand = brandRow?.setting_value || "Kintsugi";
+
+      const a = orderRow(o).address;
+      const formattedTotal = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+      const methodTitle = o.payment_method_name || o.payment || "Pembayaran Manual";
+      const nowFormatted = new Date().toLocaleString("id-ID", { timeZone: "Asia/Makassar" });
+
+      // 1. Notifikasi WhatsApp Pelanggan Setelah Konfirmasi (Section 3.A)
+      if (a.phone) {
+        const custValues = {
+          nama: a.name,
+          nomor_pesanan: o.id,
+          total: formattedTotal,
+          total_pembayaran: formattedTotal,
+          metode_pembayaran: methodTitle,
+          toko: brand,
+        };
+        const custMsg = renderWhatsAppTemplate(
+          templates.payment_confirmation_customer || DEFAULT_WA_TEMPLATES.payment_confirmation_customer,
+          custValues,
+        );
+        await queueWhatsApp(
+          c,
+          `cust_confirm/${o.id}/${Date.now()}`,
+          a.phone,
+          custMsg,
+        );
+      }
+
+      // 2. Notifikasi WhatsApp Admin Untuk Verifikasi (Section 3.B)
       const adminPhoneRaw = env.ADMIN_PHONE || env.STORE_CONTACT_PHONE || "";
       let adminPhone = "";
       if (adminPhoneRaw) {
@@ -2121,33 +2196,32 @@ export function createApp(pool, options = {}) {
         }
       }
       if (adminPhone) {
-        const a = orderRow(o).address;
         const fallbackOrigin = req.get("host") ? `${req.protocol}://${req.get("host")}` : "http://localhost:5173";
         const appUrl = (env.APP_URL || fallbackOrigin).replace(/\/+$/, "");
         const verifyLink = `${appUrl}/#admin/orders/${o.id}`;
-        const formattedTotal = `Rp${Number(o.total).toLocaleString("id-ID")}`;
-        const methodTitle = o.payment_method_name || o.payment || "QRIS Manual";
-        const message = [
-          "*Konfirmasi Pembayaran QRIS Baru*",
-          "",
-          `Nama Pelanggan: ${a.name}`,
-          `No. HP: ${a.phone}`,
-          `Nomor Pesanan: *${o.id}*`,
-          `Metode QRIS: ${methodTitle}`,
-          `Nominal Tagihan: *${formattedTotal}*`,
-          f.note ? `Catatan: ${f.note}` : null,
-          "",
-          `Link Verifikasi Admin: ${verifyLink}`,
-          "",
-          "Mohon periksa mutasi masuk akun DANA sebelum menyetujui transaksi menjadi Lunas.",
-        ]
-          .filter((line) => line !== null)
-          .join("\n");
+        const adminValues = {
+          nama: a.name,
+          nomor_pesanan: o.id,
+          metode_pembayaran: methodTitle,
+          bank_ewallet_qris: methodTitle,
+          total: formattedTotal,
+          nominal: formattedTotal,
+          waktu_konfirmasi: nowFormatted,
+          url_verifikasi: verifyLink,
+          toko: brand,
+        };
+        const adminMsg = renderWhatsAppTemplate(
+          templates.payment_verification_admin || DEFAULT_WA_TEMPLATES.payment_verification_admin,
+          adminValues,
+        );
+        const waQueueId = (isManualQrisMethod(o) || o.qris_payload)
+          ? `qris_confirm/${o.id}/${Date.now()}`
+          : `admin_verify/${o.id}/${Date.now()}`;
         await queueWhatsApp(
           c,
-          `qris_confirm/${o.id}/${Date.now()}`,
+          waQueueId,
           adminPhone,
-          message,
+          adminMsg,
         );
       }
 
@@ -2179,9 +2253,13 @@ export function createApp(pool, options = {}) {
     const f = z
       .object({
         action: z.enum(["approve", "reject"]),
-        reason: z.string().trim().max(300).optional().default(""),
+        reason: z.string().trim().max(500).optional().default(""),
       })
       .parse(req.body);
+
+    if (f.action === "reject" && !f.reason.trim()) {
+      throw fail(400, "Alasan penolakan pembayaran wajib diisi agar pelanggan mengetahui kendala transaksi.");
+    }
 
     const order = await ownOrder(req);
     const c = await pool.connect();
@@ -2191,8 +2269,9 @@ export function createApp(pool, options = {}) {
         await c.query("SELECT * FROM orders WHERE id=? FOR UPDATE", [order.id])
       ).rows[0];
       if (!o) throw fail(404, "Pesanan tidak ditemukan.");
-      if (o.payment_type !== PAYMENT_TYPES.QRIS_MANUAL) {
-        throw fail(409, "Pesanan ini tidak menggunakan pembayaran QRIS manual.");
+      const isManual = isManualPaymentMethod(o);
+      if (!isManual) {
+        throw fail(409, "Pesanan ini tidak menggunakan metode pembayaran manual.");
       }
       if (o.status !== "Menunggu pembayaran" || o.stock_released) {
         throw fail(409, "Pesanan tidak lagi menunggu verifikasi pembayaran.");
@@ -2202,12 +2281,27 @@ export function createApp(pool, options = {}) {
       }
 
       const a = orderRow(o).address;
-      const totalFormatted = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+      const formattedTotal = `Rp${Number(o.total).toLocaleString("id-ID")}`;
+      const methodTitle = o.payment_method_name || o.payment || "Pembayaran Manual";
+
+      const templateRow = (
+        await c.query("SELECT setting_value FROM store_settings WHERE setting_key='waTemplates'")
+      ).rows[0];
+      const rawTemplates =
+        typeof templateRow?.setting_value === "string"
+          ? JSON.parse(templateRow.setting_value)
+          : templateRow?.setting_value;
+      const templates = { ...DEFAULT_WA_TEMPLATES, ...(rawTemplates || {}) };
+
+      const brandRow = (
+        await c.query("SELECT setting_value FROM store_settings WHERE setting_key='brand'")
+      ).rows[0];
+      const brand = brandRow?.setting_value || "Kintsugi";
 
       if (f.action === "approve") {
         await c.query(
           "INSERT IGNORE INTO payment_events(event_key,order_id,provider_status) VALUES(?,?,?)",
-          [hash(`manual-qris:${o.id}:PAID:${Date.now()}`), o.id, "PAID"],
+          [hash(`manual-payment:${o.id}:PAID:${Date.now()}`), o.id, "PAID"],
         );
         await c.query(
           `UPDATE orders
@@ -2221,45 +2315,68 @@ export function createApp(pool, options = {}) {
           [req.user.id, o.id],
         );
 
-        const waValues = {
-          nama: a.name,
-          nomor_pesanan: o.id,
-          total: totalFormatted,
-          toko: "Kintsugi",
-          nomor_resi: o.tracking_number || "",
-          kurir: o.shipping_name || "",
-        };
-        await queueWhatsApp(
-          c,
-          "purchased/" + o.id,
-          a.phone,
-          await payments.notification(c, "purchased", waValues),
-        );
-        await queueWhatsApp(
-          c,
-          "processing/" + o.id,
-          a.phone,
-          await payments.notification(c, "processing", waValues),
-        );
+        if (a.phone) {
+          const approvedValues = {
+            nama: a.name,
+            nomor_pesanan: o.id,
+            total: formattedTotal,
+            total_pembayaran: formattedTotal,
+            metode_pembayaran: methodTitle,
+            toko: brand,
+          };
+          const approvedMsg = renderWhatsAppTemplate(
+            templates.payment_approved || DEFAULT_WA_TEMPLATES.payment_approved,
+            approvedValues,
+          );
+          await queueWhatsApp(
+            c,
+            `payment_approved/${o.id}/${Date.now()}`,
+            a.phone,
+            approvedMsg,
+          );
+        }
       } else {
-        const rejectionReason =
-          f.reason ||
-          "Bukti pembayaran belum sesuai dengan mutasi DANA yang diterima. Silakan unggah ulang bukti pembayaran yang valid.";
+        const rejectionReason = f.reason.trim();
+        await c.query(
+          "INSERT IGNORE INTO payment_events(event_key,order_id,provider_status) VALUES(?,?,?)",
+          [hash(`manual-payment:${o.id}:REJECTED:${Date.now()}`), o.id, "REJECTED"],
+        );
         await c.query(
           `UPDATE orders
-           SET payment_status='PENDING',
+           SET payment_status='REJECTED',
                payment_rejection_reason=?,
-               payment_verified_at=NULL,
-               payment_verified_by=NULL
+               payment_verified_at=UTC_TIMESTAMP(3),
+               payment_verified_by=?
            WHERE id=?`,
-          [rejectionReason, o.id],
+          [rejectionReason, req.user.id, o.id],
         );
-        await queueWhatsApp(
-          c,
-          `qris_rejected/${o.id}/${Date.now()}`,
-          a.phone,
-          `Halo ${a.name}, bukti pembayaran QRIS untuk pesanan *${o.id}* (${totalFormatted}) belum dapat disetujui dengan alasan: ${rejectionReason}. Silakan unggah ulang bukti bayar Anda di halaman Pesanan.`,
-        );
+
+        if (a.phone) {
+          const fallbackOrigin = req.get("host") ? `${req.protocol}://${req.get("host")}` : "http://localhost:5173";
+          const appUrl = (env.APP_URL || fallbackOrigin).replace(/\/+$/, "");
+          const orderLink = `${appUrl}/#account/orders`;
+          const rejectedValues = {
+            nama: a.name,
+            nomor_pesanan: o.id,
+            total: formattedTotal,
+            total_pembayaran: formattedTotal,
+            metode_pembayaran: methodTitle,
+            alasan_penolakan: rejectionReason,
+            url_pesanan: orderLink,
+            link_pesanan: orderLink,
+            toko: brand,
+          };
+          const rejectedMsg = renderWhatsAppTemplate(
+            templates.payment_rejected || DEFAULT_WA_TEMPLATES.payment_rejected,
+            rejectedValues,
+          );
+          await queueWhatsApp(
+            c,
+            `payment_rejected/${o.id}/${Date.now()}`,
+            a.phone,
+            rejectedMsg,
+          );
+        }
       }
 
       await c.query("COMMIT");
@@ -2276,6 +2393,37 @@ export function createApp(pool, options = {}) {
       options.waTransport || options.mailTransport,
     ).catch(() => {});
     res.json((await readOrders(undefined, order.id))[0]);
+  });
+
+  app.get("/api/admin/whatsapp/outbox", auth, operations, async (req, res) => {
+    const { rows } = await pool.query(
+      "SELECT id, phone, message, status, attempts, last_error, created_at, next_attempt_at FROM wa_outbox ORDER BY created_at DESC LIMIT 50",
+    );
+    res.json({ outbox: rows });
+  });
+
+  app.post("/api/admin/whatsapp/flush", auth, operations, async (req, res) => {
+    await flushWhatsApp(pool, env, options.waTransport || options.mailTransport);
+    const { rows } = await pool.query(
+      "SELECT id, phone, message, status, attempts, last_error, created_at, next_attempt_at FROM wa_outbox ORDER BY created_at DESC LIMIT 50",
+    );
+    res.json({ ok: true, outbox: rows });
+  });
+
+  app.post("/api/admin/whatsapp/test", auth, operations, async (req, res) => {
+    const f = z
+      .object({
+        phone: z.string().trim().min(8).max(20),
+        message: z.string().trim().min(1).max(1000).default("Uji koneksi gateway WhatsApp Kintsugi berhasil!"),
+      })
+      .parse(req.body);
+
+    const result = await sendWhatsApp(
+      { phone: f.phone, message: f.message },
+      env,
+      options.waTransport,
+    );
+    res.json({ ok: true, result });
   });
   app.post("/api/admin/orders/:id/confirm-pickup", auth, operations, async (req, res) => {
     const f = z
@@ -2511,6 +2659,12 @@ export function createApp(pool, options = {}) {
     try {
       await c.query("START TRANSACTION");
       const id = "lj-" + randomUUID();
+      const variants = f.variants || f.sizes.flatMap((size) => f.colors.map((color) => ({ size, color, stock: f.stock, price: f.price || 1000 })));
+      const keys = variants.map((v) => `${v.size}:${v.color}`);
+      if (new Set(keys).size !== keys.length) throw fail(400,"Ada kombinasi ukuran dan variasi yang duplikat.");
+      const validPrices = variants.map((v) => v.price).filter((p) => Number.isFinite(p) && p >= 1000);
+      const effectivePrice = validPrices.length ? Math.min(...validPrices) : (f.price >= 1000 ? f.price : 1000);
+
       await c.query(
         "INSERT INTO products(id,sku,name,category,subcategory,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
@@ -2519,7 +2673,7 @@ export function createApp(pool, options = {}) {
           f.name,
           categoryId,
           subcategoryId,
-          f.price,
+          effectivePrice,
           f.oldPrice,
           f.costPrice,
           f.variationLabel,
@@ -2530,12 +2684,10 @@ export function createApp(pool, options = {}) {
           f.isNew,
         ],
       );
-      const variants = f.variants || f.sizes.flatMap((size) => f.colors.map((color) => ({ size, color, stock: f.stock })));
-      const keys = variants.map((v) => `${v.size}:${v.color}`);
-      if (new Set(keys).size !== keys.length) throw fail(400,"Ada kombinasi ukuran dan variasi yang duplikat.");
       for (const v of variants) {
         const d = parseDimensions(v.size);
         const gallery = collectVariantImages(v);
+        const variantPrice = (v.price != null && Number(v.price) >= 1000) ? Number(v.price) : effectivePrice;
         await c.query(
           "INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,price,image_url,images_json,stock) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           [
@@ -2546,7 +2698,7 @@ export function createApp(pool, options = {}) {
             d?.width ?? v.widthCm ?? 0,
             d?.height ?? v.heightCm ?? 0,
             v.color,
-            v.price ?? null,
+            variantPrice,
             gallery[0] || null,
             gallery.length ? JSON.stringify(gallery) : null,
             v.stock,
@@ -2595,12 +2747,18 @@ export function createApp(pool, options = {}) {
         ])
       ).rows[0];
       if (!old) throw fail(404, "Produk tidak ditemukan.");
-      const price = f.price ?? old.price,
+      const map = { ...f };
+      delete map.variants;
+      if (f.variants) {
+        const validPrices = f.variants.map((v) => v.price).filter((p) => Number.isFinite(p) && p >= 1000);
+        if (validPrices.length) {
+          map.price = Math.min(...validPrices);
+        }
+      }
+      const price = map.price ?? f.price ?? old.price,
         oldPrice = f.oldPrice ?? old.old_price;
       if (oldPrice && oldPrice <= price)
         throw fail(400, "Harga sebelum diskon harus melebihi harga jual.");
-      const map = { ...f };
-      delete map.variants;
       const names = { oldPrice: "old_price", costPrice: "cost_price", weightGrams:"weight_grams", variationLabel: "variation_label", isNew: "is_new", subcategory: "subcategory" };
       if (Object.keys(map).length)
         await c.query(
@@ -2626,6 +2784,7 @@ export function createApp(pool, options = {}) {
           const width = v.widthCm ?? parseDimensions(v.size)?.width ?? 0;
           const height = v.heightCm ?? parseDimensions(v.size)?.height ?? 0;
           const gallery = collectVariantImages(v);
+          const variantPrice = (v.price != null && Number(v.price) >= 1000) ? Number(v.price) : price;
           await c.query(
             `INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,price,image_url,images_json,stock)
              VALUES(?,?,?,?,?,?,?,?,?,?,?)
@@ -2646,7 +2805,7 @@ export function createApp(pool, options = {}) {
               width,
               height,
               v.color,
-              v.price ?? null,
+              variantPrice,
               gallery[0] || null,
               gallery.length ? JSON.stringify(gallery) : null,
               v.stock,

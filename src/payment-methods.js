@@ -7,6 +7,7 @@ export const PAYMENT_TYPES = {
   GATEWAY: "gateway",
   COD: "cod",
   QRIS_MANUAL: "qris_manual",
+  MANUAL: "manual",
   STORE_PICKUP: "store_pickup",
 };
 
@@ -50,7 +51,7 @@ export function isCodMethod(methodOrId) {
 
 export function isManualQrisMethod(methodOrId) {
   if (!methodOrId) return false;
-  if (typeof methodOrId === "string") return methodOrId.startsWith("QRIS_");
+  if (typeof methodOrId === "string") return methodOrId.startsWith("QRIS_") || methodOrId === "QRIS";
   return (
     methodOrId.paymentType === PAYMENT_TYPES.QRIS_MANUAL ||
     methodOrId.payment_type === PAYMENT_TYPES.QRIS_MANUAL ||
@@ -58,8 +59,40 @@ export function isManualQrisMethod(methodOrId) {
   );
 }
 
+export function isManualPaymentMethod(methodOrId) {
+  if (!methodOrId) return false;
+  if (isStorePickupMethod(methodOrId) || isCodMethod(methodOrId)) return false;
+  if (isManualQrisMethod(methodOrId)) return true;
+  if (typeof methodOrId === "string") {
+    return (
+      methodOrId.startsWith("BANK_") ||
+      methodOrId.startsWith("EWALLET_") ||
+      methodOrId.endsWith("_MANUAL")
+    );
+  }
+  const pType = methodOrId.paymentType || methodOrId.payment_type;
+  if (
+    pType === PAYMENT_TYPES.MANUAL ||
+    pType === PAYMENT_TYPES.QRIS_MANUAL ||
+    pType === "manual_bank" ||
+    pType === "manual_ewallet"
+  ) {
+    return true;
+  }
+  const group = methodOrId.group || methodOrId.group_name;
+  if (["QRIS", "Bank", "E-Wallet"].includes(group) && pType !== PAYMENT_TYPES.GATEWAY) {
+    return true;
+  }
+  return Boolean(
+    methodOrId.account_number ||
+    methodOrId.accountNumber ||
+    methodOrId.qris_payload ||
+    methodOrId.qrisPayload
+  );
+}
+
 export function isManualOfflineMethod(methodOrId) {
-  return isCodMethod(methodOrId) || isManualQrisMethod(methodOrId);
+  return isCodMethod(methodOrId) || isManualPaymentMethod(methodOrId);
 }
 
 export function isStorePickupMethod(methodOrId) {

@@ -5,6 +5,7 @@ import {
   PAYMENT_TYPES,
   isCodMethod,
   isManualQrisMethod,
+  isManualPaymentMethod,
   isStorePickupMethod,
 } from "../src/payment-methods.js";
 import {
@@ -38,28 +39,33 @@ export async function enrichQrisOrder(order) {
   const isQris =
     order.payment_type === PAYMENT_TYPES.QRIS_MANUAL ||
     Boolean(order.qris_payload || order.qris_static_payload);
-  if (!isQris) return order;
 
-  const activePayload = order.qris_payload || order.qris_static_payload || "";
-  const staticPayload = order.qris_static_payload || order.qris_payload || "";
-  const [qrisQrDataUrl, qrisStaticQrDataUrl] = await Promise.all([
-    activePayload ? renderQrDataUrl(activePayload) : Promise.resolve(""),
-    staticPayload
-      ? staticPayload === activePayload && activePayload
-        ? Promise.resolve("")
-        : renderQrDataUrl(staticPayload)
-      : Promise.resolve(""),
-  ]);
-
+  let qrisQrDataUrl = "";
+  let qrisStaticQrDataUrl = "";
   let compatibility = null;
-  try {
-    if (activePayload) compatibility = assessQrisCompatibility(activePayload);
-  } catch {
-    compatibility = null;
+
+  if (isQris) {
+    const activePayload = order.qris_payload || order.qris_static_payload || "";
+    const staticPayload = order.qris_static_payload || order.qris_payload || "";
+    [qrisQrDataUrl, qrisStaticQrDataUrl] = await Promise.all([
+      activePayload ? renderQrDataUrl(activePayload) : Promise.resolve(""),
+      staticPayload
+        ? staticPayload === activePayload && activePayload
+          ? Promise.resolve("")
+          : renderQrDataUrl(staticPayload)
+        : Promise.resolve(""),
+    ]);
+
+    try {
+      if (activePayload) compatibility = assessQrisCompatibility(activePayload);
+    } catch {
+      compatibility = null;
+    }
   }
 
   return {
     ...order,
+    isManualPayment: isManualPaymentMethod(order),
     qrisQrDataUrl,
     qrisStaticQrDataUrl: qrisStaticQrDataUrl || qrisQrDataUrl,
     qrisCompatibility: compatibility,
@@ -283,6 +289,38 @@ export function createPayments(pool, gateway) {
           qris_mode: qrisModeActual,
           qris_merchant_name: merchantName,
           qris_provider: provider,
+          payment_status: "PENDING",
+          payment_url: "/#account/orders",
+        };
+        await c.query("COMMIT");
+        return result;
+      }
+
+      const isManual = isManualPaymentMethod(method) || isManualPaymentMethod(o);
+      if (isManual) {
+        const methodName = method?.name || o.payment_method_name || "Transfer Manual";
+        const acctNo = method?.account_number || o.account_number || "";
+        const acctName = method?.account_name || o.account_name || "";
+        const instructions = method?.instructions || method?.detail || o.instructions || "";
+        await c.query(
+          `UPDATE orders
+           SET payment_type=?,
+               payment_method_name=?,
+               account_number=?,
+               account_name=?,
+               instructions=?,
+               payment_status='PENDING',
+               payment_url='/#account/orders'
+           WHERE id=?`,
+          [PAYMENT_TYPES.MANUAL, methodName, acctNo, acctName, instructions, o.id],
+        );
+        result = {
+          ...o,
+          payment_type: PAYMENT_TYPES.MANUAL,
+          payment_method_name: methodName,
+          account_number: acctNo,
+          account_name: acctName,
+          instructions,
           payment_status: "PENDING",
           payment_url: "/#account/orders",
         };
