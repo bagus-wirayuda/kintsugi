@@ -122,6 +122,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     [reportStockFilter, setReportStockFilter] = useState("all"),
     [reportGenerating, setReportGenerating] = useState(false);
 
+  const [productImagePreview, setProductImagePreview] = useState("");
+  const [uploadingMainImage, setUploadingMainImage] = useState(false);
+  const mainFileInputRef = useRef(null);
+  const mainImageInputRef = useRef(null);
+
   const DEFAULT_WA_TEMPLATES = useMemo(
     () => ({
       otp: "*[toko] - Kode Verifikasi*\n\nHalo [nama],\n\nKode OTP verifikasi akun Anda adalah: *[kode_otp]*\n\nKode berlaku 10 menit. Jangan bagikan kode ini kepada siapa pun demi keamanan akun Anda di [toko].",
@@ -642,8 +647,8 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   }
   async function uploadAsset(file, input) {
     if (!file) return null;
-    if (file.size > 5_000_000) {
-      setError("Ukuran gambar maksimal 5 MB.");
+    if (file.size > 10_000_000) {
+      setError("Ukuran gambar maksimal 10 MB.");
       return null;
     }
     return new Promise((resolve) => {
@@ -651,16 +656,44 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       reader.onload = async () => {
         try {
           const { url } = await api("/admin/uploads", { method: "POST", body: { data: reader.result } });
-          if (input) input.value = url;
+          if (input) {
+            input.value = url;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }
           setMessage("Gambar berhasil diunggah.");
           resolve(url);
         } catch (e) {
-          setError(e.message);
+          setError(e.message || "Gagal mengunggah gambar.");
           resolve(null);
         }
       };
+      reader.onerror = () => {
+        setError("Gagal membaca file gambar.");
+        resolve(null);
+      };
       reader.readAsDataURL(file);
     });
+  }
+
+  async function handleMainImageUpload(file) {
+    if (!file) return;
+    setUploadingMainImage(true);
+    try {
+      const url = await uploadAsset(file);
+      if (url) {
+        setProductImagePreview(url);
+        if (mainImageInputRef.current) {
+          mainImageInputRef.current.value = url;
+        }
+        setEdit((curr) => (curr ? { ...curr, image: url } : curr));
+      }
+    } finally {
+      setUploadingMainImage(false);
+      if (mainFileInputRef.current) {
+        mainFileInputRef.current.value = "";
+      }
+    }
   }
   async function refresh() {
     const [p, o, h, m, s, t] = await Promise.all([
@@ -814,6 +847,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   const addVariantImages = (rowId, incomingUrls = []) => {
     const cleanIncoming = incomingUrls.map((u) => String(u || "").trim()).filter(Boolean);
     if (!cleanIncoming.length) return;
+    if (!productImagePreview && cleanIncoming[0]) {
+      setProductImagePreview(cleanIncoming[0]);
+      if (mainImageInputRef.current) {
+        mainImageInputRef.current.value = cleanIncoming[0];
+      }
+      setEdit((curr) => (curr ? { ...curr, image: cleanIncoming[0] } : curr));
+    }
     setSizeRows((rows) =>
       rows.map((r) => {
         if (r.id !== rowId) return r;
@@ -939,6 +979,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
 
   function initCreateProductData(cats = categoriesRef.current) {
     setSizeMode("dimensions");
+    setProductImagePreview("");
+    if (mainImageInputRef.current) mainImageInputRef.current.value = "";
+    if (mainFileInputRef.current) mainFileInputRef.current.value = "";
     setSizeRows([
       {
         id: "default",
@@ -974,6 +1017,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   }
 
   function initEditProductData(p, cats = categoriesRef.current) {
+    setProductImagePreview(p.image || "");
+    if (mainImageInputRef.current) mainImageInputRef.current.value = p.image || "";
+    if (mainFileInputRef.current) mainFileInputRef.current.value = "";
     const price = p.oldPrice > p.price ? p.oldPrice : p.price;
     const variants = Array.isArray(p.variants) ? p.variants : [];
     const initialRows = variants.map((v, i) => {
@@ -1039,13 +1085,18 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       setError("Sub-kategori wajib dipilih. Pastikan kategori utama memiliki sub-kategori aktif.");
       return;
     }
+    const finalImage = (productImagePreview || f.image || "").trim();
+    if (!finalImage) {
+      setError("Gambar produk wajib diunggah atau diisi tautan gambar.");
+      return;
+    }
     const body = {
       name: f.name,
       sku: f.sku,
       price: parseRupiah(f.price),
       category: cat,
       subcategory: sub,
-      image: f.image,
+      image: finalImage,
       description: f.description,
       isNew: f.isNew === "on",
       costPrice: parseRupiah(f.costPrice || 0),
@@ -2253,8 +2304,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     }}
                   >
                     <img
-                      src={product.image || "/images/seprai/sprei-01.jpg"}
+                      src={product.image || ""}
                       alt={product.name}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
                       style={{
                         width: "60px",
                         height: "68px",
@@ -2388,8 +2442,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                 }}
               >
                 <img
-                  src={draftProduct.image || "/images/seprai/sprei-01.jpg"}
+                  src={draftProduct.image || ""}
                   alt={draftProduct.name}
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
                   style={{
                     width: "56px",
                     height: "64px",
@@ -2610,10 +2667,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       src={
                         promotionDraft.image ||
                         draftProduct?.image ||
-                        "/images/seprai/sprei-01.jpg"
+                        ""
                       }
                       alt="Pratinjau Promo"
                       style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
                     />
                     <span
                       style={{
@@ -2722,9 +2782,12 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           promotion.image ||
                           product?.image ||
                           promotion.product_image ||
-                          "/images/seprai/sprei-01.jpg"
+                          ""
                         }
                         alt={promotion.title}
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
                       />
                       {promotion.image && (
                         <span className="ws-promo-custom-badge" title="Menggunakan gambar custom khusus editorial">
@@ -3644,7 +3707,13 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                         <tr key={p.id}>
                           <td>
                             <div className="ws-product-cell">
-                              <img src={p.image} alt={p.name} />
+                              <img
+                                src={p.image}
+                                alt={p.name}
+                                onError={(e) => {
+                                  e.currentTarget.style.opacity = "0.3";
+                                }}
+                              />
                               <div>
                                 <b>{p.name}</b>
                                 <small>
@@ -3734,7 +3803,16 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
           )}
           {tab === "products" && selectedProduct && (
             <section className="ws-panel ws-product-detail">
-              <div className="ws-product-detail-head"><img src={selectedProduct.image} alt={selectedProduct.name}/><div><p className="ws-kicker">{selectedProduct.sku} · {selectedProduct.category}</p><h2>{selectedProduct.name}</h2><p>{selectedProduct.description}</p><p>Motif: {selectedProduct.motif || "—"} · Harga: {money(selectedProduct.price)} · Status: {selectedProduct.active ? "Tampil" : "Disembunyikan"}</p></div></div>
+              <div className="ws-product-detail-head">
+                <img
+                  src={selectedProduct.image}
+                  alt={selectedProduct.name}
+                  onError={(e) => {
+                    e.currentTarget.style.opacity = "0.3";
+                  }}
+                />
+                <div><p className="ws-kicker">{selectedProduct.sku} · {selectedProduct.category}</p><h2>{selectedProduct.name}</h2><p>{selectedProduct.description}</p><p>Motif: {selectedProduct.motif || "—"} · Harga: {money(selectedProduct.price)} · Status: {selectedProduct.active ? "Tampil" : "Disembunyikan"}</p></div>
+              </div>
               <div className="ws-stats admin-stats-grid">{[["Terjual (lunas)",selectedProduct.soldUnits],["Nilai penjualan",money(selectedProduct.soldRevenue)],["Modal terjual",money(selectedProduct.soldCost)],["Margin kotor",money(selectedProduct.grossProfit)],["Stok tersedia",selectedProduct.stock]].map(([label,value])=><div className="ws-stat" key={label}><div><p>{label}</p><b>{value}</b></div></div>)}</div>
               <h3>Rincian variasi, harga dan stok</h3>
               <div className="ws-table-scroll">
@@ -3769,7 +3847,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           <td>{variant.stock}</td>
                           <td>
                             {variant.image_url ? (
-                              <img className="ws-variant-thumb" src={variant.image_url} alt="" />
+                              <img
+                                className="ws-variant-thumb"
+                                src={variant.image_url}
+                                alt=""
+                                onError={(e) => {
+                                  e.currentTarget.style.opacity = "0.3";
+                                }}
+                              />
                             ) : (
                               "Gambar utama"
                             )}
@@ -3865,17 +3950,125 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                     placeholder="150.000"
                   />
                 </label>
-                <label className="ws-wide">
-                  Gambar produk
-                  <input
-                    name="image"
-                    required
-                    defaultValue={edit.image || ""}
-                    placeholder="Alamat gambar produk"
-                  />
-                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => uploadAsset(event.target.files?.[0], event.currentTarget.previousElementSibling)} />
-                  <small>Unggah PNG, JPG, atau WebP (maksimal 5 MB), atau isi URL HTTPS.</small>
-                </label>
+                <div className="ws-wide ws-product-image-container">
+                  <label className="ws-product-image-label">
+                    Gambar Produk Utama *
+                  </label>
+                  <div className="ws-product-image-box">
+                    {productImagePreview ? (
+                      <div className="ws-product-preview-active">
+                        <div className="ws-product-preview-thumb-wrap">
+                          <img
+                            src={productImagePreview}
+                            alt="Foto utama produk"
+                            className="ws-product-preview-img"
+                            onError={(e) => {
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.style.opacity = "0.4";
+                            }}
+                          />
+                          <span className="ws-product-preview-badge">Foto Utama</span>
+                        </div>
+                        <div className="ws-product-preview-meta">
+                          <span className="ws-product-preview-filename" title={productImagePreview}>
+                            {productImagePreview.startsWith("data:")
+                              ? "Data Gambar (Base64)"
+                              : productImagePreview}
+                          </span>
+                          <div className="ws-product-preview-btns">
+                            <button
+                              type="button"
+                              className="ws-btn-change-image"
+                              onClick={() => mainFileInputRef.current?.click()}
+                              disabled={uploadingMainImage}
+                            >
+                              Ganti Foto
+                            </button>
+                            <button
+                              type="button"
+                              className="ws-btn-remove-image"
+                              onClick={() => {
+                                setProductImagePreview("");
+                                if (mainImageInputRef.current) mainImageInputRef.current.value = "";
+                                if (mainFileInputRef.current) mainFileInputRef.current.value = "";
+                                setEdit((curr) => (curr ? { ...curr, image: "" } : curr));
+                              }}
+                              disabled={uploadingMainImage}
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="ws-product-dropzone"
+                        onClick={() => mainFileInputRef.current?.click()}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            mainFileInputRef.current?.click();
+                          }
+                        }}
+                      >
+                        <div className="ws-product-dropzone-icon">
+                          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                          </svg>
+                        </div>
+                        <b className="ws-product-dropzone-title">
+                          Klik untuk unggah gambar utama produk
+                        </b>
+                        <small className="ws-product-dropzone-sub">
+                          Mendukung file PNG, JPG, JPEG, WebP, GIF, AVIF (maks. 10 MB)
+                        </small>
+                      </div>
+                    )}
+
+                    {uploadingMainImage && (
+                      <div className="ws-product-uploading-overlay">
+                        <div className="ws-upload-spinner" />
+                        <span>Mengunggah gambar ke server...</span>
+                      </div>
+                    )}
+
+                    <input
+                      ref={mainFileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/avif"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleMainImageUpload(file);
+                      }}
+                    />
+
+                    <div className="ws-product-url-fallback">
+                      <label htmlFor="product-main-image-url">
+                        Atau tautan URL langsung:
+                      </label>
+                      <input
+                        id="product-main-image-url"
+                        ref={mainImageInputRef}
+                        name="image"
+                        type="text"
+                        value={productImagePreview}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setProductImagePreview(val);
+                          setEdit((curr) => (curr ? { ...curr, image: val } : curr));
+                        }}
+                        placeholder="Contoh: /uploads/... atau https://..."
+                      />
+                    </div>
+                  </div>
+                  <small className="ws-product-image-hint">
+                    Gambar ini akan tampil di katalog utama toko, kartu produk, dan thumbnail detail produk.
+                  </small>
+                </div>
                 <label>Nama pilihan variasi<input name="variationLabel" defaultValue={edit.variationLabel || "Warna"} placeholder="Contoh: Warna, Motif, Bahan" required /></label>
                 <label>
                   Modal per produk (Rp)
@@ -4106,20 +4299,20 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           {/* Gambar Variasi (Opsional, multi-gambar) */}
                           <div className="ws-variant-image-field">
                             <label>
-                              Gambar Variasi (Opsional, bisa lebih dari 1)
+                              Gambar Variasi (Opsional, bisa pilih beberapa file sekaligus)
                               <div className="ws-variant-image-controls">
                                 <input
                                   type="file"
                                   multiple
-                                  accept="image/png,image/jpeg,image/webp"
+                                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/avif"
                                   onChange={async (event) => {
                                     const files = Array.from(event.target.files || []);
                                     event.target.value = "";
                                     if (!files.length) return;
                                     const uploadedUrls = [];
                                     for (const file of files) {
-                                      if (file.size > 5000000) {
-                                        setError(`Ukuran gambar ${file.name} melebihi batas 5 MB.`);
+                                      if (file.size > 10000000) {
+                                        setError(`Ukuran gambar ${file.name} melebihi batas 10 MB.`);
                                         continue;
                                       }
                                       try {
@@ -4135,7 +4328,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                         });
                                         if (url) uploadedUrls.push(url);
                                       } catch (err) {
-                                        setError(err.message);
+                                        setError(err.message || "Gagal mengunggah gambar variasi.");
                                       }
                                     }
                                     if (uploadedUrls.length) {
@@ -4158,7 +4351,16 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                     src={imgUrl}
                                     alt={`${row.variation || "Variasi"} ${imgIdx + 1}`}
                                     className="ws-variant-thumb-preview"
+                                    onError={(e) => {
+                                      e.currentTarget.onerror = null;
+                                      e.currentTarget.style.opacity = "0.4";
+                                    }}
                                   />
+                                  {imgIdx === 0 && (
+                                    <span className="ws-variant-thumb-badge" title="Gambar sampul variasi">
+                                      Utama
+                                    </span>
+                                  )}
                                   <button
                                     type="button"
                                     className="ws-variant-thumb-remove"

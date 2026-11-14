@@ -210,8 +210,8 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
       unitPrice: 0,
       oldPrice: 0,
       stock: 0,
-      image: "/images/seprai/sprei-01.jpg",
-      gallery: ["/images/seprai/sprei-01.jpg"],
+      image: "",
+      gallery: [],
       hasVariantImage: false,
       color: selectedColor || "",
       size: selectedSize || "",
@@ -250,10 +250,10 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
   const siblingImages = colorSiblings.flatMap((v) => collectVariantImages(v));
   const variantGallery = [...new Set(exactImages.length ? exactImages : siblingImages)];
 
-  const productFallback = product.image || "/images/seprai/sprei-01.jpg";
+  const productFallback = product.image || "";
   const gallery = variantGallery.length
     ? variantGallery
-    : [productFallback];
+    : (productFallback ? [productFallback] : []);
 
   const rawVariantPrice = Number(activeRow?.price);
   const unitPrice =

@@ -441,7 +441,7 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
 
   const displayImage = activeVariantInfo.hasVariantImage
     ? activeVariantInfo.image
-    : (slide.customImage || slide.image || product?.image || "/images/seprai/sprei-01.jpg");
+    : (slide.customImage || slide.image || product?.image || "");
 
   const variantHasCustomPrice = Number(currentVariant?.price) >= 1000;
   const basePrice = variantHasCustomPrice

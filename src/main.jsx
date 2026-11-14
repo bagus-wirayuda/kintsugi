@@ -489,7 +489,7 @@ function App() {
     ? activeVariantInfo.gallery
     : detail?.image
       ? [detail.image]
-      : ["/images/seprai/sprei-01.jpg"];
+      : [];
   const activeMainPhoto =
     activeGallery[Math.min(detailPhotoIndex, activeGallery.length - 1)] ||
     activeVariantInfo?.image ||

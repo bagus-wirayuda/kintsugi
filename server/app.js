@@ -88,19 +88,23 @@ function mapPaymentMethodRow(row) {
 }
 
 async function saveBase64ImageUpload(dataUrl, subdir = "") {
-  const match = String(dataUrl || "").match(
-    /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/,
-  );
-  if (!match) throw fail(400, "Gunakan gambar PNG, JPG, atau WebP.");
-  const bytes = Buffer.from(match[2], "base64");
-  if (!bytes.length || bytes.length > 5_000_000) {
-    throw fail(400, "Ukuran gambar maksimal 5 MB.");
+  const prefixMatch = String(dataUrl || "").match(/^data:([a-zA-Z0-9\/+-]+);base64,(.+)$/s);
+  if (!prefixMatch) throw fail(400, "Gunakan gambar PNG, JPG, WebP, atau GIF.");
+  const mimeType = prefixMatch[1].toLowerCase();
+  const rawBase64 = prefixMatch[2].replace(/\s+/g, "");
+  const bytes = Buffer.from(rawBase64, "base64");
+  if (!bytes.length || bytes.length > 10_000_000) {
+    throw fail(400, "Ukuran gambar maksimal 10 MB.");
   }
-  const extension = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/webp": "webp",
-  }[match[1]];
+  let extension = "jpg";
+  if (mimeType.includes("png")) extension = "png";
+  else if (mimeType.includes("webp")) extension = "webp";
+  else if (mimeType.includes("gif")) extension = "gif";
+  else if (mimeType.includes("jpeg") || mimeType.includes("jpg") || mimeType.includes("pjpeg")) extension = "jpg";
+  else if (mimeType.includes("avif")) extension = "avif";
+  else if (mimeType.includes("svg")) extension = "svg";
+  else throw fail(400, "Gunakan gambar PNG, JPG, WebP, atau GIF.");
+
   const cleanSubdir = subdir ? subdir.replace(/[^a-z0-9_-]/gi, "") : "";
   const baseDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
   const targetDir = cleanSubdir ? path.join(baseDir, cleanSubdir) : baseDir;
@@ -111,12 +115,13 @@ async function saveBase64ImageUpload(dataUrl, subdir = "") {
 }
 const imageSchema = z
   .string()
-  .max(1000)
+  .max(5000)
   .refine(
     (s) =>
-      /^\/(?:images|uploads|brand)\/[a-zA-Z0-9_\/.-]+$/.test(s) ||
-      /^https?:\/\//.test(s),
-    "Gunakan gambar /images/... atau URL HTTPS yang valid.",
+      /^\/(?:images|uploads|brand)\/[a-zA-Z0-9_\/.-]+$/i.test(s) ||
+      /^https?:\/\//i.test(s) ||
+      /^data:image\/(?:png|jpeg|jpg|webp|gif|avif);base64,/i.test(s),
+    "Gunakan gambar /uploads/..., /images/... atau URL HTTPS yang valid.",
   );
 const colorSchema = z.string().trim().min(1).max(100);
 const parseMoneyInt = (v, fallback = 0) => {
@@ -183,7 +188,13 @@ export function createApp(pool, options = {}) {
   const payments = createPayments(pool, gateway);
   const app = express();
   app.disable("x-powered-by");
-  app.use("/uploads", express.static(fileURLToPath(new URL("../public/uploads/", import.meta.url)), { fallthrough: true, maxAge: "7d" }));
+  const uploadsDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
+  mkdir(uploadsDir, { recursive: true }).catch(() => {});
+  app.use("/uploads", express.static(uploadsDir, { fallthrough: true, maxAge: "7d" }));
+  const imagesDir = fileURLToPath(new URL("../public/images/", import.meta.url));
+  app.use("/images", express.static(imagesDir, { fallthrough: true, maxAge: "7d" }));
+  const brandDir = fileURLToPath(new URL("../public/brand/", import.meta.url));
+  app.use("/brand", express.static(brandDir, { fallthrough: true, maxAge: "7d" }));
   const trustProxyConfig = env.TRUST_PROXY
     ? (env.TRUST_PROXY === "true" || env.TRUST_PROXY === "1" ? 1 : isNaN(env.TRUST_PROXY) ? env.TRUST_PROXY : Number(env.TRUST_PROXY))
     : (env.NODE_ENV === "production" ? 1 : false);
@@ -216,6 +227,7 @@ export function createApp(pool, options = {}) {
             "https://*.susercontent.com",
             "https://images.unsplash.com",
             "data:",
+            "blob:",
           ],
           connectSrc: ["'self'"],
           upgradeInsecureRequests: env.NODE_ENV === "production" ? [] : null,
@@ -223,7 +235,7 @@ export function createApp(pool, options = {}) {
       },
     }),
   );
-  app.use(express.json({ limit: "8mb" }));
+  app.use(express.json({ limit: "25mb" }));
   app.use(cookieParser());
   app.use("/api", (req, res, next) => {
     res.set("Cache-Control", "no-store");
