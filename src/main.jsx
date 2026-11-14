@@ -46,7 +46,7 @@ import { SizeGuideContent } from "./SizeGuide.jsx";
 import { sizesMatch } from "./size-guide.js";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
-import { resolveActiveVariant, resolveVariationDisplayMode } from "./variant-utils.js";
+import { resolveActiveVariant, resolveVariationDisplayMode, colorsMatch, getProductPriceRange } from "./variant-utils.js";
 import { StoreHeader, StoreFooter } from "./StoreChrome.jsx";
 import {
   getCartItemCount,
@@ -316,11 +316,11 @@ function App() {
   }, [authReady, user?.id, user?.role]);
 
   useEffect(() => {
-    const brandName = config?.brand || "Kintsugi";
-    const brandLogo = config?.logo || "/brand/kintsugi-logo-transparent-v2.png";
+    const brandName = config?.brand || "PT Liny Jaya";
+    const brandLogo = config?.logo || "";
 
     const viewTitles = {
-      home: `${brandName} | Sleep, made whole.`,
+      home: `${brandName} | Toko Resmi`,
       catalog: `Katalog Produk | ${brandName}`,
       cart: `Keranjang Belanja | ${brandName}`,
       checkout: `Checkout Pesanan | ${brandName}`,
@@ -331,7 +331,7 @@ function App() {
       auth: `Masuk / Daftar | ${brandName}`,
     };
 
-    let titleText = viewTitles[view] || `${brandName} | Sleep, made whole.`;
+    let titleText = viewTitles[view] || `${brandName} | Toko Resmi`;
     if (detail?.title) {
       titleText = `${detail.title} | ${brandName}`;
     }
@@ -810,7 +810,7 @@ function App() {
           {p.name}
         </button>
         <div className={"price " + (p.oldPrice ? "sale" : "")}>
-          {money(p.price)} {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
+          {money(p.minPrice ?? p.price)} {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
         </div>
         <div className="ks-product-actions">
           <button aria-label={'Tambah ke keranjang ' + p.name} onClick={() => openProduct(p, 'cart', activeCardColor)}><ShoppingBag size={15}/><span>Keranjang</span></button>
@@ -948,8 +948,26 @@ function App() {
             Pilihan tekstil Kintsugi
           </div>
           <div className="detail-price">
-            {money(activeUnitPrice)}
-            {activeOldPrice > activeUnitPrice && <del>{money(activeOldPrice)}</del>}
+            {activeVariantInfo?.hasPriceRange && !size ? (
+              <div className="ks-detail-price-range">
+                <span className="ks-range-amount">
+                  {money(activeVariantInfo.minPrice)} – {money(activeVariantInfo.maxPrice)}
+                </span>
+                <span className="ks-range-note">
+                  Pilih ukuran & variasi untuk melihat harga spesifik
+                </span>
+              </div>
+            ) : (
+              <div className="ks-detail-price-single">
+                <span className="ks-single-amount">{money(activeUnitPrice)}</span>
+                {activeOldPrice > activeUnitPrice && <del>{money(activeOldPrice)}</del>}
+                {activeVariantInfo?.hasPriceRange && (
+                  <span className="ks-range-subnote">
+                    Rentang: {money(activeVariantInfo.minPrice)} – {money(activeVariantInfo.maxPrice)}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <p>{detail.description}</p>
           <label>
@@ -1023,6 +1041,10 @@ function App() {
           <div className={"size-choices " + (detail.sizes.some((value) => parseDimensions(value)) ? "has-dimensions" : "regular-sizes")}>
             {detail.sizes.map((s) => {
               const dimensions = parseDimensions(s);
+              const matchedVar = detail.variants?.find((v) => colorsMatch(v.color, color) && sizesMatch(v.size, s));
+              const hasVarPrice = matchedVar?.price != null && Number(matchedVar.price) >= 1000;
+              const specificPrice = hasVarPrice ? Number(matchedVar.price) : Number(detail.basePrice || detail.price || 0);
+
               return (
                 <button
                   className={(size === s ? "selected " : "") + (dimensions ? "dimension-btn" : "text-size-btn")}
@@ -1043,6 +1065,9 @@ function App() {
                     </span>
                   ) : (
                     <span className="size-regular-value">{s}</span>
+                  )}
+                  {activeVariantInfo?.hasPriceRange && (
+                    <span className="size-variant-price-tag">{money(specificPrice)}</span>
                   )}
                 </button>
               );
@@ -1151,7 +1176,7 @@ function App() {
     return (
       <div className="workspace">
         <div className="ws-loading" role="status">
-          Menyiapkan Kintsugi…
+          Memuat halaman…
         </div>
       </div>
     );
@@ -1496,13 +1521,9 @@ function App() {
           <div className="catalog-title">
             <div>
               <span className="eyebrow">
-                {activeCategory === "fashion"
-                  ? "KINTSUGI APPAREL & FASHION"
-                  : activeCategory === "bedding" || activeCategory === "seprai"
-                    ? "KINTSUGI BEDDING COLLECTION"
-                    : activeCategory !== "Semua"
-                      ? ("KINTSUGI " + mainCategoryLabel(activeCategory, allCategories).toUpperCase())
-                      : "KINTSUGI BEDDING & FASHION COLLECTION"}
+                {activeCategory !== "Semua"
+                  ? `${(config?.brand || "PT Liny Jaya").toUpperCase()} / ${mainCategoryLabel(activeCategory, allCategories).toUpperCase()}`
+                  : `${(config?.brand || "PT Liny Jaya").toUpperCase()} / KOLEKSI KATALOG`}
               </span>
               <h1>
                 {view === "wishlist"
@@ -2222,7 +2243,7 @@ function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="drawer-title">
-              <h2>Jelajahi Kintsugi</h2>
+              <h2>Jelajahi {config?.brand || "Katalog"}</h2>
               <button aria-label="Tutup menu" onClick={() => setMenu(false)}>
                 <X />
               </button>
@@ -2262,7 +2283,7 @@ function App() {
             >
               <X />
             </button>
-            <span className="eyebrow">KINTSUGI / INFORMASI</span>
+            <span className="eyebrow">{(config?.brand || "PT LINY JAYA").toUpperCase()} / INFORMASI</span>
             <h2>{info}</h2>
             {info === "Panduan ukuran" ? (
               <SizeGuideContent

@@ -3858,3 +3858,211 @@
   border: 1px solid #f0c9c9;
   border-radius: 8px;
 }
+
+/* ==========================================================================
+   LAPORAN (REPORTS) & PDF EXPORT STYLES
+   ========================================================================== */
+.ws-reports-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ws-reports-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.ws-report-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.18s ease-in-out;
+}
+
+.ws-report-tab-btn:hover {
+  border-color: #0ea5e9;
+  background: #f8fafc;
+}
+
+.ws-report-tab-btn.active {
+  border-color: #0f172a;
+  background: #f1f5f9;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.ws-report-tab-btn strong {
+  display: block;
+  font-size: 14px;
+  color: #0f172a;
+  margin-bottom: 3px;
+}
+
+.ws-report-tab-btn small {
+  display: block;
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.ws-reports-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.ws-reports-filter-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ws-reports-filter-grid select,
+.ws-reports-filter-grid input[type="date"] {
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.ws-report-actions-cell {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  padding-bottom: 2px;
+}
+
+.ws-report-actions-cell button {
+  height: 38px;
+}
+
+.ws-reports-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Badge & Indikator Harga Varian */
+.ws-product-price-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ws-price-range-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0369a1;
+  background: #e0f2fe;
+  padding: 2px 7px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.ws-badge-custom-price {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  text-transform: uppercase;
+}
+
+.ws-badge-default-price {
+  display: inline-block;
+  font-size: 10px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.ws-variant-price-group label,
+.ws-variant-price-block label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-variant-price-badge,
+.ws-variant-price-note {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.ws-stock-out {
+  color: #dc2626;
+  font-weight: 700;
+  background: #fee2e2;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ws-stock-low {
+  color: #d97706;
+  font-weight: 700;
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Storefront Detail Price Range */
+.ks-detail-price-range {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ks-range-amount {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.ks-range-note {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.ks-range-subnote {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.size-variant-price-tag {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #0284c7;
+  margin-top: 2px;
+}
+

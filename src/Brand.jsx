@@ -1,22 +1,36 @@
 import React from "react";
 
-const DEFAULT_LOGO = "/brand/kintsugi-logo-transparent-v2.png";
-
-export default function Brand({ className = "", src, alt = "Kintsugi", ...props }) {
-  const resolvedSrc = src && typeof src === "string" && src.trim() !== "" ? src.trim() : DEFAULT_LOGO;
+export default function Brand({ className = "", src, alt = "PT Liny Jaya", ...props }) {
+  if (src && typeof src === "string" && src.trim() !== "") {
+    return (
+      <img
+        className={"kintsugi-logo " + className}
+        src={src.trim()}
+        alt={alt || "PT Liny Jaya"}
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+          if (e.currentTarget.nextElementSibling) {
+            e.currentTarget.nextElementSibling.style.display = "inline-block";
+          }
+        }}
+        {...props}
+      />
+    );
+  }
 
   return (
-    <img
-      className={"kintsugi-logo " + className}
-      src={resolvedSrc}
-      alt={alt || "Kintsugi"}
-      onError={(e) => {
-        if (!e.currentTarget.dataset.fallback) {
-          e.currentTarget.dataset.fallback = "true";
-          e.currentTarget.src = DEFAULT_LOGO;
-        }
+    <span
+      className={"ks-brand-text " + className}
+      style={{
+        fontWeight: 800,
+        fontSize: "1.2rem",
+        letterSpacing: "0.06em",
+        color: "#0f172a",
+        textTransform: "uppercase",
+        display: "inline-block",
       }}
-      {...props}
-    />
+    >
+      {alt || "PT LINY JAYA"}
+    </span>
   );
 }

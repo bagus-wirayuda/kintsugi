@@ -59,7 +59,7 @@ function Shell({
         <div className="ks-shopping-title">
           <div>
             <p className="ks-kicker">
-              KINTSUGI / {active === "cart" ? "SHOPPING BAG" : "MY SELECTION"}
+              PESANAN / {active === "cart" ? "KERANJANG BELANJA" : "FAVORIT"}
             </p>
             <h1>{title}</h1>
             <p>{subtitle}</p>
@@ -602,7 +602,7 @@ export function WishlistView({
                     {categoryLabel(p.category, config?.categories)}
                   </span>
                   <h3>{p.name}</h3>
-                  <b>{money(p.price)}</b>
+                  <b>{money(p.minPrice ?? p.price)}</b>
                   <div className="ks-product-actions">
                     <button onClick={() => openProduct && openProduct(p, 'cart')}>+ Keranjang</button>
                     <button onClick={() => openProduct && openProduct(p, 'buy')}>Beli langsung</button>

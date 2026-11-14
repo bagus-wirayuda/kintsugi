@@ -39,10 +39,15 @@ import {
   ShieldAlert,
   Clock3,
   Store,
+  FileText,
+  Download,
+  Printer,
+  Calendar,
+  DollarSign,
 } from "lucide-react";
 import Workspace, { Empty, Notice, Status } from "./Workspace";
 import { api } from "./store";
-import { colorLabel, money, formatRupiah, parseRupiah } from "./data";
+import { colorLabel, money, formatRupiah, parseRupiah, formatRupiahInput } from "./data";
 import RupiahInput from "./RupiahInput.jsx";
 import { paymentLabel } from "./Orders";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
@@ -50,14 +55,20 @@ import { PAYMENT_GROUPS, paymentName, isStorePickupMethod } from "./payment-meth
 import { SAMPLE_DANA_QRIS_PAYLOAD, validateQrisPayload } from "./qris.js";
 import { collectVariantImages } from "./variant-utils.js";
 import { resolveShippingInfo } from "./shipping-info.js";
+import {
+  generateSalesReportPDF,
+  generateFinancialReportPDF,
+  generateInventoryReportPDF,
+  formatShortDate,
+} from "./reports-pdf.js";
 
 export default function Admin({ user, notify, onLogout, config, reloadConfig }) {
   const isAdmin = user.role === "admin";
   const isManager = user.role === "manager";
   const isStaff = user.role === "staff";
   const tabs = isStaff ? ["orders"] : isAdmin
-    ? ["overview", "products", "discounts", "orders", "categories", "templates", "team", "settings"]
-    : ["overview", "products", "orders"];
+    ? ["overview", "products", "discounts", "orders", "reports", "categories", "templates", "team", "settings"]
+    : ["overview", "products", "orders", "reports"];
 
   const parseAdminHash = () => {
     const raw = location.hash.replace(/^#/, "");
@@ -96,7 +107,20 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     [paymentMethods, setPaymentMethods] = useState([]),
     [promotions, setPromotions] = useState([]),
     [metrics, setMetrics] = useState(null),
-    [team, setTeam] = useState([]);
+    [team, setTeam] = useState([]),
+    [reportType, setReportType] = useState("sales"),
+    [reportDateRange, setReportDateRange] = useState("this_month"),
+    [reportCustomStart, setReportCustomStart] = useState(() => {
+      const d = new Date();
+      d.setDate(1);
+      return d.toISOString().slice(0, 10);
+    }),
+    [reportCustomEnd, setReportCustomEnd] = useState(() => new Date().toISOString().slice(0, 10)),
+    [reportStatusFilter, setReportStatusFilter] = useState("all"),
+    [reportPaymentFilter, setReportPaymentFilter] = useState("all"),
+    [reportCategoryFilter, setReportCategoryFilter] = useState("all"),
+    [reportStockFilter, setReportStockFilter] = useState("all"),
+    [reportGenerating, setReportGenerating] = useState(false);
 
   const DEFAULT_WA_TEMPLATES = useMemo(
     () => ({
@@ -1226,6 +1250,122 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   const pending = orders.filter(
     (o) => o.payment_status === "PENDING" || o.payment_status === "CREATING",
   );
+
+  const getFilteredReportOrders = () => {
+    let list = [...orders];
+    const now = new Date();
+
+    if (reportDateRange === "today") {
+      const todayStr = now.toISOString().slice(0, 10);
+      list = list.filter((o) => (o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) === todayStr : false));
+    } else if (reportDateRange === "7_days") {
+      const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      list = list.filter((o) => o.created_at && new Date(o.created_at) >= past);
+    } else if (reportDateRange === "30_days") {
+      const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      list = list.filter((o) => o.created_at && new Date(o.created_at) >= past);
+    } else if (reportDateRange === "this_month") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      list = list.filter((o) => o.created_at && new Date(o.created_at) >= start);
+    } else if (reportDateRange === "last_month") {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      list = list.filter((o) => {
+        if (!o.created_at) return false;
+        const d = new Date(o.created_at);
+        return d >= start && d <= end;
+      });
+    } else if (reportDateRange === "custom") {
+      if (reportCustomStart) {
+        const start = new Date(reportCustomStart + "T00:00:00");
+        list = list.filter((o) => o.created_at && new Date(o.created_at) >= start);
+      }
+      if (reportCustomEnd) {
+        const end = new Date(reportCustomEnd + "T23:59:59");
+        list = list.filter((o) => o.created_at && new Date(o.created_at) <= end);
+      }
+    }
+
+    if (reportStatusFilter !== "all") {
+      list = list.filter((o) => o.status === reportStatusFilter);
+    }
+    if (reportPaymentFilter !== "all") {
+      list = list.filter((o) => o.payment_status === reportPaymentFilter);
+    }
+
+    return list;
+  };
+
+  const getReportPeriodLabel = () => {
+    if (reportDateRange === "today") return "Hari Ini (" + formatShortDate(new Date()) + ")";
+    if (reportDateRange === "7_days") return "7 Hari Terakhir";
+    if (reportDateRange === "30_days") return "30 Hari Terakhir";
+    if (reportDateRange === "this_month") {
+      return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date());
+    }
+    if (reportDateRange === "last_month") {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 1);
+      return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(d);
+    }
+    if (reportDateRange === "custom") {
+      return `${formatShortDate(reportCustomStart)} s/d ${formatShortDate(reportCustomEnd)}`;
+    }
+    return "Semua Waktu";
+  };
+
+  const handleDownloadCurrentReportPDF = () => {
+    try {
+      setReportGenerating(true);
+      const storeInfo = {
+        name: settings?.storeName || config?.name || "PT LINY JAYA",
+        phone: settings?.phone || config?.phone || "+62 811-1111-1111",
+        email: settings?.email || config?.email || "info@linyjaya.com",
+        address: settings?.address || config?.address || "Makassar, Sulawesi Selatan",
+      };
+      const periodLabel = getReportPeriodLabel();
+
+      if (reportType === "sales") {
+        const filtered = getFilteredReportOrders();
+        generateSalesReportPDF({
+          orders: filtered,
+          periodLabel,
+          statusFilter: reportStatusFilter === "all" ? "Semua Status" : reportStatusFilter,
+          paymentFilter: reportPaymentFilter === "all" ? "Semua Pembayaran" : reportPaymentFilter,
+          generatedBy: { name: user?.name || "Administrator", role: user?.role || "admin" },
+          storeInfo,
+          save: true,
+        });
+        setMessage("Laporan Penjualan & Transaksi PDF berhasil diunduh.");
+      } else if (reportType === "financial") {
+        generateFinancialReportPDF({
+          metrics: metrics || {},
+          orders,
+          expenses: metrics?.expenseRows || [],
+          periodLabel,
+          generatedBy: { name: user?.name || "Administrator", role: user?.role || "admin" },
+          storeInfo,
+          save: true,
+        });
+        setMessage("Laporan Keuangan & Laba Rugi PDF berhasil diunduh.");
+      } else if (reportType === "inventory") {
+        generateInventoryReportPDF({
+          products,
+          categoryFilter: reportCategoryFilter === "all" ? "Semua Kategori" : reportCategoryFilter,
+          stockFilter: reportStockFilter === "all" ? "Semua Kondisi Stok" : reportStockFilter,
+          generatedBy: { name: user?.name || "Administrator", role: user?.role || "admin" },
+          storeInfo,
+          save: true,
+        });
+        setMessage("Laporan Inventaris Stok & Varian Produk PDF berhasil diunduh.");
+      }
+    } catch (err) {
+      setError("Gagal membuat dokumen PDF: " + err.message);
+    } finally {
+      setReportGenerating(false);
+    }
+  };
+
   const items = [
     ...(!isStaff ? [{ id: "overview", label: isManager ? "Kinerja toko" : "Ringkasan", icon: LayoutDashboard }] : []),
     ...(!isStaff ? [{ id: "products", label: "Produk & stok", icon: Boxes }] : []),
@@ -1236,6 +1376,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       icon: Package,
       count: orders.filter((o) => o.status === "Diproses").length,
     },
+    ...(!isStaff ? [
+      { id: "reports", label: "Laporan (PDF)", icon: FileText }
+    ] : []),
     ...(isAdmin ? [
       { id: "categories", label: "Kategori navbar", icon: Tags },
       { id: "templates", label: "Template WhatsApp", icon: MessageSquareText },
@@ -1251,6 +1394,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
         : "Tambah produk"
       : selectedProduct ? "Detail produk" : "Produk & stok",
     orders: selected ? "Detail pesanan" : "Kelola pesanan",
+    reports: "Laporan Toko & Unduh PDF",
     settings: `Pengaturan toko — ${
       settingsSubmenu === "identity"
         ? "Identitas Toko"
@@ -1457,6 +1601,504 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       </div>
     );
   }
+
+  const renderReportsPage = () => {
+    const filteredOrders = getFilteredReportOrders();
+    const periodLabel = getReportPeriodLabel();
+
+    // Summary calculations for Sales
+    const totalOrdersCount = filteredOrders.length;
+    const paidOrders = filteredOrders.filter((o) => o.payment_status === "PAID");
+    const totalSalesRevenue = paidOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+    const totalSubtotal = paidOrders.reduce((sum, o) => sum + (Number(o.subtotal) || 0), 0);
+    const totalDiscount = paidOrders.reduce((sum, o) => sum + (Number(o.discount) || 0), 0);
+    const totalDelivery = paidOrders.reduce((sum, o) => sum + (Number(o.delivery) || 0), 0);
+    const aov = paidOrders.length > 0 ? Math.round(totalSalesRevenue / paidOrders.length) : 0;
+
+    // Summary calculations for Financial
+    const finRevenue = Number(metrics?.revenue) || totalSalesRevenue;
+    const finCogs = Number(metrics?.capital) || 0;
+    const finExpenses = Number(metrics?.expenses) || 0;
+    const finGrossProfit = finRevenue - finCogs;
+    const finNetIncome = finGrossProfit - finExpenses;
+
+    // Summary calculations for Inventory
+    let totalStockUnits = 0;
+    let totalStockHpp = 0;
+    let totalStockRetail = 0;
+
+    const inventoryRows = [];
+    products.forEach((p) => {
+      if (reportCategoryFilter !== "all" && p.category !== reportCategoryFilter) return;
+      const variants = Array.isArray(p.variants) && p.variants.length > 0
+        ? p.variants
+        : [{ size: "Standar", color: "Standar", stock: p.stock || 0, price: p.price }];
+
+      variants.forEach((v) => {
+        const stock = Number(v.stock) || 0;
+        if (reportStockFilter === "out_of_stock" && stock > 0) return;
+        if (reportStockFilter === "low_stock" && (stock <= 0 || stock > 5)) return;
+        if (reportStockFilter === "in_stock" && stock <= 0) return;
+
+        const vPrice = v.price != null && Number(v.price) >= 1000 ? Number(v.price) : Number(p.price || 0);
+        const cPrice = Number(p.costPrice || p.cost_price) || 0;
+
+        totalStockUnits += stock;
+        totalStockHpp += (stock * cPrice);
+        totalStockRetail += (stock * vPrice);
+
+        inventoryRows.push({
+          sku: p.sku || "—",
+          name: p.name,
+          category: p.category,
+          size: v.size,
+          color: v.color,
+          stock,
+          costPrice: cPrice,
+          price: vPrice,
+          retailValue: stock * vPrice,
+        });
+      });
+    });
+
+    return (
+      <div className="ws-reports-container">
+        {/* Navigation / Switcher Tipe Laporan */}
+        <section className="ws-panel ws-reports-nav-panel">
+          <div className="ws-reports-types">
+            <button
+              type="button"
+              className={`ws-report-tab-btn ${reportType === "sales" ? "active" : ""}`}
+              onClick={() => setReportType("sales")}
+            >
+              <TrendingUp size={20} color="#0f766e" />
+              <div>
+                <strong>Laporan Penjualan & Transaksi</strong>
+                <small>Omzet, status pesanan, pembayaran & rincian pesanan</small>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={`ws-report-tab-btn ${reportType === "financial" ? "active" : ""}`}
+              onClick={() => setReportType("financial")}
+            >
+              <Banknote size={20} color="#0369a1" />
+              <div>
+                <strong>Laporan Laba Rugi & Keuangan</strong>
+                <small>Pendapatan, HPP modal, beban operasional & laba bersih</small>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={`ws-report-tab-btn ${reportType === "inventory" ? "active" : ""}`}
+              onClick={() => setReportType("inventory")}
+            >
+              <Boxes size={20} color="#4338ca" />
+              <div>
+                <strong>Laporan Inventaris Stok Produk</strong>
+                <small>Stok fisik per varian, nilai modal & potensi nilai jual</small>
+              </div>
+            </button>
+          </div>
+        </section>
+
+        {/* Filter Toolbar */}
+        <section className="ws-panel ws-reports-filter-panel">
+          <div className="ws-reports-filter-grid">
+            <label>
+              Periode Waktu
+              <select
+                value={reportDateRange}
+                onChange={(e) => setReportDateRange(e.target.value)}
+              >
+                <option value="this_month">Bulan Ini ({new Intl.DateTimeFormat("id-ID", { month: "long" }).format(new Date())})</option>
+                <option value="today">Hari Ini</option>
+                <option value="7_days">7 Hari Terakhir</option>
+                <option value="30_days">30 Hari Terakhir</option>
+                <option value="last_month">Bulan Lalu</option>
+                <option value="all">Semua Periode</option>
+                <option value="custom">Rentang Tanggal Kustom…</option>
+              </select>
+            </label>
+
+            {reportDateRange === "custom" && (
+              <>
+                <label>
+                  Mulai Dari
+                  <input
+                    type="date"
+                    value={reportCustomStart}
+                    onChange={(e) => setReportCustomStart(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Sampai Dengan
+                  <input
+                    type="date"
+                    value={reportCustomEnd}
+                    onChange={(e) => setReportCustomEnd(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+
+            {reportType === "sales" && (
+              <>
+                <label>
+                  Status Pesanan
+                  <select
+                    value={reportStatusFilter}
+                    onChange={(e) => setReportStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Semua Status</option>
+                    <option value="Selesai">Selesai</option>
+                    <option value="Diproses">Diproses</option>
+                    <option value="Dikirim">Dikirim</option>
+                    <option value="Menunggu pembayaran">Menunggu Pembayaran</option>
+                    <option value="Dibatalkan">Dibatalkan</option>
+                  </select>
+                </label>
+                <label>
+                  Status Pembayaran
+                  <select
+                    value={reportPaymentFilter}
+                    onChange={(e) => setReportPaymentFilter(e.target.value)}
+                  >
+                    <option value="all">Semua Pembayaran</option>
+                    <option value="PAID">Lunas (PAID)</option>
+                    <option value="WAITING_VERIFICATION">Menunggu Verifikasi</option>
+                    <option value="PENDING">Belum Bayar (PENDING)</option>
+                    <option value="FAILED">Gagal / Batal</option>
+                  </select>
+                </label>
+              </>
+            )}
+
+            {reportType === "inventory" && (
+              <>
+                <label>
+                  Kategori Produk
+                  <select
+                    value={reportCategoryFilter}
+                    onChange={(e) => setReportCategoryFilter(e.target.value)}
+                  >
+                    <option value="all">Semua Kategori</option>
+                    {categories.filter((c) => !c.parent_id && !c.parentId).map((c) => (
+                      <option key={c.id} value={c.id}>{c.name || c.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Kondisi Stok
+                  <select
+                    value={reportStockFilter}
+                    onChange={(e) => setReportStockFilter(e.target.value)}
+                  >
+                    <option value="all">Semua Kondisi Stok</option>
+                    <option value="in_stock">Stok Tersedia (&gt; 0)</option>
+                    <option value="low_stock">Stok Rendah (&le; 5)</option>
+                    <option value="out_of_stock">Stok Habis (0)</option>
+                  </select>
+                </label>
+              </>
+            )}
+
+            <div className="ws-report-actions-cell">
+              <button
+                type="button"
+                className="ws-button primary"
+                onClick={handleDownloadCurrentReportPDF}
+                disabled={reportGenerating}
+              >
+                <Download size={15} />
+                <span>{reportGenerating ? "Membuat PDF…" : "Unduh PDF"}</span>
+              </button>
+              <button
+                type="button"
+                className="ws-button"
+                onClick={() => window.print()}
+                title="Cetak via browser"
+              >
+                <Printer size={15} />
+                <span>Cetak</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* KPI Summary Cards */}
+        {reportType === "sales" && (
+          <section className="ws-panel">
+            <div className="ws-panel-heading">
+              <h2>Ringkasan Penjualan & Transaksi</h2>
+              <p>Periode: <strong>{periodLabel}</strong> • Filter: Status <strong>{reportStatusFilter}</strong>, Pembayaran <strong>{reportPaymentFilter}</strong></p>
+            </div>
+            <div className="ws-stats admin-stats-grid">
+              <div className="ws-stat">
+                <div>
+                  <p>Total Transaksi</p>
+                  <b>{totalOrdersCount} Pesanan</b>
+                  <small style={{ color: "#64748b" }}>{paidOrders.length} lunas • {totalOrdersCount - paidOrders.length} lainnya</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Total Omzet (Lunas)</p>
+                  <b style={{ color: "#166534" }}>{money(totalSalesRevenue)}</b>
+                  <small style={{ color: "#64748b" }}>Subtotal: {money(totalSubtotal)}</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Rata-rata Order (AOV)</p>
+                  <b>{money(aov)}</b>
+                  <small style={{ color: "#64748b" }}>Per pesanan lunas</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Total Ongkos Kirim</p>
+                  <b>{money(totalDelivery)}</b>
+                  <small style={{ color: "#64748b" }}>Diskon promo: -{money(totalDiscount)}</small>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {reportType === "financial" && (
+          <section className="ws-panel">
+            <div className="ws-panel-heading">
+              <h2>Laba Rugi & Kinerja Finansial</h2>
+              <p>Periode: <strong>{periodLabel}</strong></p>
+            </div>
+            <div className="ws-stats admin-stats-grid">
+              <div className="ws-stat">
+                <div>
+                  <p>Pendapatan Penjualan (Lunas)</p>
+                  <b>{money(finRevenue)}</b>
+                  <small style={{ color: "#166534" }}>Omzet penjualan terbayar</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>HPP / Modal Pokok Barang</p>
+                  <b style={{ color: "#b91c1c" }}>-{money(finCogs)}</b>
+                  <small style={{ color: "#64748b" }}>Modal pokok barang terjual</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Laba Kotor (Gross Profit)</p>
+                  <b style={{ color: "#166534" }}>{money(finGrossProfit)}</b>
+                  <small style={{ color: "#64748b" }}>Margin: {finRevenue > 0 ? ((finGrossProfit / finRevenue) * 100).toFixed(1) : 0}%</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Beban Operasional Toko</p>
+                  <b style={{ color: "#b91c1c" }}>-{money(finExpenses)}</b>
+                  <small style={{ color: "#64748b" }}>Biaya operasional & beban</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Laba Bersih Akhir (Net Profit)</p>
+                  <b style={{ color: finNetIncome >= 0 ? "#166534" : "#b91c1c" }}>{money(finNetIncome)}</b>
+                  <small style={{ color: "#64748b" }}>Setelah HPP & seluruh beban</small>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {reportType === "inventory" && (
+          <section className="ws-panel">
+            <div className="ws-panel-heading">
+              <h2>Ikhtisar Inventaris & Nilai Aset Stok</h2>
+              <p>Kategori: <strong>{reportCategoryFilter}</strong> • Kondisi Stok: <strong>{reportStockFilter}</strong></p>
+            </div>
+            <div className="ws-stats admin-stats-grid">
+              <div className="ws-stat">
+                <div>
+                  <p>Varian Produk Terdata</p>
+                  <b>{inventoryRows.length} Varian</b>
+                  <small style={{ color: "#64748b" }}>Dari {products.length} produk master</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Total Fisik Unit Stok</p>
+                  <b>{totalStockUnits.toLocaleString("id-ID")} Unit</b>
+                  <small style={{ color: "#64748b" }}>Siap dipesan pelanggan</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Estimasi Nilai Modal (HPP)</p>
+                  <b>{money(totalStockHpp)}</b>
+                  <small style={{ color: "#64748b" }}>Nilai aset modal barang</small>
+                </div>
+              </div>
+              <div className="ws-stat">
+                <div>
+                  <p>Potensi Nilai Jual Retail</p>
+                  <b style={{ color: "#166534" }}>{money(totalStockRetail)}</b>
+                  <small style={{ color: "#166534" }}>Potensi omzet kotor toko</small>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Data Table Preview */}
+        <section className="ws-panel">
+          <div className="ws-panel-heading ws-reports-table-header">
+            <div>
+              <h2>Pratinjau Data Laporan ({reportType === "sales" ? `${filteredOrders.length} Transaksi` : reportType === "financial" ? `${(metrics?.expenseRows || []).length} Pengeluaran` : `${inventoryRows.length} Varian`})</h2>
+              <p>Data tabel di bawah ini terhubung langsung dengan dokumen PDF resmi yang dapat diunduh.</p>
+            </div>
+            <button
+              type="button"
+              className="ws-button primary"
+              onClick={handleDownloadCurrentReportPDF}
+              disabled={reportGenerating}
+            >
+              <Download size={15} />
+              <span>Unduh Dokumen PDF</span>
+            </button>
+          </div>
+
+          <div className="ws-table-scroll">
+            {reportType === "sales" && (
+              <table className="ws-table">
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>ID Pesanan</th>
+                    <th>Tanggal</th>
+                    <th>Pelanggan</th>
+                    <th>Rincian Produk</th>
+                    <th>Pembayaran</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: "right" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.length > 0 ? (
+                    filteredOrders.map((o, idx) => (
+                      <tr key={o.id}>
+                        <td>{idx + 1}</td>
+                        <td><strong>{o.id}</strong></td>
+                        <td>{formatShortDate(o.created_at)}</td>
+                        <td>
+                          <div>{o.address?.name || "Pelanggan"}</div>
+                          <small style={{ color: "#64748b" }}>{o.address?.phone || ""}</small>
+                        </td>
+                        <td>
+                          {(o.items || []).map((it) => `${it.name} (${it.size || ""}, ${it.color || ""}) ×${it.quantity}`).join(", ") || "—"}
+                        </td>
+                        <td>
+                          <Status state={o.payment_status} />
+                          <small style={{ display: "block", color: "#64748b" }}>{o.payment_method_name || o.payment}</small>
+                        </td>
+                        <td><Status state={o.status} /></td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{money(o.total || 0)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                        Tidak ada transaksi yang cocok dengan kriteria filter yang dipilih.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+
+            {reportType === "financial" && (
+              <table className="ws-table">
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Tanggal</th>
+                    <th>Keterangan Pengeluaran Operasional</th>
+                    <th style={{ textAlign: "right" }}>Nominal Beban</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(metrics?.expenseRows || []).length > 0 ? (
+                    (metrics.expenseRows || []).map((exp, idx) => (
+                      <tr key={exp.id || idx}>
+                        <td>{idx + 1}</td>
+                        <td>{formatShortDate(exp.date || exp.expense_date)}</td>
+                        <td>{exp.description}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700, color: "#b91c1c" }}>
+                          -{money(exp.amount || 0)}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                        Belum ada data pengeluaran operasional yang dicatat.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+
+            {reportType === "inventory" && (
+              <table className="ws-table">
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>SKU</th>
+                    <th>Nama Produk</th>
+                    <th>Kategori</th>
+                    <th>Varian (Ukuran & Warna)</th>
+                    <th style={{ textAlign: "right" }}>Harga Pokok (HPP)</th>
+                    <th style={{ textAlign: "right" }}>Harga Jual</th>
+                    <th style={{ textAlign: "center" }}>Stok</th>
+                    <th style={{ textAlign: "right" }}>Total Nilai Jual</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryRows.length > 0 ? (
+                    inventoryRows.map((row, idx) => (
+                      <tr key={`${row.sku}-${row.size}-${row.color}-${idx}`}>
+                        <td>{idx + 1}</td>
+                        <td><strong>{row.sku}</strong></td>
+                        <td>{row.name}</td>
+                        <td>{row.category}</td>
+                        <td>{row.size} - {row.color}</td>
+                        <td style={{ textAlign: "right" }}>{row.costPrice > 0 ? money(row.costPrice) : "—"}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{money(row.price)}</td>
+                        <td style={{ textAlign: "center" }}>
+                          <span className={row.stock <= 0 ? "ws-stock-out" : row.stock <= 5 ? "ws-stock-low" : ""}>
+                            {row.stock}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{money(row.retailValue)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                        Tidak ada varian produk yang cocok dengan filter kategori dan stok.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  };
 
   const renderDiscountsPage = () => {
     const activeProducts = products.filter((p) => p.active);
@@ -2266,7 +2908,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
       total: "Rp185.000",
       nomor_resi: "JNE-9920148819",
       kurir: "JNE Reguler",
-      toko: settings?.brand || "Kintsugi",
+      toko: settings?.brand || "PT Liny Jaya",
     };
 
     const formatPreview = (text) =>
@@ -2648,10 +3290,22 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               ? "Periksa pembayaran, siapkan pesanan, dan kelola pengiriman."
               : tab === "discounts"
                 ? "Kelola penawaran promo produk dan slider sorotan beranda toko Anda."
-                : "Periksa koneksi dan konfigurasi layanan toko."
+                : tab === "reports"
+                  ? "Analisis penjualan, laba rugi keuangan, dan inventaris produk dengan ekspor format PDF resmi."
+                  : "Periksa koneksi dan konfigurasi layanan toko."
       }
       actions={
         <div className="ws-actions">
+          {tab === "reports" && (
+            <button
+              className="ws-button primary"
+              onClick={handleDownloadCurrentReportPDF}
+              disabled={reportGenerating}
+            >
+              <Download size={16} />
+              {reportGenerating ? "Membuat PDF…" : "Unduh PDF Laporan"}
+            </button>
+          )}
           {tab === "products" && !edit && isAdmin && (
             <button
               className="ws-button primary"
@@ -3000,7 +3654,16 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                               </div>
                             </div>
                           </td>
-                          <td>{money(p.price)}</td>
+                          <td>
+                            <div className="ws-product-price-cell">
+                              <strong>{money(p.minPrice ?? p.price)}</strong>
+                              {p.hasPriceRange && (
+                                <span className="ws-price-range-badge" title={`Rentang harga: ${money(p.minPrice)} - ${money(p.maxPrice)}`}>
+                                  {money(p.minPrice)} – {money(p.maxPrice)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td>
                             <b>{p.stock}</b> unit
                             <small>{p.variants.length} varian · Terjual {p.soldUnits || 0}</small>
@@ -3073,7 +3736,50 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
             <section className="ws-panel ws-product-detail">
               <div className="ws-product-detail-head"><img src={selectedProduct.image} alt={selectedProduct.name}/><div><p className="ws-kicker">{selectedProduct.sku} · {selectedProduct.category}</p><h2>{selectedProduct.name}</h2><p>{selectedProduct.description}</p><p>Motif: {selectedProduct.motif || "—"} · Harga: {money(selectedProduct.price)} · Status: {selectedProduct.active ? "Tampil" : "Disembunyikan"}</p></div></div>
               <div className="ws-stats admin-stats-grid">{[["Terjual (lunas)",selectedProduct.soldUnits],["Nilai penjualan",money(selectedProduct.soldRevenue)],["Modal terjual",money(selectedProduct.soldCost)],["Margin kotor",money(selectedProduct.grossProfit)],["Stok tersedia",selectedProduct.stock]].map(([label,value])=><div className="ws-stat" key={label}><div><p>{label}</p><b>{value}</b></div></div>)}</div>
-              <h3>Rincian variasi dan stok</h3><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Ukuran</th><th>{selectedProduct.variation_label || "Variasi"}</th><th>Stok</th><th>Gambar</th></tr></thead><tbody>{selectedProduct.variants.map((variant)=><tr key={variant.size+variant.color}><td>{dimensionLabel(variant.size)}</td><td>{colorLabel(variant.color)}</td><td>{variant.stock}</td><td>{variant.image_url ? <img className="ws-variant-thumb" src={variant.image_url} alt=""/> : "Gambar utama"}</td></tr>)}</tbody></table></div>
+              <h3>Rincian variasi, harga dan stok</h3>
+              <div className="ws-table-scroll">
+                <table className="ws-table">
+                  <thead>
+                    <tr>
+                      <th>Ukuran</th>
+                      <th>{selectedProduct.variation_label || "Variasi"}</th>
+                      <th>Harga Variasi</th>
+                      <th>Stok</th>
+                      <th>Gambar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedProduct.variants.map((variant) => {
+                      const vPrice = variant.price != null && Number(variant.price) >= 1000
+                        ? Number(variant.price)
+                        : Number(selectedProduct.price);
+                      const isCustom = variant.price != null && Number(variant.price) >= 1000;
+                      return (
+                        <tr key={variant.size + variant.color}>
+                          <td>{dimensionLabel(variant.size)}</td>
+                          <td>{colorLabel(variant.color)}</td>
+                          <td>
+                            <strong>{money(vPrice)}</strong>
+                            {isCustom ? (
+                              <span className="ws-badge-custom-price">Khusus</span>
+                            ) : (
+                              <span className="ws-badge-default-price">Harga Utama</span>
+                            )}
+                          </td>
+                          <td>{variant.stock}</td>
+                          <td>
+                            {variant.image_url ? (
+                              <img className="ws-variant-thumb" src={variant.image_url} alt="" />
+                            ) : (
+                              "Gambar utama"
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
           {tab === "products" && edit && (
@@ -3379,18 +4085,23 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           </label>
 
                           {/* Harga Khusus Variasi (Opsional) */}
-                          <label>
-                            Harga Variasi (Rp, Opsional)
-                            <input
-                              type="number"
-                              min="1000"
-                              max="10000000"
-                              step="1000"
-                              value={row.variantPrice ?? ""}
-                              onChange={(e) => updateVariantField(row.id, "variantPrice", e.target.value)}
-                              placeholder="Ikuti harga utama"
-                            />
-                          </label>
+                          <div className="ws-variant-price-group">
+                            <label>
+                              Harga Khusus Variasi (Rp, Opsional)
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={row.variantPrice ? formatRupiahInput(row.variantPrice) : ""}
+                                onChange={(e) => updateVariantField(row.id, "variantPrice", parseRupiah(e.target.value) || "")}
+                                placeholder={`Ikuti harga produk (${money(parseRupiah(edit.price) || edit.price || 0)})`}
+                              />
+                            </label>
+                            <span className="ws-variant-price-badge">
+                              {row.variantPrice
+                                ? `Harga khusus varian: ${money(parseRupiah(row.variantPrice))}`
+                                : `Mengikuti harga utama: ${money(parseRupiah(edit.price) || edit.price || 0)}`}
+                            </span>
+                          </div>
 
                           {/* Gambar Variasi (Opsional, multi-gambar) */}
                           <div className="ws-variant-image-field">
@@ -4391,6 +5102,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               </div>
             </div>
           )}
+          {tab === "reports" && renderReportsPage()}
           {tab === "discounts" && renderDiscountsPage()}
           {tab === "templates" && renderTemplatesPage()}
           {tab === "team" && <><section className="ws-panel ws-form-panel"><div className="ws-panel-heading"><h2>Tambah pimpinan atau karyawan</h2><p>Pimpinan melihat laporan kinerja; karyawan fokus pada pemantauan dan pemrosesan pesanan.</p></div><form className="ws-inline-expense" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const f=Object.fromEntries(new FormData(form));perform(()=>api("/admin/users",{method:"POST",body:f}),"Akun tim berhasil dibuat.").then((ok)=>ok&&form.reset());}}><label>Nama<input name="name" required/></label><label>Email masuk<input name="email" type="email" required/></label><label>WhatsApp<input name="phone"/></label><label>Kata sandi sementara<input name="password" minLength="12" required/></label><label>Peran<select name="role"><option value="staff">Karyawan</option><option value="manager">Pimpinan</option></select></label><button className="ws-button primary">Buat akun</button></form></section><section className="ws-panel"><div className="ws-panel-heading"><h2>Akun terdaftar</h2></div><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Nama</th><th>Email</th><th>Nomor</th><th>Peran</th></tr></thead><tbody>{team.map((member)=><tr key={member.id}><td>{member.name}</td><td>{member.email}</td><td>{member.phone}</td><td><select aria-label={`Peran ${member.name}`} disabled={member.id===user.id} value={member.role} onChange={(event)=>perform(()=>api(`/admin/users/${member.id}/role`,{method:"PATCH",body:{role:event.target.value}}),"Peran akun diperbarui.")}><option value="customer">Pelanggan</option><option value="staff">Karyawan</option><option value="manager">Pimpinan</option><option value="admin">Admin</option></select></td></tr>)}</tbody></table></div></section></>}
@@ -4547,7 +5259,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       </label>
                       <label>
                         Tagline Utama Hero (Kicker)
-                        <input name="heroKicker" defaultValue={settings?.heroKicker || ""} placeholder="Contoh: KINTSUGI / BEDROOM COLLECTION" />
+                        <input name="heroKicker" defaultValue={settings?.heroKicker || ""} placeholder="Contoh: KOLEKSI PILIHAN / 2026" />
                       </label>
                       <label className="ws-wide">
                         Judul Utama Hero (Gunakan baris baru untuk pindah baris)

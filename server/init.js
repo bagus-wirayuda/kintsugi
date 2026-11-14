@@ -1037,8 +1037,10 @@ export async function initialize(target = pool, seed = true) {
   await ensureVariantColumn("product_variants", "images_json", "images_json TEXT NULL");
   await ensureVariantColumn("order_items", "variant_id", "variant_id VARCHAR(80) NULL DEFAULT NULL AFTER product_id");
 
-  // Sinkronisasi katalog seprai
-  await syncSepraiCatalog(target);
+  // Sinkronisasi katalog seprai hanya jika mode seed aktif
+  if (seed) {
+    await syncSepraiCatalog(target);
+  }
 
   // Bersihkan metode bawaan lama dan sisakan hanya COD sebagai contoh default
   const paymentMethodsMigration = (await target.query(

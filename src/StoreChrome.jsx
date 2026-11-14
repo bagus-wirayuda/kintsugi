@@ -82,9 +82,9 @@ export function StoreHeader({
           <button
             className="ks-brand"
             onClick={() => nav("home")}
-            aria-label="Kintsugi beranda"
+            aria-label={`${config?.brand || "PT Liny Jaya"} beranda`}
           >
-            <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
+            <Brand src={config?.logo || undefined} alt={config?.brand || "PT Liny Jaya"} />
           </button>
           <nav className="ks-departments" aria-label="Kategori utama produk">
             {mainCategoriesList.map((m) => (
@@ -203,7 +203,7 @@ export function StoreHeader({
     </>
   );
 }
-export function StoreFooter({ nav, onInfo, contact = "", storeAddress = "", brand = "Kintsugi" }) {
+export function StoreFooter({ nav, onInfo, contact = "", storeAddress = "", brand = "PT Liny Jaya" }) {
   const info = (title) => onInfo ? onInfo(title) : nav("account/help");
   return (
     <footer className="ks-simple-footer">

@@ -490,10 +490,10 @@ export default function Checkout({
         <div className="checkout-page-title">
           <p className="ks-kicker">
             {step === "checkout"
-              ? "KINTSUGI / CHECKOUT"
+              ? "PESANAN / CHECKOUT"
               : shipping === "pickup"
-                ? "KINTSUGI / AMBIL DI TOKO"
-                : "KINTSUGI / PEMBAYARAN"}
+                ? "PESANAN / AMBIL DI TOKO"
+                : "PESANAN / PEMBAYARAN"}
           </p>
           <h1>
             {step === "checkout"
@@ -1329,7 +1329,7 @@ export default function Checkout({
         )}
       </main>
       <footer className="auth-footer">
-        © 2026 Kintsugi · Pilihan sederhana, untuk setiap hari.
+        © 2026 PT Liny Jaya · Transaksi aman & terpercaya.
       </footer>
     </div>
   );

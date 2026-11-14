@@ -196,7 +196,7 @@ export default function Auth({
       {!admin && <StoreHeader config={config} nav={nav} shop={shop} activeCategory={activeCategory} count={cartCount} wishCount={wishCount} onSearch={onSearch}/>}
       {admin && <div className="auth-brandbar">
         <a className="ws-logo" href="#home">
-          <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
+          <Brand src={config?.logo || undefined} alt={config?.brand || "PT Liny Jaya"} />
           <div>
             <small>{admin ? "ADMINISTRATION" : "CUSTOMER ACCOUNT"}</small>
           </div>
@@ -302,37 +302,6 @@ export default function Auth({
           )}
           <Notice>{error}</Notice>
           <Notice type="success">{message}</Notice>
-          {mode === "login" && !challenge && (
-            <div className="auth-quick-login">
-              <span className="auth-quick-title">Login Cepat Akun Demo:</span>
-              <div className="auth-quick-btns">
-                <button
-                  type="button"
-                  className="auth-preset-chip"
-                  onClick={() => {
-                    const phoneInput = document.querySelector('input[name="phone"]');
-                    const passInput = document.querySelector('input[name="password"]');
-                    if (phoneInput) phoneInput.value = "admin@linyjaya.test";
-                    if (passInput) passInput.value = "AdminLinyJaya2026!";
-                  }}
-                >
-                  <ShieldCheck size={14} /> Admin Demo
-                </button>
-                <button
-                  type="button"
-                  className="auth-preset-chip"
-                  onClick={() => {
-                    const phoneInput = document.querySelector('input[name="phone"]');
-                    const passInput = document.querySelector('input[name="password"]');
-                    if (phoneInput) phoneInput.value = "pelanggan@linyjaya.test";
-                    if (passInput) passInput.value = "BelanjaLiny2026!";
-                  }}
-                >
-                  <ShoppingBag size={14} /> Pelanggan Demo
-                </button>
-              </div>
-            </div>
-          )}
           <form onSubmit={submit} key={mode + Boolean(challenge) + method}>
             {challenge ? (
               <>
@@ -554,7 +523,7 @@ export default function Auth({
         </section>
       </main>
       <footer className="auth-footer">
-        © 2026 Kintsugi · Akses akun yang aman
+        © 2026 {config?.brand || "PT Liny Jaya"} · Akses akun yang aman
       </footer>
     </div>
   );

@@ -20,7 +20,7 @@ import VariantSummary from "./VariantSummary.jsx";
 import { resolveActiveVariant, resolveVariationDisplayMode } from "./variant-utils.js";
 
 export default function Home({ shop, products = [], openProduct, config = {}, onAddToCart, onBuyDirect, onSizeGuide }) {
-  const mainNavItems = getMainCategories(config.categories || mainCategories);
+  const mainNavItems = getMainCategories(config.categories || []);
 
   // Resolusi section produk beranda (dinamis dan full custom)
   const homeSections = Array.isArray(config.homeSections)
@@ -144,51 +144,87 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
     }
     pauseTemporarily();
   };
+  const hasHero = Boolean(
+    (config.heroTitle && config.heroTitle.trim()) ||
+    (config.heroImage && config.heroImage.trim()) ||
+    (config.heroKicker && config.heroKicker.trim())
+  );
+
   return (
     <main className="ks-home">
-      <section className="ks-hero">
-        <img
-          src={config.heroImage || assets.hero}
-          alt="Kamar tidur dengan tekstil lembut pilihan Kintsugi"
-          fetchPriority="high"
-        />
-        <div className="ks-hero-shade" />
-        <div className="ks-hero-content">
-          <span className="ks-kicker">{config.heroKicker || "KINTSUGI / BEDROOM COLLECTION"}</span>
-          <h1>
-            {(config.heroTitle || "Beristirahat.\nLebih dalam.\nSetiap malam.")
-              .split("\n")
-              .map((line, index) => (
-                <span key={index} className="ks-hero-line">
-                  {index === 2 ? <em>{line}</em> : line}
-                </span>
-              ))}
-          </h1>
-          <p>{config.heroText || "Tekstil kamar yang lembut untuk menjaga setiap momen istirahat."}</p>
-          <button type="button" onClick={() => shop("Semua", "Semua")}>
-            JELAJAHI KOLEKSI <ArrowRight size={19} />
-          </button>
-          <span className="ks-hero-caption">
-            Lembut, tenang, dan dirancang untuk tidur yang utuh.
-          </span>
-        </div>
-        <div className="ks-hero-index">
-          <span>01</span>
-          <i />
-          <span>{config.brand || "SLEEP, REFINED."}</span>
-        </div>
-      </section>
-      <nav className="ks-quick-links" aria-label="Menu kategori utama di ponsel">
-        {mainNavItems.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => shop(m.id, "Semua")}
-          >
-            {m.label || m.name || m.id} <ArrowUpRight size={14} />
-          </button>
-        ))}
-      </nav>
+      {hasHero && (
+        <section className="ks-hero">
+          {config.heroImage && (
+            <img
+              src={config.heroImage}
+              alt={config.heroTitle || config.brand || "Banner Utama"}
+              fetchPriority="high"
+            />
+          )}
+          <div className="ks-hero-shade" />
+          <div className="ks-hero-content">
+            {config.heroKicker && <span className="ks-kicker">{config.heroKicker}</span>}
+            {config.heroTitle && (
+              <h1>
+                {config.heroTitle
+                  .split("\n")
+                  .map((line, index) => (
+                    <span key={index} className="ks-hero-line">
+                      {index === 2 ? <em>{line}</em> : line}
+                    </span>
+                  ))}
+              </h1>
+            )}
+            {config.heroText && <p>{config.heroText}</p>}
+            <button type="button" onClick={() => shop("Semua", "Semua")}>
+              JELAJAHI KOLEKSI <ArrowRight size={19} />
+            </button>
+            <span className="ks-hero-caption">
+              Koleksi resmi {config.brand || "PT Liny Jaya"}.
+            </span>
+          </div>
+          <div className="ks-hero-index">
+            <span>01</span>
+            <i />
+            <span>{config.brand || "PT Liny Jaya"}</span>
+          </div>
+        </section>
+      )}
+
+      {!hasHero && products.length === 0 && (!homeSections || homeSections.length === 0) && (
+        <section className="ks-empty-storefront" style={{ textAlign: "center", padding: "100px 24px" }}>
+          <div style={{ maxWidth: "560px", margin: "0 auto" }}>
+            <h1 style={{ fontSize: "2.2rem", fontWeight: 700, margin: "0 0 16px", color: "var(--ws-text, #0f172a)" }}>
+              Selamat Datang di {config.brand || "PT Liny Jaya"}
+            </h1>
+            <p style={{ color: "var(--ws-muted, #64748b)", fontSize: "1.1rem", lineHeight: 1.6, margin: "0 0 28px" }}>
+              Katalog produk dan tampilan beranda siap dikonfigurasi melalui panel admin.
+            </p>
+            <button
+              type="button"
+              className="btn black"
+              style={{ padding: "12px 28px", fontSize: "14px", fontWeight: 600, borderRadius: "6px" }}
+              onClick={() => shop("Semua", "Semua")}
+            >
+              Jelajahi Katalog
+            </button>
+          </div>
+        </section>
+      )}
+
+      {mainNavItems && mainNavItems.length > 0 && (
+        <nav className="ks-quick-links" aria-label="Menu kategori utama di ponsel">
+          {mainNavItems.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => shop(m.id, "Semua")}
+            >
+              {m.label || m.name || m.id} <ArrowUpRight size={14} />
+            </button>
+          ))}
+        </nav>
+      )}
 
       {/* Dynamic Product Sections (SLEEP ESSENTIALS concept) */}
       {homeSections.map((section, sIdx) => {
@@ -253,7 +289,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
                   >
                     {p.name}
                   </button>
-                  <strong>{money(p.price)}</strong>
+                  <strong>{money(p.minPrice ?? p.price)}</strong>
                   {p.oldPrice > 0 && <del>{money(p.oldPrice)}</del>}
                   <div className="ks-product-actions">
                     <button type="button" onClick={() => openProduct(p, 'cart', activeColor)}>+ Keranjang</button>

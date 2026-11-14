@@ -132,7 +132,7 @@ export function getWablasConfig(env = process.env) {
   }
 
   return {
-    host: (host || "https://texas.wablas.com").replace(/\/$/, ""),
+    host: (host || "https://smg.wablas.com").replace(/\/$/, ""),
     token: token || "",
     secret: secret || "",
   };

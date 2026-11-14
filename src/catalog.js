@@ -26,14 +26,14 @@ export const catalogCategories = [
   { id: "fashion-loungewear", label: "Piyama & Loungewear", name: "Piyama & Loungewear", parentId: "fashion", parent_id: "fashion" },
 ];
 
-export const getMainCategories = (categories = []) => {
-  const pool = categories && categories.length ? categories : catalogCategories;
+export const getMainCategories = (categories = null) => {
+  const pool = Array.isArray(categories) ? categories : catalogCategories;
   const mains = pool.filter((c) => !c.parentId && !c.parent_id && c.active !== false);
-  return mains.length ? mains : mainCategories;
+  return mains;
 };
 
-export const getSubcategories = (categories = [], parentId = null) => {
-  const pool = categories && categories.length ? categories : catalogCategories;
+export const getSubcategories = (categories = null, parentId = null) => {
+  const pool = Array.isArray(categories) ? categories : catalogCategories;
   if (!parentId || parentId === "Semua") {
     return pool.filter((c) => (c.parentId || c.parent_id) && c.active !== false);
   }

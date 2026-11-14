@@ -43,7 +43,7 @@ export default function Workspace({
             }
           }}
         >
-          <Brand src={config?.logo || undefined} alt={config?.brand || "Kintsugi"} />
+          <Brand src={config?.logo || undefined} alt={config?.brand || "PT Liny Jaya"} />
           <div>
             <small>{isAdminWorkspace ? `${config?.brand || "TOKO"} / PENGELOLAAN` : "AKUN PELANGGAN"}</small>
           </div>

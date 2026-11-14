@@ -1335,8 +1335,22 @@ export function createApp(pool, options = {}) {
       };
     });
     const allVariantImages = normalizedVariants.flatMap((v) => v.images);
+    const basePrice = Number(p.price) || 0;
+    const variantPrices = normalizedVariants
+      .map((v) => (v.price != null && Number(v.price) >= 1000 ? Number(v.price) : basePrice))
+      .filter((n) => Number.isFinite(n) && n >= 1000);
+    if (!variantPrices.length) variantPrices.push(basePrice);
+    const minPrice = Math.min(...variantPrices);
+    const maxPrice = Math.max(...variantPrices);
+    const hasPriceRange = minPrice !== maxPrice;
+
     return {
       ...p,
+      price: minPrice, // Di katalog selalu menampilkan harga termurah
+      basePrice,
+      minPrice,
+      maxPrice,
+      hasPriceRange,
       active: Boolean(p.active),
       oldPrice: p.old_price,
       costPrice: p.cost_price || 0,
@@ -1369,7 +1383,6 @@ export function createApp(pool, options = {}) {
         const salePrice = promotion.promo_price != null && Number(promotion.promo_price) > 0
           ? Number(promotion.promo_price)
           : promotionPrice(p.price, promotion.discount_percent);
-        product.price = salePrice;
         product.variants = product.variants.map((v) => {
           if (v.price == null) return v;
           const variantSale = promotion.discount_percent
@@ -1377,6 +1390,16 @@ export function createApp(pool, options = {}) {
             : v.price;
           return { ...v, basePrice: v.price, oldPrice: v.price, price: variantSale };
         });
+        const promoVariantPrices = product.variants
+          .map((v) => (v.price != null && Number(v.price) >= 1000 ? Number(v.price) : salePrice))
+          .filter((n) => Number.isFinite(n) && n >= 1000);
+        if (!promoVariantPrices.length) promoVariantPrices.push(salePrice);
+        const promoMinPrice = Math.min(...promoVariantPrices);
+        const promoMaxPrice = Math.max(...promoVariantPrices);
+        product.price = promoMinPrice;
+        product.minPrice = promoMinPrice;
+        product.maxPrice = promoMaxPrice;
+        product.hasPriceRange = promoMinPrice !== promoMaxPrice;
         product.promotion = { id: promotion.id, title: promotion.title, discountPercent: Number(promotion.discount_percent), promoPrice: salePrice };
       }
       return product;
@@ -1668,7 +1691,7 @@ export function createApp(pool, options = {}) {
         ...orderRow(o),
         items: items
           .filter((i) => i.order_id === o.id)
-          .map(({ cost_price, ...i }) => ({ ...i, id: i.product_id })),
+          .map(({ cost_price, ...i }) => ({ ...i, id: i.product_id, cost_price, costPrice: cost_price || 0 })),
       })),
     );
   }
@@ -2640,7 +2663,7 @@ export function createApp(pool, options = {}) {
       gateway: gateway.configured,
       sandbox: gateway.sandbox,
       whatsappConfigured: Boolean(env.WABLAS_TOKEN),
-      whatsappHost: env.WABLAS_API_HOST || "https://texas.wablas.com",
+      whatsappHost: env.WABLAS_API_HOST || "https://smg.wablas.com",
       whatsapp: wa.rows,
       email: email.rows,
       rajaOngkirConfigured:Boolean(env.RAJAONGKIR_API_KEY&&(settings.rajaOriginId||env.RAJAONGKIR_ORIGIN_ID)),

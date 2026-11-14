@@ -1,7 +1,7 @@
 export function policy(title, contact) {
   const policies = {
     "Cerita kami":
-      "Kintsugi menyediakan sprei dan tekstil kamar untuk kebutuhan dewasa, hotel & guest, anak, serta bayi. Temukan ukuran panjang, lebar, dan tinggi serta warna yang sesuai untuk spring bed Anda.",
+      "PT Liny Jaya menyediakan produk berkualitas pilihan terbaik. Temukan variasi, ukuran, dan warna yang sesuai dengan kebutuhan Anda.",
     "Kualitas & material":
       "Baca deskripsi produk dan ikuti label perawatan pada barang. Hubungi layanan pelanggan untuk informasi bahan, warna, dan ukuran sebelum memesan.",
     Keberlanjutan:
@@ -17,7 +17,7 @@ export function policy(title, contact) {
     "Penukaran & pengembalian":
       "Hubungi pengelola dengan nomor pesanan dan kondisi barang untuk permintaan penukaran. Persetujuan dan biaya ditentukan setelah pemeriksaan. Pembatalan mandiri tersedia sebelum pembayaran; refund otomatis belum tersedia.",
     "Hubungi kami":
-      "Layanan pelanggan Kintsugi: " +
+      "Layanan pelanggan PT Liny Jaya: " +
       contact +
       ". Sertakan nomor pesanan jika pertanyaan berkaitan dengan pembelian.",
     "Kebijakan privasi":

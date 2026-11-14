@@ -157,6 +157,46 @@ export function colorsMatch(a, b) {
 }
 
 /**
+ * Calculates the price range (minimum and maximum price) across a product's variants.
+ * If selectedColor is specified, also computes range for that specific color.
+ */
+export function getProductPriceRange(product, selectedColor = "") {
+  if (!product) return { min: 0, max: 0, hasRange: false, colorMin: 0, colorMax: 0, hasColorRange: false };
+  const basePrice = Number(product.basePrice ?? product.price) || 0;
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+
+  const allPrices = variants
+    .map((v) => (v.price != null && Number(v.price) >= 1000 ? Number(v.price) : basePrice))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (!allPrices.length) allPrices.push(basePrice);
+
+  const min = Math.min(...allPrices);
+  const max = Math.max(...allPrices);
+
+  let colorMin = min;
+  let colorMax = max;
+  if (selectedColor) {
+    const colorVariants = variants.filter((v) => colorsMatch(v.color, selectedColor));
+    const colorPrices = colorVariants
+      .map((v) => (v.price != null && Number(v.price) >= 1000 ? Number(v.price) : basePrice))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (colorPrices.length) {
+      colorMin = Math.min(...colorPrices);
+      colorMax = Math.max(...colorPrices);
+    }
+  }
+
+  return {
+    min,
+    max,
+    hasRange: max > min,
+    colorMin,
+    colorMax,
+    hasColorRange: colorMax > colorMin,
+  };
+}
+
+/**
  * Resolves the active database variant row for (selectedColor, selectedSize),
  * falling back cleanly to the active color's first in-stock or first variant when size is unset.
  */
@@ -164,6 +204,8 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
   if (!product) {
     return {
       variant: null,
+      exactVariant: null,
+      isExactVariantSelected: false,
       variantId: "",
       unitPrice: 0,
       oldPrice: 0,
@@ -173,6 +215,12 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
       hasVariantImage: false,
       color: selectedColor || "",
       size: selectedSize || "",
+      minPrice: 0,
+      maxPrice: 0,
+      hasPriceRange: false,
+      colorMinPrice: 0,
+      colorMaxPrice: 0,
+      hasColorRange: false,
     };
   }
 
@@ -231,8 +279,12 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
         ? Math.max(0, ...colorSiblings.map((v) => Number(v.stock) || 0))
         : Math.max(0, Number(product.stock) || 0);
 
+  const priceRange = getProductPriceRange(product, selectedColor);
+
   return {
     variant: activeRow,
+    exactVariant: exactVariant || null,
+    isExactVariantSelected: Boolean(exactVariant),
     variantId,
     unitPrice,
     oldPrice,
@@ -242,6 +294,12 @@ export function resolveActiveVariant(product, selectedColor = "", selectedSize =
     hasVariantImage: variantGallery.length > 0,
     color: selectedColor || activeRow?.color || "",
     size: selectedSize || exactVariant?.size || "",
+    minPrice: priceRange.min,
+    maxPrice: priceRange.max,
+    hasPriceRange: priceRange.hasRange,
+    colorMinPrice: priceRange.colorMin,
+    colorMaxPrice: priceRange.colorMax,
+    hasColorRange: priceRange.hasColorRange,
   };
 }
 
