@@ -17,7 +17,7 @@ import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import { api } from "./store";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
-import { resolveActiveVariant, resolveVariationDisplayMode } from "./variant-utils.js";
+import { resolveActiveVariant, resolveVariationDisplayMode, handleImageError } from "./variant-utils.js";
 
 export default function Home({ shop, products = [], openProduct, config = {}, onAddToCart, onBuyDirect, onSizeGuide }) {
   const mainNavItems = getMainCategories(config.categories || []);
@@ -159,6 +159,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
               src={config.heroImage}
               alt={config.heroTitle || config.brand || "Banner Utama"}
               fetchPriority="high"
+              onError={(e) => handleImageError(e)}
             />
           )}
           <div className="ks-hero-shade" />
@@ -266,6 +267,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
                       src={cardImage}
                       alt={`${p.name}${activeColor ? ` - ${colorLabel(activeColor)}` : ""}`}
                       loading="lazy"
+                      onError={(e) => handleImageError(e)}
                     />
                     <span>
                       {p.oldPrice ? "PENAWARAN TERBATAS" : "PILIHAN KOLEKSI"}
@@ -462,6 +464,7 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
           src={displayImage}
           alt={product?.name ? `${product.name}${selectedColor ? ` - ${colorLabel(selectedColor)}` : ""}` : slide.title}
           loading="lazy"
+          onError={(e) => handleImageError(e)}
         />
         {discountPercent > 0 && (
           <span className="ks-promo-badge">
@@ -518,7 +521,7 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
                       aria-pressed={isSel}
                     >
                       {promoDisplay.mode === "thumbnail" && item.thumb && (
-                        <img src={item.thumb} alt={item.label} className="ks-promo-variant-thumb" />
+                        <img src={item.thumb} alt={item.label} className="ks-promo-variant-thumb" onError={(e) => handleImageError(e)} />
                       )}
                       {promoDisplay.mode !== "swatch" && <span>{item.label}</span>}
                     </button>

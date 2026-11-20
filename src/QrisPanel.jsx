@@ -18,6 +18,7 @@ import { api } from "./store";
 import { money } from "./data";
 import { Notice, Status } from "./Workspace";
 import { isManualQrisMethod } from "./payment-methods.js";
+import { handleImageError } from "./variant-utils.js";
 
 export default function QrisPanel({ order, onUpdated, notify }) {
   const [useStaticFallback, setUseStaticFallback] = useState(
@@ -453,6 +454,7 @@ export default function QrisPanel({ order, onUpdated, notify }) {
                       <img
                         src={order.payment_proof_url}
                         alt="Bukti pembayaran pelanggan"
+                        onError={(e) => handleImageError(e)}
                       />
                     </a>
                     <div>

@@ -314,3 +314,12 @@ export function getGalleryForSelection(product, selectedColor = "", selectedSize
     hasVariantImage: resolved.hasVariantImage,
   };
 }
+
+export const PLACEHOLDER_PRODUCT_SVG =
+  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2' ry='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>";
+
+export function handleImageError(e, fallback = PLACEHOLDER_PRODUCT_SVG) {
+  if (!e || !e.currentTarget) return;
+  e.currentTarget.onerror = null;
+  e.currentTarget.src = fallback;
+}

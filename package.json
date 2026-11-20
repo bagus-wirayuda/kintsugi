@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:server": "node --env-file-if-exists=.env server/index.js",
     "build": "vite build",
+    "test": "node --env-file-if-exists=.env --test tests/*.test.js",
     "db:init": "node --env-file-if-exists=.env server/init.js",
     "db:reset": "node --env-file-if-exists=.env scripts/reset-database.mjs",
     "start": "node --env-file-if-exists=.env server/index.js"

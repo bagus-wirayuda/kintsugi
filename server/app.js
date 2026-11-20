@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -96,6 +97,41 @@ function mapPaymentMethodRow(row) {
   };
 }
 
+export async function syncUploadsDirectories() {
+  try {
+    const publicUploads = fileURLToPath(new URL("../public/uploads/", import.meta.url));
+    const distUploads = fileURLToPath(new URL("../dist/uploads/", import.meta.url));
+    const distRoot = fileURLToPath(new URL("../dist/", import.meta.url));
+
+    await mkdir(publicUploads, { recursive: true });
+    if (!existsSync(distRoot)) return;
+    await mkdir(distUploads, { recursive: true });
+
+    const syncDir = async (src, dest) => {
+      if (!existsSync(src)) return;
+      const { readdir, copyFile } = await import("node:fs/promises");
+      const entries = await readdir(src, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+          await mkdir(destPath, { recursive: true });
+          await syncDir(srcPath, destPath);
+        } else if (entry.isFile()) {
+          if (!existsSync(destPath)) {
+            await copyFile(srcPath, destPath).catch(() => {});
+          }
+        }
+      }
+    };
+
+    await syncDir(publicUploads, distUploads);
+    await syncDir(distUploads, publicUploads);
+  } catch (err) {
+    console.warn("Sinkronisasi direktori uploads dilewati:", err.message);
+  }
+}
+
 async function saveBase64ImageUpload(dataUrl, subdir = "") {
   const prefixMatch = String(dataUrl || "").match(/^data:([a-zA-Z0-9\/+-]+);base64,(.+)$/s);
   if (!prefixMatch) throw fail(400, "Gunakan format gambar JPG, PNG, WebP, GIF, BMP, atau AVIF.");
@@ -128,10 +164,24 @@ async function saveBase64ImageUpload(dataUrl, subdir = "") {
 
   const cleanSubdir = subdir ? subdir.replace(/[^a-z0-9_-]/gi, "") : "";
   const baseDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
+  const distDir = fileURLToPath(new URL("../dist/uploads/", import.meta.url));
   const targetDir = cleanSubdir ? path.join(baseDir, cleanSubdir) : baseDir;
   await mkdir(targetDir, { recursive: true });
   const name = `${randomUUID()}.${extension}`;
   await writeFile(path.join(targetDir, name), bytes, { flag: "wx" });
+
+  // Sinkronkan ke dist/uploads jika dist ada (untuk lingkungan produksi / webserver Nginx static root)
+  try {
+    const distRoot = fileURLToPath(new URL("../dist/", import.meta.url));
+    if (existsSync(distRoot)) {
+      const distTarget = cleanSubdir ? path.join(distDir, cleanSubdir) : distDir;
+      await mkdir(distTarget, { recursive: true });
+      await writeFile(path.join(distTarget, name), bytes).catch(() => {});
+    }
+  } catch (err) {
+    console.warn("Sinkronisasi file upload ke dist/uploads diabaikan:", err.message);
+  }
+
   return cleanSubdir ? `/uploads/${cleanSubdir}/${name}` : `/uploads/${name}`;
 }
 const imageSchema = z
@@ -183,8 +233,8 @@ const variantSchema = z.object({
   stock: z.number().int().min(0).max(100000),
   price: z.preprocess(
     (v) => (v === "" || v == null ? null : parseMoneyInt(v, null)),
-    z.number().int().min(1000).max(10000000),
-  ),
+    z.number().int().min(1000).max(10000000).nullable(),
+  ).optional(),
   imageUrl: z.preprocess(
     (v) => (v === "" ? null : v),
     imageSchema.nullable(),
@@ -218,12 +268,86 @@ export function createApp(pool, options = {}) {
   const app = express();
   app.disable("x-powered-by");
   const uploadsDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
+  const distUploadsDir = fileURLToPath(new URL("../dist/uploads/", import.meta.url));
   mkdir(uploadsDir, { recursive: true }).catch(() => {});
-  app.use("/uploads", express.static(uploadsDir, { fallthrough: true, maxAge: "7d" }));
+  syncUploadsDirectories().catch(() => {});
+
+  const staticAssetHeaders = (res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  };
+
+  app.use(
+    "/uploads",
+    express.static(uploadsDir, {
+      fallthrough: true,
+      maxAge: "7d",
+      setHeaders: staticAssetHeaders,
+    }),
+  );
+  if (existsSync(distUploadsDir)) {
+    app.use(
+      "/uploads",
+      express.static(distUploadsDir, {
+        fallthrough: true,
+        maxAge: "7d",
+        setHeaders: staticAssetHeaders,
+      }),
+    );
+  }
+  // Cegah fallback ke SPA index.html untuk aset /uploads yang tidak ditemukan
+  app.use("/uploads", (req, res) => {
+    res.status(404).type("text/plain").send("Upload asset not found");
+  });
+
   const imagesDir = fileURLToPath(new URL("../public/images/", import.meta.url));
-  app.use("/images", express.static(imagesDir, { fallthrough: true, maxAge: "7d" }));
+  const distImagesDir = fileURLToPath(new URL("../dist/images/", import.meta.url));
+  app.use(
+    "/images",
+    express.static(imagesDir, {
+      fallthrough: true,
+      maxAge: "7d",
+      setHeaders: staticAssetHeaders,
+    }),
+  );
+  if (existsSync(distImagesDir)) {
+    app.use(
+      "/images",
+      express.static(distImagesDir, {
+        fallthrough: true,
+        maxAge: "7d",
+        setHeaders: staticAssetHeaders,
+      }),
+    );
+  }
+  app.use("/images", (req, res) => {
+    res.status(404).type("text/plain").send("Image asset not found");
+  });
+
   const brandDir = fileURLToPath(new URL("../public/brand/", import.meta.url));
-  app.use("/brand", express.static(brandDir, { fallthrough: true, maxAge: "7d" }));
+  const distBrandDir = fileURLToPath(new URL("../dist/brand/", import.meta.url));
+  app.use(
+    "/brand",
+    express.static(brandDir, {
+      fallthrough: true,
+      maxAge: "7d",
+      setHeaders: staticAssetHeaders,
+    }),
+  );
+  if (existsSync(distBrandDir)) {
+    app.use(
+      "/brand",
+      express.static(distBrandDir, {
+        fallthrough: true,
+        maxAge: "7d",
+        setHeaders: staticAssetHeaders,
+      }),
+    );
+  }
+  app.use("/brand", (req, res) => {
+    res.status(404).type("text/plain").send("Brand asset not found");
+  });
+
   const trustProxyConfig = env.TRUST_PROXY
     ? (env.TRUST_PROXY === "true" || env.TRUST_PROXY === "1" ? 1 : isNaN(env.TRUST_PROXY) ? env.TRUST_PROXY : Number(env.TRUST_PROXY))
     : (env.NODE_ENV === "production" ? 1 : false);
@@ -238,8 +362,16 @@ export function createApp(pool, options = {}) {
     path: "/",
     maxAge: 7 * 86400000,
   };
+
+  const isHttpsConfigured =
+    Boolean(env.APP_URL?.startsWith("https://")) ||
+    env.COOKIE_SECURE === "true" ||
+    env.COOKIE_SECURE === "1";
+  const shouldUpgradeInsecure = env.NODE_ENV === "production" && isHttpsConfigured;
+
   app.use(
     helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" },
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
@@ -257,9 +389,13 @@ export function createApp(pool, options = {}) {
             "https://images.unsplash.com",
             "data:",
             "blob:",
+            ...(env.APP_URL ? [env.APP_URL] : []),
           ],
-          connectSrc: ["'self'"],
-          upgradeInsecureRequests: env.NODE_ENV === "production" ? [] : null,
+          connectSrc: [
+            "'self'",
+            ...(env.APP_URL ? [env.APP_URL] : []),
+          ],
+          upgradeInsecureRequests: shouldUpgradeInsecure ? [] : null,
         },
       },
     }),
@@ -2662,8 +2798,10 @@ export function createApp(pool, options = {}) {
       const variants = f.variants || f.sizes.flatMap((size) => f.colors.map((color) => ({ size, color, stock: f.stock, price: f.price || 1000 })));
       const keys = variants.map((v) => `${v.size}:${v.color}`);
       if (new Set(keys).size !== keys.length) throw fail(400,"Ada kombinasi ukuran dan variasi yang duplikat.");
-      const validPrices = variants.map((v) => v.price).filter((p) => Number.isFinite(p) && p >= 1000);
-      const effectivePrice = validPrices.length ? Math.min(...validPrices) : (f.price >= 1000 ? f.price : 1000);
+      const allPrices = variants
+        .map((v) => (v.price != null && Number(v.price) >= 1000 ? Number(v.price) : f.price))
+        .filter((p) => Number.isFinite(p) && p >= 1000);
+      const effectivePrice = allPrices.length ? Math.min(...allPrices) : (f.price >= 1000 ? f.price : 1000);
 
       await c.query(
         "INSERT INTO products(id,sku,name,category,subcategory,price,old_price,cost_price,variation_label,motif,weight_grams,image,description,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -2687,7 +2825,7 @@ export function createApp(pool, options = {}) {
       for (const v of variants) {
         const d = parseDimensions(v.size);
         const gallery = collectVariantImages(v);
-        const variantPrice = (v.price != null && Number(v.price) >= 1000) ? Number(v.price) : effectivePrice;
+        const variantPrice = (v.price != null && Number(v.price) >= 1000) ? Number(v.price) : null;
         await c.query(
           "INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,price,image_url,images_json,stock) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           [
@@ -2749,10 +2887,16 @@ export function createApp(pool, options = {}) {
       if (!old) throw fail(404, "Produk tidak ditemukan.");
       const map = { ...f };
       delete map.variants;
+      if (map.price === 0 || map.price == null) {
+        delete map.price;
+      }
+      const base = (f.price != null && f.price >= 1000 ? f.price : null) ?? Number(old.price);
       if (f.variants) {
-        const validPrices = f.variants.map((v) => v.price).filter((p) => Number.isFinite(p) && p >= 1000);
-        if (validPrices.length) {
-          map.price = Math.min(...validPrices);
+        const allPrices = f.variants
+          .map((v) => (v.price != null && Number(v.price) >= 1000 ? Number(v.price) : base))
+          .filter((p) => Number.isFinite(p) && p >= 1000);
+        if (allPrices.length) {
+          map.price = Math.min(...allPrices);
         }
       }
       const price = map.price ?? f.price ?? old.price,
@@ -2784,7 +2928,7 @@ export function createApp(pool, options = {}) {
           const width = v.widthCm ?? parseDimensions(v.size)?.width ?? 0;
           const height = v.heightCm ?? parseDimensions(v.size)?.height ?? 0;
           const gallery = collectVariantImages(v);
-          const variantPrice = (v.price != null && Number(v.price) >= 1000) ? Number(v.price) : price;
+          const variantPrice = (v.price != null && Number(v.price) >= 1000) ? Number(v.price) : null;
           await c.query(
             `INSERT INTO product_variants(id,product_id,size,length_cm,width_cm,height_cm,color,price,image_url,images_json,stock)
              VALUES(?,?,?,?,?,?,?,?,?,?,?)

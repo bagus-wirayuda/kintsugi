@@ -22,6 +22,7 @@ import { dimensionLabel } from "./dimensions.js";
 import { getCartItemCount } from "./checkout-state.js";
 import QrisPanel from "./QrisPanel.jsx";
 import { resolveShippingInfo } from "./shipping-info.js";
+import { handleImageError } from "./variant-utils.js";
 function Shell({
   user,
   config,
@@ -316,7 +317,7 @@ export function CartView({
                   />
                 </label>
                 <div className="ks-cart-img-wrap">
-                  <img src={i.image} alt={i.name} loading="lazy" />
+                  <img src={i.image} alt={i.name} loading="lazy" onError={(e) => handleImageError(e)} />
                 </div>
               <div className="ks-cart-detail">
                 <div className="ks-cart-meta-top">
@@ -595,7 +596,7 @@ export function WishlistView({
                   aria-label={"Lihat " + p.name}
                   onClick={() => openProduct && openProduct(p)}
                 >
-                  <img src={p.image} alt={p.name} />
+                  <img src={p.image} alt={p.name} onError={(e) => handleImageError(e)} />
                 </button>
                 <div>
                   <span className="ws-kicker">

@@ -53,7 +53,7 @@ import { paymentLabel } from "./Orders";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import { PAYMENT_GROUPS, paymentName, isStorePickupMethod, isManualPaymentMethod, isManualQrisMethod } from "./payment-methods.js";
 import { SAMPLE_DANA_QRIS_PAYLOAD, validateQrisPayload } from "./qris.js";
-import { collectVariantImages } from "./variant-utils.js";
+import { collectVariantImages, PLACEHOLDER_PRODUCT_SVG, handleImageError } from "./variant-utils.js";
 import { resolveShippingInfo } from "./shipping-info.js";
 import {
   generateSalesReportPDF,
@@ -123,6 +123,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     [reportGenerating, setReportGenerating] = useState(false);
 
   const [productImagePreview, setProductImagePreview] = useState("");
+  const [localMainPreviewUrl, setLocalMainPreviewUrl] = useState("");
   const [uploadingMainImage, setUploadingMainImage] = useState(false);
   const [activeLightboxImage, setActiveLightboxImage] = useState(null);
   const [storeLogoPreview, setStoreLogoPreview] = useState("");
@@ -723,8 +724,9 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
     if (!file) return;
     setUploadingMainImage(true);
     try {
-      // Langsung tampilkan preview client-side seketika file dipilih
+      // Langsung simpan dan tampilkan preview client-side seketika file dipilih
       const url = await uploadAsset(file, null, (previewDataUrl) => {
+        setLocalMainPreviewUrl(previewDataUrl);
         setProductImagePreview(previewDataUrl);
       });
       if (url) {
@@ -1033,6 +1035,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
   function initCreateProductData(cats = categoriesRef.current) {
     setSizeMode("dimensions");
     setProductImagePreview("");
+    setLocalMainPreviewUrl("");
     if (mainImageInputRef.current) mainImageInputRef.current.value = "";
     if (mainFileInputRef.current) mainFileInputRef.current.value = "";
     setSizeRows([
@@ -1071,6 +1074,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
 
   function initEditProductData(p, cats = categoriesRef.current) {
     setProductImagePreview(p.image || "");
+    setLocalMainPreviewUrl("");
     if (mainImageInputRef.current) mainImageInputRef.current.value = p.image || "";
     if (mainFileInputRef.current) mainFileInputRef.current.value = "";
     const price = p.oldPrice > p.price ? p.oldPrice : p.price;
@@ -3892,9 +3896,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                               <img
                                 src={p.image}
                                 alt={p.name}
-                                onError={(e) => {
-                                  e.currentTarget.style.opacity = "0.3";
-                                }}
+                                onError={(e) => handleImageError(e)}
                               />
                               <div>
                                 <b>{p.name}</b>
@@ -4033,9 +4035,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                 className="ws-variant-thumb"
                                 src={variant.image_url}
                                 alt=""
-                                onError={(e) => {
-                                  e.currentTarget.style.opacity = "0.3";
-                                }}
+                                onError={(e) => handleImageError(e)}
                               />
                             ) : (
                               "Gambar utama"
@@ -4137,7 +4137,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                       <div className="ws-product-preview-active">
                         <div
                           className="ws-product-preview-thumb-wrap"
-                          onClick={() => setActiveLightboxImage({ url: productImagePreview, title: "Foto Utama Produk" })}
+                          onClick={() => setActiveLightboxImage({ url: productImagePreview || localMainPreviewUrl, title: "Foto Utama Produk" })}
                           style={{ cursor: "pointer" }}
                           title="Klik untuk melihat foto penuh"
                         >
@@ -4147,7 +4147,11 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             className="ws-product-preview-img"
                             onError={(e) => {
                               e.currentTarget.onerror = null;
-                              e.currentTarget.style.opacity = "0.4";
+                              if (localMainPreviewUrl && localMainPreviewUrl !== productImagePreview) {
+                                e.currentTarget.src = localMainPreviewUrl;
+                              } else {
+                                e.currentTarget.src = PLACEHOLDER_PRODUCT_SVG;
+                              }
                             }}
                           />
                           <span className="ws-product-preview-badge">Foto Utama</span>
@@ -4162,7 +4166,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             <button
                               type="button"
                               className="ws-btn-view-image"
-                              onClick={() => setActiveLightboxImage({ url: productImagePreview, title: "Foto Utama Produk" })}
+                              onClick={() => setActiveLightboxImage({ url: productImagePreview || localMainPreviewUrl, title: "Foto Utama Produk" })}
                             >
                               Lihat
                             </button>
@@ -4540,10 +4544,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                     src={imgUrl}
                                     alt={`${row.variation || "Variasi"} ${imgIdx + 1}`}
                                     className="ws-variant-thumb-preview"
-                                    onError={(e) => {
-                                      e.currentTarget.onerror = null;
-                                      e.currentTarget.style.opacity = "0.4";
-                                    }}
+                                    onError={(e) => handleImageError(e)}
                                   />
                                   {imgIdx === 0 && (
                                     <span className="ws-variant-thumb-badge" title="Gambar sampul variasi">

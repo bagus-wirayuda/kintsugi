@@ -114,7 +114,7 @@ Admin dapat menambah produk dengan kombinasi ukuran/warna, mengedit SKU/kategori
 
 Hasil siap untuk **pengujian lokal dengan Laragon**. Pengiriman webhook publik, key live, kredensial WhatsApp Wablas yang aktif, data/kebijakan toko produksi serta hosting HTTPS perlu konfigurasi sebelum transaksi pelanggan nyata. Verifikasi nomor WhatsApp pendaftaran melalui OTP, masuk menggunakan OTP WhatsApp, reset password melalui OTP WhatsApp, dan penggantian kata sandi sudah disediakan. Upload foto, kurir/resi dan refund otomatis tidak termasuk implementasi.
 
-Untuk hosting Node: build, MySQL dengan user aplikasi khusus, NODE_ENV=production, APP_URL HTTPS, HOST sesuai jaringan dan TRUST_PROXY=1 hanya di belakang reverse proxy tepercaya. Tidak ada deployment Sites statis pada pekerjaan lokal ini.
+Untuk hosting Node: build, MySQL dengan user aplikasi khusus, NODE_ENV=production, APP_URL HTTPS, HOST sesuai jaringan dan TRUST_PROXY=1 hanya di belakang reverse proxy tepercaya. Template konfigurasi reverse proxy Nginx siap pakai tersedia pada berkas `nginx.conf.example` (mengatur routing `/api/`, `/uploads/`, SPA fallback, serta `client_max_body_size 25M;`). Penanganan berkas upload disinkronkan otomatis antara `public/uploads` dan `dist/uploads`. Tidak ada deployment Sites statis pada pekerjaan lokal ini.
 
 ## Tata letak baru dan OTP pendaftaran
 

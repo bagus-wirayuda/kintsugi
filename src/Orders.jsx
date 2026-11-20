@@ -18,6 +18,7 @@ import { paymentName, isManualPaymentMethod } from './payment-methods';
 import { Notice, Status } from "./Workspace";
 import { dimensionLabel } from "./dimensions.js";
 import QrisPanel from "./QrisPanel.jsx";
+import { handleImageError } from "./variant-utils.js";
 import { resolveShippingInfo } from "./shipping-info.js";
 export const paymentLabel = {
   CREATING: "Menyiapkan pembayaran",
@@ -114,7 +115,7 @@ export default function OrderCard({ order: o, onRefresh, notify, config }) {
       <div className="ws-order-items">
         {o.items.map((i, j) => (
           <div key={j}>
-            <img src={i.image} alt={i.name} />
+            <img src={i.image} alt={i.name} onError={(e) => handleImageError(e)} />
             <div>
               <b>{i.name}</b>
               <span>

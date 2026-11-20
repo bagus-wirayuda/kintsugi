@@ -46,7 +46,7 @@ import { SizeGuideContent } from "./SizeGuide.jsx";
 import { sizesMatch } from "./size-guide.js";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
-import { resolveActiveVariant, resolveVariationDisplayMode, colorsMatch, getProductPriceRange } from "./variant-utils.js";
+import { resolveActiveVariant, resolveVariationDisplayMode, colorsMatch, getProductPriceRange, handleImageError } from "./variant-utils.js";
 import { StoreHeader, StoreFooter } from "./StoreChrome.jsx";
 import {
   getCartItemCount,
@@ -773,6 +773,7 @@ function App() {
               src={cardImage}
               alt={`${p.name}${activeCardColor ? ` - ${colorLabel(activeCardColor)}` : ""}`}
               loading="lazy"
+              onError={(e) => handleImageError(e)}
             />
           </button>
           <span className={"product-tag " + (p.oldPrice ? "red" : "")}>
@@ -919,6 +920,7 @@ function App() {
               className="ks-variant-live-img"
               src={activeMainPhoto}
               alt={`${detail.name}${color ? ` - ${colorLabel(color)}` : ""}`}
+              onError={(e) => handleImageError(e)}
             />
           </div>
           {activeGallery.length > 1 && (
@@ -932,7 +934,7 @@ function App() {
                   aria-pressed={idx === detailPhotoIndex}
                   onClick={() => setDetailPhotoIndex(idx)}
                 >
-                  <img src={imgUrl} alt="" loading="lazy" />
+                  <img src={imgUrl} alt="" loading="lazy" onError={(e) => handleImageError(e)} />
                 </button>
               ))}
             </div>
@@ -1015,7 +1017,7 @@ function App() {
                   }}
                 >
                   {detailDisplay.mode === "thumbnail" && item.thumb && (
-                    <img src={item.thumb} alt={item.label} className="ks-variant-thumb" />
+                    <img src={item.thumb} alt={item.label} className="ks-variant-thumb" onError={(e) => handleImageError(e)} />
                   )}
                   {detailDisplay.mode !== "swatch" && (
                     <span className="ks-variant-text">{item.label}</span>

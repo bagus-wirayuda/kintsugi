@@ -3,12 +3,13 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pool } from "./db.js";
-import { createApp } from "./app.js";
+import { createApp, syncUploadsDirectories } from "./app.js";
 import { startRuntime } from "./runtime.js";
 import { initialize } from "./init.js";
 try {
   await initialize(pool, false);
   await pool.query("SELECT 1 FROM users LIMIT 1");
+  await syncUploadsDirectories().catch(() => {});
 } catch (error) {
   console.error(
     "Koneksi database tidak tersedia. Periksa konfigurasi layanan database.",
@@ -41,6 +42,16 @@ if (existsSync(dist)) {
 }
 
 app.get("/{*path}", (req, res) => {
+  const p = req.path || "";
+  if (
+    p.startsWith("/api/") ||
+    p.startsWith("/uploads/") ||
+    p.startsWith("/images/") ||
+    p.startsWith("/brand/") ||
+    p.startsWith("/assets/")
+  ) {
+    return res.status(404).type("text/plain").send("Resource not found");
+  }
   if (existsSync(indexPath)) {
     res.setHeader("Cache-Control", "no-cache");
     res.sendFile(indexPath);
