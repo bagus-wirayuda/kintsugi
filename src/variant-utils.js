@@ -318,8 +318,61 @@ export function getGalleryForSelection(product, selectedColor = "", selectedSize
 export const PLACEHOLDER_PRODUCT_SVG =
   "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2' ry='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>";
 
+/**
+ * Normalizes an image or asset URL for reliable cross-environment loading.
+ */
+export function resolveMediaUrl(url) {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("blob:") ||
+    /^https?:\/\//i.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+}
+
+/**
+ * Robust image error handler with smart automatic proxy fallback:
+ * If /uploads/... fails (e.g. blocked by Nginx static SPA root), automatically retries via /api/uploads/...
+ * If /api/uploads/... fails, automatically retries via /uploads/...
+ * Only if both paths fail does it switch to the fallback placeholder.
+ */
 export function handleImageError(e, fallback = PLACEHOLDER_PRODUCT_SVG) {
   if (!e || !e.currentTarget) return;
-  e.currentTarget.onerror = null;
-  e.currentTarget.src = fallback;
+  const img = e.currentTarget;
+  const currentSrc = img.getAttribute("src") || img.src || "";
+  const retryCount = Number(img.dataset.retryCount || 0);
+
+  // Jika sumber gambar adalah berkas statis lokal/upload dan belum mencoba jalur alternatif
+  if (
+    retryCount === 0 &&
+    (currentSrc.includes("/uploads/") ||
+      currentSrc.includes("/images/") ||
+      currentSrc.includes("/brand/"))
+  ) {
+    img.dataset.retryCount = "1";
+    if (currentSrc.includes("/api/")) {
+      img.src = currentSrc.replace("/api/", "/");
+      return;
+    } else {
+      if (currentSrc.startsWith("/")) {
+        img.src = "/api" + currentSrc;
+      } else {
+        try {
+          const u = new URL(currentSrc, window.location.origin);
+          img.src = `/api${u.pathname}${u.search}`;
+        } catch {
+          img.src = "/api/" + currentSrc.replace(/^\/+/, "");
+        }
+      }
+      return;
+    }
+  }
+
+  img.onerror = null;
+  img.src = fallback;
 }

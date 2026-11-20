@@ -1,5 +1,9 @@
 import React from "react";
-import { resolveVariationDisplayMode } from "./variant-utils.js";
+import {
+  resolveVariationDisplayMode,
+  resolveMediaUrl,
+  handleImageError,
+} from "./variant-utils.js";
 
 /**
  * Renders a strictly uniform variation selector/summary for catalog and home cards.
@@ -61,7 +65,12 @@ export default function VariantSummary({
     if (mode === "thumbnail") {
       const content = (
         <>
-          <img src={item.thumb} alt={item.label} loading="lazy" />
+          <img
+            src={resolveMediaUrl(item.thumb)}
+            alt={item.label}
+            loading="lazy"
+            onError={(e) => handleImageError(e)}
+          />
           <span>{item.label}</span>
         </>
       );

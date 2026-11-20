@@ -46,7 +46,7 @@ import { SizeGuideContent } from "./SizeGuide.jsx";
 import { sizesMatch } from "./size-guide.js";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
-import { resolveActiveVariant, resolveVariationDisplayMode, colorsMatch, getProductPriceRange, handleImageError } from "./variant-utils.js";
+import { resolveActiveVariant, resolveVariationDisplayMode, colorsMatch, getProductPriceRange, handleImageError, resolveMediaUrl } from "./variant-utils.js";
 import { StoreHeader, StoreFooter } from "./StoreChrome.jsx";
 import {
   getCartItemCount,
@@ -759,7 +759,7 @@ function App() {
         ? cardColors[p.id]
         : p.colors?.[0] || "";
     const cardVariant = resolveActiveVariant(p, activeCardColor, "");
-    const cardImage = cardVariant.image || p.image;
+    const cardImage = resolveMediaUrl(cardVariant.image || p.image);
     return (
       <article className="product" key={p.id}>
         <div className="product-image">
@@ -918,7 +918,7 @@ function App() {
           <div className="detail-image">
             <img
               className="ks-variant-live-img"
-              src={activeMainPhoto}
+              src={resolveMediaUrl(activeMainPhoto)}
               alt={`${detail.name}${color ? ` - ${colorLabel(color)}` : ""}`}
               onError={(e) => handleImageError(e)}
             />
@@ -934,7 +934,7 @@ function App() {
                   aria-pressed={idx === detailPhotoIndex}
                   onClick={() => setDetailPhotoIndex(idx)}
                 >
-                  <img src={imgUrl} alt="" loading="lazy" onError={(e) => handleImageError(e)} />
+                  <img src={resolveMediaUrl(imgUrl)} alt="" loading="lazy" onError={(e) => handleImageError(e)} />
                 </button>
               ))}
             </div>
@@ -1017,7 +1017,7 @@ function App() {
                   }}
                 >
                   {detailDisplay.mode === "thumbnail" && item.thumb && (
-                    <img src={item.thumb} alt={item.label} className="ks-variant-thumb" onError={(e) => handleImageError(e)} />
+                    <img src={resolveMediaUrl(item.thumb)} alt={item.label} className="ks-variant-thumb" onError={(e) => handleImageError(e)} />
                   )}
                   {detailDisplay.mode !== "swatch" && (
                     <span className="ks-variant-text">{item.label}</span>

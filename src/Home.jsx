@@ -17,7 +17,7 @@ import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import { api } from "./store";
 import SizeSummary from "./SizeSummary.jsx";
 import VariantSummary from "./VariantSummary.jsx";
-import { resolveActiveVariant, resolveVariationDisplayMode, handleImageError } from "./variant-utils.js";
+import { resolveActiveVariant, resolveVariationDisplayMode, handleImageError, resolveMediaUrl } from "./variant-utils.js";
 
 export default function Home({ shop, products = [], openProduct, config = {}, onAddToCart, onBuyDirect, onSizeGuide }) {
   const mainNavItems = getMainCategories(config.categories || []);
@@ -156,7 +156,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
         <section className="ks-hero">
           {config.heroImage && (
             <img
-              src={config.heroImage}
+              src={resolveMediaUrl(config.heroImage)}
               alt={config.heroTitle || config.brand || "Banner Utama"}
               fetchPriority="high"
               onError={(e) => handleImageError(e)}
@@ -254,7 +254,7 @@ export default function Home({ shop, products = [], openProduct, config = {}, on
                     ? cardColors[p.id]
                     : p.colors?.[0] || "";
                 const activeVariant = resolveActiveVariant(p, activeColor, "");
-                const cardImage = activeVariant.image || p.image;
+                const cardImage = resolveMediaUrl(activeVariant.image || p.image);
                 return (
                 <article key={p.id}>
                   <button
@@ -461,7 +461,7 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
       <div className="ks-story-photo">
         <img
           className="ks-variant-live-img"
-          src={displayImage}
+          src={resolveMediaUrl(displayImage)}
           alt={product?.name ? `${product.name}${selectedColor ? ` - ${colorLabel(selectedColor)}` : ""}` : slide.title}
           loading="lazy"
           onError={(e) => handleImageError(e)}
@@ -521,7 +521,7 @@ function PromoSlideItem({ slide, isActive, onBuyDirect, onAddToCart, onSizeGuide
                       aria-pressed={isSel}
                     >
                       {promoDisplay.mode === "thumbnail" && item.thumb && (
-                        <img src={item.thumb} alt={item.label} className="ks-promo-variant-thumb" onError={(e) => handleImageError(e)} />
+                        <img src={resolveMediaUrl(item.thumb)} alt={item.label} className="ks-promo-variant-thumb" onError={(e) => handleImageError(e)} />
                       )}
                       {promoDisplay.mode !== "swatch" && <span>{item.label}</span>}
                     </button>

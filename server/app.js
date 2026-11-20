@@ -5,7 +5,7 @@ import cookieParser from "cookie-parser";
 import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,17 +166,21 @@ async function saveBase64ImageUpload(dataUrl, subdir = "") {
   const baseDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
   const distDir = fileURLToPath(new URL("../dist/uploads/", import.meta.url));
   const targetDir = cleanSubdir ? path.join(baseDir, cleanSubdir) : baseDir;
-  await mkdir(targetDir, { recursive: true });
+  await mkdir(targetDir, { recursive: true, mode: 0o755 });
   const name = `${randomUUID()}.${extension}`;
-  await writeFile(path.join(targetDir, name), bytes, { flag: "wx" });
+  const targetFile = path.join(targetDir, name);
+  await writeFile(targetFile, bytes, { flag: "wx", mode: 0o644 });
+  await chmod(targetFile, 0o644).catch(() => {});
 
   // Sinkronkan ke dist/uploads jika dist ada (untuk lingkungan produksi / webserver Nginx static root)
   try {
     const distRoot = fileURLToPath(new URL("../dist/", import.meta.url));
     if (existsSync(distRoot)) {
       const distTarget = cleanSubdir ? path.join(distDir, cleanSubdir) : distDir;
-      await mkdir(distTarget, { recursive: true });
-      await writeFile(path.join(distTarget, name), bytes).catch(() => {});
+      await mkdir(distTarget, { recursive: true, mode: 0o755 });
+      const distFile = path.join(distTarget, name);
+      await writeFile(distFile, bytes, { mode: 0o644 }).catch(() => {});
+      await chmod(distFile, 0o644).catch(() => {});
     }
   } catch (err) {
     console.warn("Sinkronisasi file upload ke dist/uploads diabaikan:", err.message);
@@ -189,7 +193,7 @@ const imageSchema = z
   .max(5000)
   .refine(
     (s) =>
-      /^\/(?:images|uploads|brand)\/[a-zA-Z0-9_\/.-]+$/i.test(s) ||
+      /^\/(?:api\/)?(?:images|uploads|brand)\/[a-zA-Z0-9_\/.-]+$/i.test(s) ||
       /^https?:\/\//i.test(s) ||
       /^data:image\/(?:png|jpeg|jpg|webp|gif|avif|bmp|heic|heif|svg\+xml);base64,/i.test(s),
     "Gunakan gambar /uploads/..., /images/... atau URL HTTPS yang valid.",
@@ -268,8 +272,7 @@ export function createApp(pool, options = {}) {
   const app = express();
   app.disable("x-powered-by");
   const uploadsDir = fileURLToPath(new URL("../public/uploads/", import.meta.url));
-  const distUploadsDir = fileURLToPath(new URL("../dist/uploads/", import.meta.url));
-  mkdir(uploadsDir, { recursive: true }).catch(() => {});
+  mkdir(uploadsDir, { recursive: true, mode: 0o755 }).catch(() => {});
   syncUploadsDirectories().catch(() => {});
 
   const staticAssetHeaders = (res) => {
@@ -277,76 +280,40 @@ export function createApp(pool, options = {}) {
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   };
 
-  app.use(
-    "/uploads",
-    express.static(uploadsDir, {
-      fallthrough: true,
-      maxAge: "7d",
-      setHeaders: staticAssetHeaders,
-    }),
-  );
-  if (existsSync(distUploadsDir)) {
-    app.use(
-      "/uploads",
-      express.static(distUploadsDir, {
-        fallthrough: true,
-        maxAge: "7d",
-        setHeaders: staticAssetHeaders,
-      }),
-    );
-  }
-  // Cegah fallback ke SPA index.html untuk aset /uploads yang tidak ditemukan
-  app.use("/uploads", (req, res) => {
-    res.status(404).type("text/plain").send("Upload asset not found");
-  });
+  function mountStaticRoute(folderName) {
+    const publicDir = fileURLToPath(new URL(`../public/${folderName}/`, import.meta.url));
+    const distDir = fileURLToPath(new URL(`../dist/${folderName}/`, import.meta.url));
+    mkdir(publicDir, { recursive: true, mode: 0o755 }).catch(() => {});
 
-  const imagesDir = fileURLToPath(new URL("../public/images/", import.meta.url));
-  const distImagesDir = fileURLToPath(new URL("../dist/images/", import.meta.url));
-  app.use(
-    "/images",
-    express.static(imagesDir, {
+    const servePublic = express.static(publicDir, {
       fallthrough: true,
       maxAge: "7d",
       setHeaders: staticAssetHeaders,
-    }),
-  );
-  if (existsSync(distImagesDir)) {
-    app.use(
-      "/images",
-      express.static(distImagesDir, {
-        fallthrough: true,
-        maxAge: "7d",
-        setHeaders: staticAssetHeaders,
-      }),
-    );
-  }
-  app.use("/images", (req, res) => {
-    res.status(404).type("text/plain").send("Image asset not found");
-  });
+    });
+    const serveDist = express.static(distDir, {
+      fallthrough: true,
+      maxAge: "7d",
+      setHeaders: staticAssetHeaders,
+    });
 
-  const brandDir = fileURLToPath(new URL("../public/brand/", import.meta.url));
-  const distBrandDir = fileURLToPath(new URL("../dist/brand/", import.meta.url));
-  app.use(
-    "/brand",
-    express.static(brandDir, {
-      fallthrough: true,
-      maxAge: "7d",
-      setHeaders: staticAssetHeaders,
-    }),
-  );
-  if (existsSync(distBrandDir)) {
-    app.use(
-      "/brand",
-      express.static(distBrandDir, {
-        fallthrough: true,
-        maxAge: "7d",
-        setHeaders: staticAssetHeaders,
-      }),
-    );
+    const handler = (req, res, next) => {
+      servePublic(req, res, (err) => {
+        if (err) return next(err);
+        serveDist(req, res, (err2) => {
+          if (err2) return next(err2);
+          res.status(404).type("text/plain").send(`${folderName} asset not found`);
+        });
+      });
+    };
+
+    // Melayani baik /folderName maupun /api/folderName untuk fleksibilitas reverse proxy Nginx
+    app.use(`/${folderName}`, handler);
+    app.use(`/api/${folderName}`, handler);
   }
-  app.use("/brand", (req, res) => {
-    res.status(404).type("text/plain").send("Brand asset not found");
-  });
+
+  mountStaticRoute("uploads");
+  mountStaticRoute("images");
+  mountStaticRoute("brand");
 
   const trustProxyConfig = env.TRUST_PROXY
     ? (env.TRUST_PROXY === "true" || env.TRUST_PROXY === "1" ? 1 : isNaN(env.TRUST_PROXY) ? env.TRUST_PROXY : Number(env.TRUST_PROXY))
@@ -362,12 +329,6 @@ export function createApp(pool, options = {}) {
     path: "/",
     maxAge: 7 * 86400000,
   };
-
-  const isHttpsConfigured =
-    Boolean(env.APP_URL?.startsWith("https://")) ||
-    env.COOKIE_SECURE === "true" ||
-    env.COOKIE_SECURE === "1";
-  const shouldUpgradeInsecure = env.NODE_ENV === "production" && isHttpsConfigured;
 
   app.use(
     helmet({
@@ -395,7 +356,7 @@ export function createApp(pool, options = {}) {
             "'self'",
             ...(env.APP_URL ? [env.APP_URL] : []),
           ],
-          upgradeInsecureRequests: shouldUpgradeInsecure ? [] : null,
+          upgradeInsecureRequests: null,
         },
       },
     }),

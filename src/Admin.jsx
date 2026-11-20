@@ -53,7 +53,7 @@ import { paymentLabel } from "./Orders";
 import { dimensionLabel, parseDimensions } from "./dimensions.js";
 import { PAYMENT_GROUPS, paymentName, isStorePickupMethod, isManualPaymentMethod, isManualQrisMethod } from "./payment-methods.js";
 import { SAMPLE_DANA_QRIS_PAYLOAD, validateQrisPayload } from "./qris.js";
-import { collectVariantImages, PLACEHOLDER_PRODUCT_SVG, handleImageError } from "./variant-utils.js";
+import { collectVariantImages, PLACEHOLDER_PRODUCT_SVG, handleImageError, resolveMediaUrl } from "./variant-utils.js";
 import { resolveShippingInfo } from "./shipping-info.js";
 import {
   generateSalesReportPDF,
@@ -3894,7 +3894,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           <td>
                             <div className="ws-product-cell">
                               <img
-                                src={p.image}
+                                src={resolveMediaUrl(p.image)}
                                 alt={p.name}
                                 onError={(e) => handleImageError(e)}
                               />
@@ -4033,7 +4033,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                             {variant.image_url ? (
                               <img
                                 className="ws-variant-thumb"
-                                src={variant.image_url}
+                                src={resolveMediaUrl(variant.image_url)}
                                 alt=""
                                 onError={(e) => handleImageError(e)}
                               />
@@ -4142,15 +4142,14 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                           title="Klik untuk melihat foto penuh"
                         >
                           <img
-                            src={productImagePreview}
+                            src={resolveMediaUrl(productImagePreview)}
                             alt="Foto utama produk"
                             className="ws-product-preview-img"
                             onError={(e) => {
-                              e.currentTarget.onerror = null;
                               if (localMainPreviewUrl && localMainPreviewUrl !== productImagePreview) {
                                 e.currentTarget.src = localMainPreviewUrl;
                               } else {
-                                e.currentTarget.src = PLACEHOLDER_PRODUCT_SVG;
+                                handleImageError(e, PLACEHOLDER_PRODUCT_SVG);
                               }
                             }}
                           />
@@ -4541,7 +4540,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                   title="Klik untuk melihat foto penuh"
                                 >
                                   <img
-                                    src={imgUrl}
+                                    src={resolveMediaUrl(imgUrl)}
                                     alt={`${row.variation || "Variasi"} ${imgIdx + 1}`}
                                     className="ws-variant-thumb-preview"
                                     onError={(e) => handleImageError(e)}
@@ -6088,7 +6087,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                   ) : (
                                     selectedList.map((prod) => (
                                       <span key={prod.id} className="ws-prod-chip">
-                                        <img src={prod.image} alt={prod.name} className="ws-prod-chip-thumb" />
+                                        <img src={resolveMediaUrl(prod.image)} alt={prod.name} className="ws-prod-chip-thumb" onError={(e) => handleImageError(e)} />
                                         <span>{prod.name}</span>
                                         <button
                                           type="button"
@@ -6119,7 +6118,7 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
                                           onChange={() => {}}
                                           style={{ width: "16px", height: "16px", accentColor: "var(--ks-teal)", cursor: "pointer" }}
                                         />
-                                        <img src={prod.image} alt={prod.name} className="ws-prod-select-thumb" />
+                                        <img src={resolveMediaUrl(prod.image)} alt={prod.name} className="ws-prod-select-thumb" onError={(e) => handleImageError(e)} />
                                         <div className="ws-prod-select-info">
                                           <span className="ws-prod-select-name" title={prod.name}>
                                             {prod.name}
@@ -6906,9 +6905,10 @@ export default function Admin({ user, notify, onLogout, config, reloadConfig }) 
               ×
             </button>
             <img
-              src={activeLightboxImage.url}
+              src={resolveMediaUrl(activeLightboxImage.url)}
               alt={activeLightboxImage.title || "Pratinjau"}
               className="ks-lightbox-img"
+              onError={(e) => handleImageError(e)}
             />
             {activeLightboxImage.title && (
               <div className="ks-lightbox-caption">{activeLightboxImage.title}</div>

@@ -18,7 +18,7 @@ import { api } from "./store";
 import { money } from "./data";
 import { Notice, Status } from "./Workspace";
 import { isManualQrisMethod } from "./payment-methods.js";
-import { handleImageError } from "./variant-utils.js";
+import { handleImageError, resolveMediaUrl } from "./variant-utils.js";
 
 export default function QrisPanel({ order, onUpdated, notify }) {
   const [useStaticFallback, setUseStaticFallback] = useState(
@@ -452,7 +452,7 @@ export default function QrisPanel({ order, onUpdated, notify }) {
                       className="ks-qris-proof-thumb"
                     >
                       <img
-                        src={order.payment_proof_url}
+                        src={resolveMediaUrl(order.payment_proof_url)}
                         alt="Bukti pembayaran pelanggan"
                         onError={(e) => handleImageError(e)}
                       />

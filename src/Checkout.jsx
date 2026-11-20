@@ -23,7 +23,7 @@ import CheckoutIdentity, {
 } from "./CheckoutIdentity";
 import { readDraft, saveDraft } from "./checkout-state";
 import { dimensionLabel } from "./dimensions.js";
-import { handleImageError } from "./variant-utils.js";
+import { handleImageError, resolveMediaUrl } from "./variant-utils.js";
 
 const emptyAddress = {
   name: "",
@@ -1175,7 +1175,7 @@ export default function Checkout({
                     : 99;
                   return (
                     <div key={i.key}>
-                      <img src={i.image} alt={i.name} onError={(e) => handleImageError(e)} />
+                      <img src={resolveMediaUrl(i.image)} alt={i.name} onError={(e) => handleImageError(e)} />
                       <div>
                         <b>{i.name}</b>
                         <small>
